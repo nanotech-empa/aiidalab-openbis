@@ -86,7 +86,6 @@ if __name__ == "__main__":
     logging_filepath = f"{data_folder}/logging.json"
     if os.path.exists(logging_filepath):
         logging_data = utils.read_json(logging_filepath)
-        measurement_session_id = logging_data["measurement_session_id"]
     else:
         logging_data = {
             "eln_url": openbis_url,
