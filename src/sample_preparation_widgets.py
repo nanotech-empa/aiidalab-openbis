@@ -1597,9 +1597,8 @@ class RegisterPreparationWidget(ipw.VBox):
             )
             experiment_project_code = experiment_object.project.identifier
 
-            # TODO: Replace this by a non-cached get_openbis_object function
-            current_sample = self.openbis_session.get_object(
-                sample_ident=current_sample_id
+            current_sample = utils.get_openbis_object(
+                self.openbis_session, sample_ident=current_sample_id
             )
 
             # If sample was used in a measurement session, a new preparation should start
