@@ -14,8 +14,9 @@ INSTRUMENTS_TYPES = utils.read_json("metadata/instruments_types.json")
 OPENBIS_OBJECT_TYPES = utils.read_json("metadata/object_types.json")
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
 
-institutions_project = "/LAB205_ADMINISTRATIVE/INSTITUTIONS"
+institutions_project = "/LAB205_ADMINISTRATIVE/ORGANISATIONS"
 people_project = "/LAB205_ADMINISTRATIVE/PEOPLE"
+locations_project = "/LAB205_ADMINISTRATIVE/LOCATIONS"
 
 
 class AtomModelWidget(ipw.VBox):
@@ -1701,7 +1702,7 @@ class CreateSubstanceWidget(ipw.VBox):
         instruments_options = self.load_instruments(
             collection=OPENBIS_COLLECTIONS_PATHS["Instrument"]
         )
-        rooms_options = self.load_rooms(project="/ADMINISTRATIVE/LOCATIONS")
+        rooms_options = self.load_rooms(project=locations_project)
         location_options = instruments_options + rooms_options
         location_options.insert(0, ("Select a location...", "-1"))
         self.location_dropdown = ipw.Dropdown(options=location_options)
@@ -1712,7 +1713,7 @@ class CreateSubstanceWidget(ipw.VBox):
             options=[
                 "Fridge",
                 "Freezer",
-                "Poiseouns",
+                "Poisonous",
                 "Dark",
                 "Dry",
                 "No oxygen",
@@ -1813,18 +1814,38 @@ class CreateSubstanceWidget(ipw.VBox):
         synthesisers_identifiers = []
         for obj in synthesisers:
             obj_name = obj.props["name"]
+            groups = obj.props.get("groups") or []
             organisations = obj.props.get("organisations") or []
-            organisations_names_list = []
-            for organisation in organisations:
-                organisation_obj = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=organisation
-                )
-                organisation_name = organisation_obj.props["name"]
-                organisations_names_list.append(organisation_name)
 
-            organisations_names = ", ".join(organisations_names_list)
-            synthesiser_id = f"{obj_name} ({organisations_names})"
-            synthesisers_identifiers.append(synthesiser_id)
+            if groups:
+                groups_names_list = []
+                for group in groups:
+                    group_obj = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=group
+                    )
+                    group_name = group_obj.props["name"]
+                    groups_names_list.append(group_name)
+
+                groups_names = ", ".join(groups_names_list)
+                synthesiser_id = f"{obj_name} ({groups_names})"
+
+            elif organisations:
+                organisations_names_list = []
+                for organisation in organisations:
+                    organisation_obj = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=organisation
+                    )
+                    organisation_name = organisation_obj.props["name"]
+                    organisations_names_list.append(organisation_name)
+
+                organisations_names = ", ".join(organisations_names_list)
+                synthesiser_id = f"{obj_name} ({organisations_names})"
+
+            else:
+                synthesiser_id = obj_name
+
+            synthesiser_details = (synthesiser_id, obj.permId)
+            synthesisers_identifiers.append(synthesiser_details)
 
         return synthesisers_identifiers
 
