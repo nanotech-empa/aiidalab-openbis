@@ -1531,6 +1531,14 @@ class CreateResultsWidget(ipw.VBox):
             self.support_files_uploader,
         ]
 
+    def reset_widgets(self):
+        self.select_project_widget.project_dropdown.value = "-1"
+        self.name_textbox.value = ""
+        self.description_textbox.value = ""
+        self.comments_textbox.value = ""
+        self.support_files_uploader.value.clear()
+        self.support_files_uploader._counter = 0
+
     def load_analysis_measurements_and_simulations(self, change):
         project_id = self.select_project_widget.project_dropdown.value
         analysis_objects = []
