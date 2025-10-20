@@ -104,7 +104,7 @@ class SpecialStorageConditionsEnum(str, Enum):
     Freezer = "Freezer"
     Dark = "Dark"
     Flammable = "Flammable"
-    Poisenous = "Poisenous"
+    Poisonous = "Poisonous"
 
 
 class CurrencyUnitEnum(str, Enum):
