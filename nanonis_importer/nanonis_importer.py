@@ -37,7 +37,7 @@ DEFAULT_URL = "local.openbis.ch"
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename="/home/jovyan/apps/aiida-openbis/logs/aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
