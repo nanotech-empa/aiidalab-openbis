@@ -1240,7 +1240,9 @@ class CreateDraftsWidget(ipw.VBox):
         )
 
         self.select_results_label = ipw.Label(value="Results")
-        self.select_results_selector = ipw.SelectMultiple()
+        self.select_results_selector = ipw.SelectMultiple(
+            layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_results_hbox = ipw.HBox(
             [self.select_results_label, self.select_results_selector]
         )
@@ -1274,7 +1276,7 @@ class CreateDraftsWidget(ipw.VBox):
         self.support_files_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 20px;'>Support files</span>"
         )
-        self.support_files_uploader = ipw.FileUpload()
+        self.support_files_uploader = ipw.FileUpload(multiple=True)
 
         self.select_project_widget.project_dropdown.observe(self.load_results)
 
@@ -1291,6 +1293,15 @@ class CreateDraftsWidget(ipw.VBox):
             self.support_files_title,
             self.support_files_uploader,
         ]
+
+    def reset_widgets(self):
+        self.select_project_widget.project_dropdown.value = "-1"
+        self.name_textbox.value = ""
+        self.draft_type_dropdown.value = "Preprint"
+        self.description_textbox.value = ""
+        self.comments_textbox.value = ""
+        self.support_files_uploader.value.clear()
+        self.support_files_uploader._counter = 0
 
     def load_results(self, change):
         project_id = self.select_project_widget.project_dropdown.value
