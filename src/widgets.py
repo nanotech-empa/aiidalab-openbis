@@ -1692,7 +1692,7 @@ class CreateSubstanceWidget(ipw.VBox):
         )
 
         self.amount_label = ipw.Label(value="Amount")
-        self.amount_value_textbox = ipw.Text()
+        self.amount_value_textbox = ipw.FloatText()
         self.amount_unit_dropdown = ipw.Dropdown(options=["g", "mg", "ug", "ml", "ul"])
         self.amount_hbox = ipw.HBox(
             [self.amount_label, self.amount_value_textbox, self.amount_unit_dropdown]
@@ -2058,7 +2058,7 @@ class CreateSubstanceWidget(ipw.VBox):
         self.synthesised_by_selector.value = []
         self.supplier_own_name_textbox.value = ""
         self.comments_textbox.value = ""
-        self.amount_value_textbox.value = ""
+        self.amount_value_textbox.value = 0
         self.amount_unit_dropdown.value = "g"
         self.location_dropdown.value = "-1"
         self.package_opening_date.value = None
