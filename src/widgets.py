@@ -1844,6 +1844,10 @@ class CreateSubstanceWidget(ipw.VBox):
         )
         chemical_props_vbox = ipw.VBox()
 
+        empa_number_label = ipw.Label(value="EMPA number")
+        empa_number_textbox = ipw.IntText()
+        empa_number_hbox = ipw.HBox(children=[empa_number_label, empa_number_textbox])
+
         smiles_label = ipw.Label(value="SMILES")
         smiles_textbox = ipw.Text()
         smiles_hbox = ipw.HBox(children=[smiles_label, smiles_textbox])
@@ -1906,6 +1910,7 @@ class CreateSubstanceWidget(ipw.VBox):
                 "name": name_textbox.value,
                 "description": description_textbox.value,
                 "comments": comments_textbox.value,
+                "empa_number": empa_number_textbox.value,
                 "iupac_name": iupac_name_textbox.value,
                 "cas_number": cas_number_textbox.value,
                 "smiles": smiles_textbox.value,
@@ -1962,6 +1967,7 @@ class CreateSubstanceWidget(ipw.VBox):
             name_hbox,
             description_hbox,
             comments_hbox,
+            empa_number_hbox,
             chemical_props_title,
             iupac_name_hbox,
             cas_number_hbox,
