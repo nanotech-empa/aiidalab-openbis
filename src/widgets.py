@@ -1324,7 +1324,9 @@ class CreateAnalysisWidget(ipw.VBox):
         )
 
         self.select_simulations_label = ipw.Label(value="Simulations")
-        self.select_simulations_selector = ipw.SelectMultiple()
+        self.select_simulations_selector = ipw.SelectMultiple(
+            layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_simulations_hbox = ipw.HBox(
             [self.select_simulations_label, self.select_simulations_selector]
         )
@@ -1334,7 +1336,9 @@ class CreateAnalysisWidget(ipw.VBox):
         )
 
         self.select_measurements_label = ipw.Label(value="Measurements")
-        self.select_measurements_selector = ipw.SelectMultiple()
+        self.select_measurements_selector = ipw.SelectMultiple(
+            layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_measurements_hbox = ipw.HBox(
             [self.select_measurements_label, self.select_measurements_selector]
         )
@@ -1347,8 +1351,13 @@ class CreateAnalysisWidget(ipw.VBox):
         openbis_software = utils.get_openbis_objects(
             self.openbis_session, type="SOFTWARE"
         )
-        software_options = [(obj.props["name"], obj.permId) for obj in openbis_software]
-        self.select_software_selector = ipw.SelectMultiple(options=software_options)
+        software_options = [
+            (f"{obj.props['name']} - {obj.props['version']}", obj.permId)
+            for obj in openbis_software
+        ]
+        self.select_software_selector = ipw.SelectMultiple(
+            options=software_options, layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_software_hbox = ipw.HBox(
             [self.select_software_label, self.select_software_selector]
         )
@@ -1359,8 +1368,10 @@ class CreateAnalysisWidget(ipw.VBox):
 
         self.select_code_label = ipw.Label(value="Code")
         openbis_code = utils.get_openbis_objects(self.openbis_session, type="CODE")
-        code_options = [(obj.props["name"], obj.permId) for obj in openbis_code]
-        self.select_code_selector = ipw.SelectMultiple(options=code_options)
+        code_options = [(f"{obj.props['name']}", obj.permId) for obj in openbis_code]
+        self.select_code_selector = ipw.SelectMultiple(
+            options=code_options, layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_code_hbox = ipw.HBox(
             [self.select_code_label, self.select_code_selector]
         )
@@ -1386,7 +1397,7 @@ class CreateAnalysisWidget(ipw.VBox):
         self.support_files_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 20px;'>Support files</span>"
         )
-        self.support_files_uploader = ipw.FileUpload()
+        self.support_files_uploader = ipw.FileUpload(multiple=True)
 
         self.select_project_widget.project_dropdown.observe(
             self.load_measurements_and_simulations
@@ -1421,7 +1432,11 @@ class CreateAnalysisWidget(ipw.VBox):
                 openbis_objs = utils.get_openbis_objects(
                     self.openbis_session, type=simulation_type, project=project_id
                 )
-                objs = [(obj.props["name"], obj.permId) for obj in openbis_objs]
+
+                objs = [
+                    (f"{obj.props['name']} ({obj.type.code})", obj.permId)
+                    for obj in openbis_objs
+                ]
                 simulations_objects += objs
 
             measurements = utils.get_openbis_objects(
@@ -1431,11 +1446,11 @@ class CreateAnalysisWidget(ipw.VBox):
             )
 
             for measurement in measurements:
-                measurement_details = (measurement.props["name"], measurement.permId)
-                if measurement.props["wfms_uuid"]:
-                    simulations_objects.append(measurement_details)
-                else:
-                    measurements_objects.append(measurement_details)
+                measurement_details = (
+                    f"{measurement.props['name']} ({measurement.type.code})",
+                    measurement.permId,
+                )
+                measurements_objects.append(measurement_details)
 
         self.select_simulations_selector.options = simulations_objects
         self.select_measurements_selector.options = measurements_objects

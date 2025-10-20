@@ -198,6 +198,9 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             logging.info("No instrument selected.")
             return
 
+        measurements_directory = self.select_measurements_folder_widget.selected_path
+
+        # TODO: Move this into measurements_uploader.py
         measurement_session_object = utils.create_openbis_object(
             self.openbis_session,
             type=OPENBIS_OBJECT_TYPES["Measurement Session"],
@@ -206,7 +209,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             props={
                 "name": f"Measurement Session on Sample {sample_name}",
                 "default_object_view": "IMAGING_GALLERY_VIEW",
-                "measurement_folder_path": self.select_measurements_folder_widget.selected_path,
+                "measurement_folder_path": measurements_directory,
             },
         )
         logging.info(
@@ -214,7 +217,6 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         )
 
         measurement_session_id = measurement_session_object.permId
-        measurements_directory = self.select_measurements_folder_widget.selected_path
         watchdog_file = "src/measurements_uploader.py"
         shutil.copy(watchdog_file, measurements_directory)
 
