@@ -1,7 +1,6 @@
 {
     "Geometry optimisation": "GEOMETRY_OPTIMISATION",
     "Band structure": "BAND_STRUCTURE",
-    "Measurement session": "MEASUREMENT_SESSION",
     "PDOS": "PDOS",
     "Vibrational spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
     "Unclassified simulation": "UNCLASSIFIED_SIMULATION",
