@@ -1468,7 +1468,9 @@ class CreateResultsWidget(ipw.VBox):
         )
 
         self.select_simulations_label = ipw.Label(value="Simulations")
-        self.select_simulations_selector = ipw.SelectMultiple()
+        self.select_simulations_selector = ipw.SelectMultiple(
+            layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_simulations_hbox = ipw.HBox(
             [self.select_simulations_label, self.select_simulations_selector]
         )
@@ -1478,7 +1480,9 @@ class CreateResultsWidget(ipw.VBox):
         )
 
         self.select_measurements_label = ipw.Label(value="Measurements")
-        self.select_measurements_selector = ipw.SelectMultiple()
+        self.select_measurements_selector = ipw.SelectMultiple(
+            layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_measurements_hbox = ipw.HBox(
             [self.select_measurements_label, self.select_measurements_selector]
         )
@@ -1487,7 +1491,9 @@ class CreateResultsWidget(ipw.VBox):
             value="<span style='font-weight: bold; font-size: 20px;'>Select analysis</span>"
         )
         self.select_analysis_label = ipw.Label(value="Analysis")
-        self.select_analysis_selector = ipw.SelectMultiple()
+        self.select_analysis_selector = ipw.SelectMultiple(
+            layout=ipw.Layout(width="500px", height="100px")
+        )
         self.select_analysis_hbox = ipw.HBox(
             [self.select_analysis_label, self.select_analysis_selector]
         )
@@ -1513,7 +1519,7 @@ class CreateResultsWidget(ipw.VBox):
         self.support_files_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 20px;'>Support files</span>"
         )
-        self.support_files_uploader = ipw.FileUpload()
+        self.support_files_uploader = ipw.FileUpload(multiple=True)
 
         self.select_project_widget.project_dropdown.observe(
             self.load_analysis_measurements_and_simulations
@@ -1536,6 +1542,14 @@ class CreateResultsWidget(ipw.VBox):
             self.support_files_uploader,
         ]
 
+    def reset_widgets(self):
+        self.select_project_widget.project_dropdown.value = "-1"
+        self.name_textbox.value = ""
+        self.description_textbox.value = ""
+        self.comments_textbox.value = ""
+        self.support_files_uploader.value.clear()
+        self.support_files_uploader._counter = 0
+
     def load_analysis_measurements_and_simulations(self, change):
         project_id = self.select_project_widget.project_dropdown.value
         analysis_objects = []
@@ -1547,7 +1561,10 @@ class CreateResultsWidget(ipw.VBox):
                 openbis_objs = utils.get_openbis_objects(
                     self.openbis_session, type=simulation_type, project=project_id
                 )
-                objs = [(obj.props["name"], obj.permId) for obj in openbis_objs]
+                objs = [
+                    (f"{obj.props['name']} ({obj.type.code})", obj.permId)
+                    for obj in openbis_objs
+                ]
                 simulations_objects += objs
 
             measurements = utils.get_openbis_objects(
@@ -1557,7 +1574,10 @@ class CreateResultsWidget(ipw.VBox):
             )
 
             for measurement in measurements:
-                measurement_details = (measurement.props["name"], measurement.permId)
+                measurement_details = (
+                    f"{measurement.props['name']} ({measurement.type.code})",
+                    measurement.permId,
+                )
                 measurements_objects.append(measurement_details)
 
             analysis = utils.get_openbis_objects(
@@ -1565,7 +1585,6 @@ class CreateResultsWidget(ipw.VBox):
                 type=OPENBIS_OBJECT_TYPES["Analysis"],
                 project=project_id,
             )
-
             analysis_objects = [(obj.props["name"], obj.permId) for obj in analysis]
 
         self.select_simulations_selector.options = simulations_objects
