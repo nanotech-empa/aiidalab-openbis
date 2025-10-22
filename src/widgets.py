@@ -1768,7 +1768,7 @@ class CreateSubstanceWidget(ipw.VBox):
         self.comments_hbox = ipw.HBox([self.comments_label, self.comments_textbox])
 
         self.add_molecule_button = ipw.Button(
-            description="Add molecule", button_style="success"
+            description="Link molecule", button_style="success"
         )
         self.add_molecule_button.on_click(self.add_molecule)
 
