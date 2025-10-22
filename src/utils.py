@@ -4,7 +4,6 @@ from pybis import Openbis
 import yaml
 import datetime
 import os
-from functools import lru_cache
 import ipywidgets as ipw
 import io
 import contextlib
@@ -26,17 +25,14 @@ def get_openbis_objects(openbis_session, **kwargs):
     return openbis_session.get_objects(**kwargs)
 
 
-@lru_cache(maxsize=5000)
 def get_openbis_object(openbis_session, **kwargs):
     return openbis_session.get_object(**kwargs)
 
 
-@lru_cache(maxsize=5000)
 def get_openbis_collection(openbis_session, **kwargs):
     return openbis_session.get_collection(**kwargs)
 
 
-@lru_cache(maxsize=5000)
 def get_openbis_property_type(openbis_session, **kwargs):
     return openbis_session.get_property_type(**kwargs)
 

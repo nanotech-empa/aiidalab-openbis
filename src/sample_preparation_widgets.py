@@ -1525,16 +1525,6 @@ class RegisterPreparationWidget(ipw.VBox):
                     self.sample_preparation_object = parent_object
                     break
 
-        # If sample was used in a measurement session, a new preparation should start
-        sample_object_children = sample_object.children
-        for child_id in sample_object_children:
-            child_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=child_id
-            )
-            if child_object.type == OPENBIS_OBJECT_TYPES["Measurement Session"]:
-                self.sample_preparation_object = None
-                break
-
         # Load sample history
         self.sample_history_vbox.load_sample_history(sample_object)
 
@@ -1610,6 +1600,16 @@ class RegisterPreparationWidget(ipw.VBox):
             current_sample = utils.get_openbis_object(
                 self.openbis_session, sample_ident=current_sample_id
             )
+
+            # If sample was used in a measurement session, a new preparation should start
+            sample_object_children = current_sample.children
+            for child_id in sample_object_children:
+                child_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=child_id
+                )
+                if child_object.type == OPENBIS_OBJECT_TYPES["Measurement Session"]:
+                    self.sample_preparation_object = None
+                    break
 
             # Create preparation object when it does not exist
             if self.sample_preparation_object is None:
