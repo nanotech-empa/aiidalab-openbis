@@ -5,7 +5,6 @@ from IPython.display import display, Javascript
 from . import utils, widgets
 import ipyfilechooser
 import atexit
-import shutil
 import subprocess
 import logging
 
@@ -227,13 +226,11 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
         measurement_session_id = measurement_session_object.permId
         measurements_directory = self.select_measurements_folder_widget.selected_path
-        watchdog_file = "src/measurements_uploader.py"
-        shutil.copy(watchdog_file, measurements_directory)
 
         watchdog_process = subprocess.Popen(
             [
                 "python",
-                f"{measurements_directory}/measurements_uploader.py",
+                "src/measurements_uploader.py",
                 "--openbis_url",
                 self.session_data["url"],
                 "--openbis_token",

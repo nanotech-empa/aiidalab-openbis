@@ -14,7 +14,7 @@
 #
 import sys
 
-sys.path.append("/home/jovyan/aiida-openbis/")
+sys.path.append("/home/jovyan/aiidalab-openbis/")
 import os
 from pybis import Openbis, ImagingControl
 import pybis.imaging as imaging
