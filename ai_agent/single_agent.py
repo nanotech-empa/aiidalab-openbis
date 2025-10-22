@@ -132,7 +132,7 @@ class OpenBISAgent:
         # self.graph = graph_builder.compile(checkpointer=memory)
         # self.agent_config = {"configurable": {"thread_id": uuid4()}}
 
-    def ask_question(self, user_prompt: str):
+    def ask_question(self, user_prompt: str, debug=False):
         """
         Ask a question to the agent and get a response.
 
@@ -168,7 +168,8 @@ class OpenBISAgent:
                 if message not in self.messages["messages"]:
                     self.messages["messages"].append(message)
 
-            print(event["messages"][-1])
+            if debug:
+                print(event["messages"][-1])
             response.append(event["messages"][-1])
 
         return response
