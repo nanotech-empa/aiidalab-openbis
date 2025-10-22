@@ -1,6 +1,6 @@
 {
     "version": "0.1.0",
-    "name": "aiida-openbis",
+    "name": "aiidalab-openbis",
     "license": "MIT License",
     "author": "nanotech@surfaces laboratory, Empa",
     "author_email": "carlo.pignedoli@empa.ch",
