@@ -665,6 +665,7 @@ def process_measurement_files(
     # Dat files belonging to the same measurement session, i.e., that are consecutive, should be grouped into just one list of files, except when they do not have the same channels.
     grouped_measurement_files = []
     group = []
+    img_cache = {}
     for i, f in enumerate(sorted_measurement_files):
         # SXM files are saved alone
         if f.endswith(".sxm"):
@@ -675,11 +676,21 @@ def process_measurement_files(
 
         # DAT files, in case they share the same signals and are consecutively acquired, are saved together
         elif f.endswith(".dat"):
-            f_img = spm(f"{data_folder}/{f}")
+            if f"{data_folder}/{f}" in img_cache:
+                f_img = img_cache[f"{data_folder}/{f}"]
+            else:
+                f_img = spm(f"{data_folder}/{f}")
+                img_cache[f"{data_folder}/{f}"] = f_img
+
             files_with_different_channels = False
 
             for file in group:
-                img = spm(f"{data_folder}/{file}")
+                if f"{data_folder}/{file}" in img_cache:
+                    img = img_cache[f"{data_folder}/{file}"]
+                else:
+                    img = spm(f"{data_folder}/{file}")
+                    img_cache[f"{data_folder}/{file}"] = img
+
                 if img.signals != f_img.signals:
                     files_with_different_channels = True
                     break
