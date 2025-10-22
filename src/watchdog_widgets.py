@@ -198,20 +198,32 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             logging.info("No instrument selected.")
             return
 
-        measurement_session_object = utils.create_openbis_object(
-            self.openbis_session,
-            type=OPENBIS_OBJECT_TYPES["Measurement Session"],
-            collection=experiment_id,
-            parents=[sample_id, instrument_id],
-            props={
-                "name": f"Measurement Session on Sample {sample_name}",
-                "default_object_view": "IMAGING_GALLERY_VIEW",
-                "measurement_folder_path": self.select_measurements_folder_widget.selected_path,
-            },
-        )
-        logging.info(
-            f"Measurement Session {measurement_session_object.permId} created."
-        )
+        data_folder = self.select_measurements_folder_widget.selected_path
+        logging_filepath = f"{data_folder}/logging.json"
+        if os.path.exists(logging_filepath):
+            logging_data = utils.read_json(logging_filepath)
+            measurement_session_object = utils.get_openbis_object(
+                self.openbis_session,
+                sample_ident=logging_data.get("measurement_session_id", ""),
+            )
+            logging.info(
+                f"Uploading data into Measurement Session {measurement_session_object.permId}."
+            )
+        else:
+            measurement_session_object = utils.create_openbis_object(
+                self.openbis_session,
+                type=OPENBIS_OBJECT_TYPES["Measurement Session"],
+                collection=experiment_id,
+                parents=[sample_id, instrument_id],
+                props={
+                    "name": f"Measurement Session on Sample {sample_name}",
+                    "default_object_view": "IMAGING_GALLERY_VIEW",
+                    "measurement_folder_path": self.select_measurements_folder_widget.selected_path,
+                },
+            )
+            logging.info(
+                f"Measurement Session {measurement_session_object.permId} created."
+            )
 
         measurement_session_id = measurement_session_object.permId
         measurements_directory = self.select_measurements_folder_widget.selected_path
