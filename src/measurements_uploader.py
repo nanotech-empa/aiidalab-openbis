@@ -6,7 +6,7 @@ import argparse
 from pybis import Openbis
 import sys
 
-sys.path.append("/home/jovyan/apps/aiida-openbis/")
+sys.path.append("/home/jovyan/apps/aiidalab-openbis/")
 from src import utils
 from nanonis_importer.nanonis_importer import process_measurement_files
 
