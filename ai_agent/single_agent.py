@@ -11,6 +11,7 @@ from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START
 from langgraph.graph.message import add_messages
 from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage, AIMessage
+from langfuse.langchain import CallbackHandler
 
 
 def read_text_file(file_path: str) -> str:
@@ -132,7 +133,7 @@ class OpenBISAgent:
         # self.graph = graph_builder.compile(checkpointer=memory)
         # self.agent_config = {"configurable": {"thread_id": uuid4()}}
 
-    def ask_question(self, user_prompt: str, debug=False):
+    def ask_question(self, user_prompt: str):
         """
         Ask a question to the agent and get a response.
 
@@ -150,6 +151,7 @@ class OpenBISAgent:
         events = self.graph.stream(
             self.messages,
             stream_mode="values",
+            config={"callbacks": [CallbackHandler()]},
         )
 
         response = []
@@ -168,8 +170,6 @@ class OpenBISAgent:
                 if message not in self.messages["messages"]:
                     self.messages["messages"].append(message)
 
-            if debug:
-                print(event["messages"][-1])
             response.append(event["messages"][-1])
 
         return response
