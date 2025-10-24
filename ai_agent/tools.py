@@ -956,7 +956,10 @@ def import_simulation_from_openbis(simulation_permid, human_response=False) -> s
             simulation_obj = openbis_utils.get_openbis_object(simulation_permid)
             simulation_aiida_node = simulation_obj.props["aiida_node"]
             if simulation_aiida_node:
-                aiida_node_datasets = simulation_aiida_node.get_datasets()
+                simulation_aiida_node_obj = openbis_utils.get_openbis_object(
+                    simulation_aiida_node
+                )
+                aiida_node_datasets = simulation_aiida_node_obj.get_datasets()
                 for dataset in aiida_node_datasets:
                     dataset_filenames = dataset.file_list
                     is_aiida_file = False
