@@ -11,6 +11,8 @@ from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START
 from langgraph.graph.message import add_messages
 from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage, AIMessage
+from langfuse.langchain import CallbackHandler
+import os
 
 
 def read_text_file(file_path: str) -> str:
@@ -50,21 +52,21 @@ class OpenBISAgent:
     It uses a LangChain model and tools to interact with the openBIS session.
     """
 
-    def __init__(self, llm_config):
+    def __init__(self):
         self.messages = {"messages": []}
 
-        if llm_config["llm_provider"] == "OpenAI":
-            self.llm_api_key = llm_config["api_key"]
+        if os.environ["LLM_PROVIDER"] == "OpenAI":
+            self.llm_api_key = os.environ["LLM_API_KEY"]
             self.llm_model = ChatOpenAI(
-                model=llm_config["llm_model"],
+                model=os.environ["LLM_MODEL"],
                 openai_api_key=self.llm_api_key,
                 temperature=0.5,
                 max_retries=3,
             )
-        elif llm_config["llm_provider"] == "Google Gemini":
-            self.llm_api_key = llm_config["api_key"]
+        elif os.environ["LLM_PROVIDER"] == "Google Gemini":
+            self.llm_api_key = os.environ["LLM_API_KEY"]
             self.llm_model = ChatGoogleGenerativeAI(
-                model=llm_config["llm_model"],
+                model=os.environ["LLM_MODEL"],
                 google_api_key=self.llm_api_key,
                 temperature=0.5,
                 max_retries=3,
@@ -132,7 +134,7 @@ class OpenBISAgent:
         # self.graph = graph_builder.compile(checkpointer=memory)
         # self.agent_config = {"configurable": {"thread_id": uuid4()}}
 
-    def ask_question(self, user_prompt: str, debug=False):
+    def ask_question(self, user_prompt: str):
         """
         Ask a question to the agent and get a response.
 
@@ -150,6 +152,7 @@ class OpenBISAgent:
         events = self.graph.stream(
             self.messages,
             stream_mode="values",
+            config={"callbacks": [CallbackHandler()]},
         )
 
         response = []
@@ -168,8 +171,6 @@ class OpenBISAgent:
                 if message not in self.messages["messages"]:
                     self.messages["messages"].append(message)
 
-            if debug:
-                print(event["messages"][-1])
             response.append(event["messages"][-1])
 
         return response
