@@ -364,8 +364,6 @@ def create_vectorDB(db_path, embedding_model, chunks):
     return vectordb
 
 
-LLM_CONFIG = read_json("/home/jovyan/api_keys/llm_config.json")
-
 SIMULATION_TYPES = [
     "ATOMISTIC_MODEL",
     "BAND_STRUCTURE",
@@ -1297,14 +1295,14 @@ def get_processes_documents(query):
     )
 
     # Embedding model
-    if LLM_CONFIG["llm_provider"] == "Google Gemini":
+    if os.environ["LLM_PROVIDER"] == "Google Gemini":
         embedding_model = GoogleGenerativeAIEmbeddings(
-            model="gemini-embedding-001", google_api_key=LLM_CONFIG["api_key"]
+            model="gemini-embedding-001", google_api_key=os.environ["LLM_API_KEY"]
         )
-    elif LLM_CONFIG["llm_provider"] == "OpenAI":
+    elif os.environ["LLM_PROVIDER"] == "OpenAI":
         embedding_model = OpenAIEmbeddings(
             model="text-embedding-3-small",
-            openai_api_key=LLM_CONFIG["api_key"],
+            openai_api_key=os.environ["LLM_API_KEY"],
         )
     else:
         raise ValueError("LLM provider not supported")
