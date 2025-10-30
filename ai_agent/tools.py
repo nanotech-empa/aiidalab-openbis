@@ -1068,7 +1068,7 @@ def get_sample_provenance(sample: SampleArgs) -> str:
     return sample_summary
 
 
-@tool
+# @tool
 def get_samples_by_substance(input_substance: SubstanceArgs) -> List[str]:
     """
     Search for objects in openBIS of type SAMPLE that contains the input substance
@@ -1144,16 +1144,17 @@ def get_samples_by_substance(input_substance: SubstanceArgs) -> List[str]:
                             if substance_obj.permId == input_substance_obj.permId:
                                 sample_found = True
 
-                    if sample_found:
+                    if sample_found or cleaned_sample:
                         break
 
-                    if cleaned_sample:
-                        break
+                if not sample_found and not cleaned_sample:
+                    for ps_parent in parent_obj.parents:
+                        ps_parent_obj = openbis_utils.get_openbis_object(ps_parent)
+                        if ps_parent_obj.type.code == "SAMPLE":
+                            # Append parent sample so it will be processed later
+                            samples.append(ps_parent_obj)
 
-            if sample_found:
-                break
-
-            if cleaned_sample:
+            if sample_found or cleaned_sample:
                 break
 
         if sample_found:
