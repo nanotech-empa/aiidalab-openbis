@@ -185,6 +185,10 @@ Channels:
         nickname: Intensity
         scaling: 1
         unit: 'Counts'
+    Q_THz (e/pulse):
+      nickname: Q_THz
+      scaling: 1
+      unit: 'e/pulse'
 
 Parameters:
     X (m):
