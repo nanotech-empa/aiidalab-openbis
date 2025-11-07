@@ -1442,7 +1442,7 @@ class RegisterPreparationWidget(ipw.VBox):
             indent=False, layout=ipw.Layout(margin="2px", width="20px")
         )
 
-        self.load_processes_vbox = ipw.VBox()
+        self.load_processes_hbox = ipw.HBox()
         self.processes_dropdown = ipw.Dropdown()
 
         self.save_button = ipw.Button(
@@ -1462,7 +1462,7 @@ class RegisterPreparationWidget(ipw.VBox):
             self.sample_history_title,
             self.sample_history_vbox,
             self.new_processes_title,
-            self.load_processes_vbox,
+            self.load_processes_hbox,
             self.new_processes_accordion,
             self.process_buttons_hbox,
             self.save_button,
@@ -1548,7 +1548,21 @@ class RegisterPreparationWidget(ipw.VBox):
         processes_options.insert(0, ("Select a process...", "-1"))
         self.processes_dropdown.options = processes_options
         self.processes_dropdown.value = "-1"
-        self.load_processes_vbox.children = [self.processes_dropdown]
+
+        cancel_button = ipw.Button(
+            description="X",
+            disabled=False,
+            button_style="danger",
+            tooltip="Cancel",
+            layout=ipw.Layout(width="30px", height="30px"),
+        )
+
+        def close_load_processes(b):
+            self.load_processes_hbox.children = []
+
+        cancel_button.on_click(close_load_processes)
+
+        self.load_processes_hbox.children = [self.processes_dropdown, cancel_button]
 
     def load_process_settings(self, change):
         process_id = self.processes_dropdown.value
@@ -1576,7 +1590,20 @@ class RegisterPreparationWidget(ipw.VBox):
                     processes_accordion_children.append(new_process_step_widget)
                     self.new_processes_accordion.children = processes_accordion_children
 
-            self.load_processes_vbox.children = []
+            self.load_processes_hbox.children = []
+
+            self.children = [
+                self.select_experiment_title,
+                self.select_experiment_dropdown,
+                self.select_sample_title,
+                self.select_sample_dropdown,
+                self.sample_history_title,
+                self.sample_history_vbox,
+                self.new_processes_title,
+                self.load_processes_hbox,
+                self.new_processes_accordion,
+                self.save_button,
+            ]
 
     def save_process_steps(self, b):
         experiment_id = self.select_experiment_dropdown.experiment_dropdown.value
@@ -2044,7 +2071,22 @@ class RegisterPreparationWidget(ipw.VBox):
             for index, process_step in enumerate(processes_accordion_children):
                 self.new_processes_accordion.set_title(index, "")
 
+            self.process_short_name = ""
             self.new_processes_accordion.children = []
+
+            self.children = [
+                self.select_experiment_title,
+                self.select_experiment_dropdown,
+                self.select_sample_title,
+                self.select_sample_dropdown,
+                self.sample_history_title,
+                self.sample_history_vbox,
+                self.new_processes_title,
+                self.load_processes_hbox,
+                self.new_processes_accordion,
+                self.process_buttons_hbox,
+                self.save_button,
+            ]
 
 
 class RegisterProcessStepWidget(ipw.VBox):
