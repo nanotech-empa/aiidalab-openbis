@@ -569,7 +569,9 @@ class MoleculeWidget(ipw.VBox):
             obj_datasets = obj.get_datasets(type="ELN_PREVIEW")
             obj_props = obj.props.all()
             obj_name = obj_props.get("name", "")
-            self.parent_accordion.set_title(self.object_index, obj_name)
+            obj_empa_number = obj_props.get("empa_number", "")
+            obj_empa_number_name = f"{obj_empa_number} ({obj_name})"
+            self.parent_accordion.set_title(self.object_index, obj_empa_number_name)
             self.title = obj_name
 
             obj_details_html = ipw.HTML()
@@ -1930,8 +1932,15 @@ class CreateSubstanceWidget(ipw.VBox):
         )
         chemical_props_vbox = ipw.VBox()
 
-        empa_number_label = ipw.Label(value="EMPA number")
-        empa_number_textbox = ipw.IntText()
+        # Get last empa number
+        molecules_objects = utils.get_openbis_objects(
+            self.openbis_session,
+            type=OPENBIS_OBJECT_TYPES["Molecule"],
+            props=["empa_number"],
+        )
+        last_empa_number = pd.to_numeric(molecules_objects.df.EMPA_NUMBER).max()
+        empa_number_label = ipw.Label(value="Empa number")
+        empa_number_textbox = ipw.IntText(value=last_empa_number + 1)
         empa_number_hbox = ipw.HBox(children=[empa_number_label, empa_number_textbox])
 
         smiles_label = ipw.Label(value="SMILES")
