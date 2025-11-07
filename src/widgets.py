@@ -524,7 +524,15 @@ class MoleculeWidget(ipw.VBox):
             collection=OPENBIS_COLLECTIONS_PATHS["Precursor Molecule"],
             type=OPENBIS_OBJECT_TYPES["Molecule"],
         )
-        dropdown_list = [(obj.props["name"], obj.permId) for obj in molecules_objects]
+        dropdown_list = []
+        for obj in molecules_objects:
+            mol_name = obj.props["name"]
+            mol_empa_number = obj.props["empa_number"]
+            dropdown_list.append((f"{mol_empa_number} ({mol_name})", obj.permId))
+
+        # Sort by EMPA number (assuming it’s numeric)
+        dropdown_list.sort(key=lambda x: int(x[0].split()[0]), reverse=True)
+
         dropdown_list.insert(0, ("Select a molecule...", "-1"))
         self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
         self.details_vbox = ipw.VBox()
@@ -589,6 +597,8 @@ class MoleculeWidget(ipw.VBox):
 
                 # Erase file after downloading it
                 shutil.rmtree(f"images/{object_dataset.permId}")
+            else:
+                self.molecule_sketch.value = b""
 
             self.details_vbox.children = [obj_details_html]
 
