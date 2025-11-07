@@ -16,22 +16,6 @@
                 "</div>",
                 "</div>"
             ],
-            "Results": [
-                "<div style='display: flex;'>",
-                "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='create_analysis.ipynb' target='_blank' style='font-size: 13px;'>Create analysis</a></li>",
-                "<li><a href='create_results.ipynb' target='_blank' style='font-size: 13px;'>Create results</a></li>",
-                "<li><a href='create_drafts.ipynb' target='_blank' style='font-size: 13px;'>Create drafts</a></li>",
-                "</div>",
-                "</div>"
-            ],
-            "Inventory": [
-                "<div style='display: flex;'>",
-                "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='upload_substances.ipynb' target='_blank' style='font-size: 13px;'>Upload substances</a></li>",
-                "</div>",
-                "</div>"
-            ],
             "AI Agent": [
                 "<div style='display: flex;'>",
                 "<div style='flex: 1; padding: 10px;'>",
@@ -54,22 +38,6 @@
                 "<div id='box' style='display: flex; pointer-events: none;'>",
                 "<div style='flex: 1; padding: 10px;'>",
                 "<li><a href='import_export_simulations.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Import/export simulations from/to openBIS</a></li>",
-                "</div>",
-                "</div>"
-            ],
-            "Results": [
-                "<div id='box' style='display: flex; pointer-events: none;'>",
-                "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='create_analysis.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Create analysis</a></li>",
-                "<li><a href='create_results.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Create results</a></li>",
-                "<li><a href='create_drafts.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Create drafts</a></li>",
-                "</div>",
-                "</div>"
-            ],
-            "Inventory": [
-                "<div id='box' style='display: flex; pointer-events: none;'>",
-                "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='upload_substances.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Upload substances</a></li>",
                 "</div>",
                 "</div>"
             ],
