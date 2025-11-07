@@ -180,7 +180,7 @@ if __name__ == "__main__":
         "--config_filepath",
         type=str,
         help="File that contains the spaces, projects, and collections configuration",
-        default="/home/jovyan/apps/aiida-openbis/config/collections_config.json",
+        default="/home/jovyan/apps/aiidalab-openbis/config/collections_config.json",
     )
 
     args = parser.parse_args()

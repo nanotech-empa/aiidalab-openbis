@@ -619,6 +619,12 @@ class Molecule(OpenBISObject):
         description="IUPAC standardised chemical name, e.g. 1,3,7-Trimethyl-3,7-dihydro-1H-purine-2,6-dione for caffeine.",
         metadata={"type": "VARCHAR"},
     )
+    substances: List["Substance"] = Field(
+        default_factory=list,
+        title="Substance(s)",
+        description="List of substances that contain this molecule",
+        metadata={"type": "SAMPLE", "multivalue": True},
+    )
 
     @classmethod
     def get_code(cls) -> str:
