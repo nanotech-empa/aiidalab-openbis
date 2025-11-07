@@ -1047,9 +1047,9 @@ class SelectExperimentWidget(ipw.VBox):
         sort_project_registration_date_checkbox.observe(sort_project_dropdown)
 
         self.create_new_experiment_widgets.children = [
-            new_experiment_name_hbox,
             project_hbox,
             sort_project_hbox,
+            new_experiment_name_hbox,
             buttons_hbox,
         ]
 
