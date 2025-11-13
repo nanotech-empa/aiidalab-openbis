@@ -2853,6 +2853,7 @@ class RegisterActionWidget(ipw.VBox):
                                     sample_ident=evaporator_slot_id,
                                 )
                                 all_instrument_components.append(evaporator_slot_object)
+
             for component_object in all_instrument_components:
                 component_actions_settings_prop = component_object.props[
                     "actions_settings"
