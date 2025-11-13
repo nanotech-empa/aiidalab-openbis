@@ -1849,6 +1849,12 @@ class Evaporator(Component):
         description="List of evaporator slots attached to the evaporator.",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
+    target_temperature: TemperatureValue = Field(
+        default=None,
+        title="Target temperature",
+        description="Target temperature for evaporation of the substance in it.",
+        metadata={"type": "JSON"},
+    )
 
     @classmethod
     def get_code(cls) -> str:
