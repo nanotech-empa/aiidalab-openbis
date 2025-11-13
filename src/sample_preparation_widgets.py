@@ -2847,12 +2847,16 @@ class RegisterActionWidget(ipw.VBox):
                             evaporator_slots = component_object.props[
                                 "evaporator_slots"
                             ]
-                            for evaporator_slot_id in evaporator_slots:
-                                evaporator_slot_object = utils.get_openbis_object(
-                                    self.openbis_session,
-                                    sample_ident=evaporator_slot_id,
-                                )
-                                all_instrument_components.append(evaporator_slot_object)
+                            if evaporator_slots:
+                                for evaporator_slot_id in evaporator_slots:
+                                    evaporator_slot_object = utils.get_openbis_object(
+                                        self.openbis_session,
+                                        sample_ident=evaporator_slot_id,
+                                    )
+                                    all_instrument_components.append(
+                                        evaporator_slot_object
+                                    )
+
             for component_object in all_instrument_components:
                 component_actions_settings_prop = component_object.props[
                     "actions_settings"
@@ -3267,12 +3271,15 @@ class RegisterObservableWidget(ipw.VBox):
                             evaporator_slots = component_object.props[
                                 "evaporator_slots"
                             ]
-                            for evaporator_slot_id in evaporator_slots:
-                                evaporator_slot_object = utils.get_openbis_object(
-                                    self.openbis_session,
-                                    sample_ident=evaporator_slot_id,
-                                )
-                                all_instrument_components.append(evaporator_slot_object)
+                            if evaporator_slots:
+                                for evaporator_slot_id in evaporator_slots:
+                                    evaporator_slot_object = utils.get_openbis_object(
+                                        self.openbis_session,
+                                        sample_ident=evaporator_slot_id,
+                                    )
+                                    all_instrument_components.append(
+                                        evaporator_slot_object
+                                    )
 
             for component_object in all_instrument_components:
                 component_observables_settings_prop = component_object.props[
