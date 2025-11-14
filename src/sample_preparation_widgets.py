@@ -1506,6 +1506,7 @@ class RegisterPreparationWidget(ipw.VBox):
                 else:
                     most_recent_parent = parent_object
 
+        self.sample_preparation_object = None
         if most_recent_parent:
             if (
                 most_recent_parent.experiment.permId
