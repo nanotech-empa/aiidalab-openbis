@@ -542,7 +542,7 @@ class ActionHistoryWidget(ipw.VBox):
         widget_children = [self.name_hbox, self.description_hbox, self.duration_hbox]
 
         if self.object_type == OPENBIS_OBJECT_TYPES["Annealing"]:
-            self.target_temperature_label = ipw.Label(value="Name:")
+            self.target_temperature_label = ipw.Label(value="Target temperature:")
             self.target_temperature_html = ipw.HTML()
             self.target_temperature_hbox = ipw.HBox(
                 children=[self.target_temperature_label, self.target_temperature_html]
