@@ -3465,10 +3465,16 @@ class STMSimulation(Simulation):
 
 
 class MeasurementSession(OpenBISObject):
-    sample: str = Field(
+    sample: Sample = Field(
         default=None,
         title="Sample",
         description="Sample",
+        metadata={"type": "PARENT"},
+    )
+    instrument: Union[Instrument, InstrumentSTM] = Field(
+        default=None,
+        title="Instrument",
+        description="Instrument used for the measurement session",
         metadata={"type": "PARENT"},
     )
     measurement_folder_path: str = Field(
