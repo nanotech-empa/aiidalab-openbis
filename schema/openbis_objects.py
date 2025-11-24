@@ -569,7 +569,7 @@ class Author(OpenBISObject):
         default=None,
         title="Person",
         description="Person",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "SAMPLE"},
     )
     groups: List[Group] = Field(
         default=None,
