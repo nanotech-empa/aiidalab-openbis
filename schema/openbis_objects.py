@@ -3465,17 +3465,17 @@ class STMSimulation(Simulation):
 
 
 class MeasurementSession(OpenBISObject):
+    sample: str = Field(
+        default=None,
+        title="Sample",
+        description="Sample",
+        metadata={"type": "PARENT"},
+    )
     measurement_folder_path: str = Field(
         default=None,
         title="Measurement folder path",
         description="Path to the measurement folder",
         metadata={"type": "VARCHAR"},
-    )
-    measurement_session: "MeasurementSession" = Field(
-        default=None,
-        title="Measurement session",
-        description="Reference to another measurement session",
-        metadata={"type": "PARENT"},
     )
 
     @classmethod
