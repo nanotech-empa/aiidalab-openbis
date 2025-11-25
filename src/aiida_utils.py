@@ -1361,7 +1361,7 @@ def get_codes_info(workchain_uuid):
 
 
 workchain_exporters = {
-    "NanoribbonsWorkChain_export": NanoribbonsWorkChain_export,
+    "NanoribbonsWorkChain": NanoribbonsWorkChain_export,
     "PwRelaxWorkChain": PwRelaxWorkChain_export,
     "BandsWorkChain": BandsWorkChain_export,
     "PdosWorkChain": PdosWorkChain_export,
