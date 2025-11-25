@@ -670,23 +670,25 @@ def NanoribbonsWorkChain_export(
         if node.label in targets and targets[node.label] is None:
             targets[node.label] = node
 
-    cell_op2   = targets["cell_op2"]
-    scf        = targets["scf"]
-    bands      = targets["bands"]
+    cell_op2 = targets["cell_op2"]
+    scf = targets["scf"]
+    bands = targets["bands"]
     export_pdos = targets["export_pdos"]
-    
-    output_parameters = get_qe_output_parameters(scf.outputs.output_parameters.get_dict())
-    input_parameters = get_qe_input_parameters(scf.outputs.output_parameters.get_dict())
-    
-    dft_object_parameters = {"xc_functional":'PBE',
-                             "plus_u":'False',
-                             "spin_orbit_coupling":'False',
-                             "uks":output_parameters["lsda"],
-                             "charge": float(scf.inputs.parameters["SYSTEM"]["tot_charge"]),
-                             "vdw_corr": ''
-                            }
-    bands_type = OPENBIS_OBJECT_TYPES["Band Structure"]
 
+    output_parameters = get_qe_output_parameters(
+        scf.outputs.output_parameters.get_dict()
+    )
+    input_parameters = get_qe_input_parameters(scf.outputs.output_parameters.get_dict())
+
+    dft_object_parameters = {
+        "xc_functional": "PBE",
+        "plus_u": "False",
+        "spin_orbit_coupling": "False",
+        "uks": output_parameters["lsda"],
+        "charge": float(scf.inputs.parameters["SYSTEM"]["tot_charge"]),
+        "vdw_corr": "",
+    }
+    bands_type = OPENBIS_OBJECT_TYPES["Band Structure"]
 
     dictionary = {
         "wfms_uuid": workchain_uuid,
@@ -750,25 +752,34 @@ def NanoribbonsWorkChain_export(
     bands_obobject.add_parents(input_structure)
     utils.update_openbis_object(bands_obobject)
 
-## section geo opt
+    ## section geo opt
     geoopt_obobject = None
     if cell_opt2 is not None:
-
         force_conv_threshold_json = json.dumps(
-            {"value": cell_opt2.inputs.parameters.get_dict()["CONTROL"]["forc_conv_thr"], "unit": "eV/Bohr**3"}
+            {
+                "value": cell_opt2.inputs.parameters.get_dict()["CONTROL"][
+                    "forc_conv_thr"
+                ],
+                "unit": "eV/Bohr**3",
+            }
         )
 
         geo_opt_type = OPENBIS_OBJECT_TYPES["Geometry Optimisation"]
-        output_parameters = get_qe_output_parameters(cell_opt2.outputs.output_parameters.get_dict())
-        input_parameters = get_qe_input_parameters(cell_opt2.outputs.output_parameters.get_dict())
+        output_parameters = get_qe_output_parameters(
+            cell_opt2.outputs.output_parameters.get_dict()
+        )
+        input_parameters = get_qe_input_parameters(
+            cell_opt2.outputs.output_parameters.get_dict()
+        )
 
-        dft_object_parameters = {"xc_functional":'PBE',
-                                 "plus_u":'False',
-                                 "spin_orbit_coupling":'False',
-                                 "uks":output_parameters["lsda"],
-                                 "charge": float(scf.inputs.parameters["SYSTEM"]["tot_charge"]),
-                                 "vdw_corr": ''
-                                }
+        dft_object_parameters = {
+            "xc_functional": "PBE",
+            "plus_u": "False",
+            "spin_orbit_coupling": "False",
+            "uks": output_parameters["lsda"],
+            "charge": float(scf.inputs.parameters["SYSTEM"]["tot_charge"]),
+            "vdw_corr": "",
+        }
         geoopt_object_parameters = {
             "wfms_uuid": workchain_uuid,
             "level_theory_method": "dft",
@@ -780,10 +791,9 @@ def NanoribbonsWorkChain_export(
             "input_parameters": json.dumps(input_parameters),
         }
 
-        
-        geoopt_object_parameters["cell_opt_constraints"] = 'free x'
+        geoopt_object_parameters["cell_opt_constraints"] = "free x"
         geoopt_object_parameters["cell_optimised"] = True
-        
+
         if workchain.description:
             workchain_name = workchain.description[:30]
             geoopt_object_parameters["name"] = f"GeoOpt - {workchain_name}"
@@ -816,10 +826,11 @@ def NanoribbonsWorkChain_export(
         output_structure.add_parents(geoopt_obobject)
         utils.update_openbis_object(output_structure)
         geoopt_obobject.add_children(output_structure)
-        
-## end section geo opt        
+
+    ## end section geo opt
 
     return geoopt_obobject, bands_obobject
+
 
 def PwRelaxWorkChain_export(
     openbis_session, experiment_id, workchain_uuid, uuids
@@ -854,9 +865,13 @@ def PwRelaxWorkChain_export(
         ),
     }
 
-    geoopt_object_parameters["cell_optimised"] = pw_input_parameters['CONTROL']['calculation']=='vc-relax'
+    geoopt_object_parameters["cell_optimised"] = (
+        pw_input_parameters["CONTROL"]["calculation"] == "vc-relax"
+    )
     if geoopt_object_parameters["cell_optimised"]:
-        geoopt_object_parameters["cell_opt_constraints"] = pw_input_parameters.get("CELL", {}).get("cell_dofree", "")
+        geoopt_object_parameters["cell_opt_constraints"] = pw_input_parameters.get(
+            "CELL", {}
+        ).get("cell_dofree", "")
 
     if workchain.caller.description:
         workchain_name = workchain.caller.description[:30]
