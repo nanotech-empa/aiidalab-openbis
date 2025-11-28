@@ -594,15 +594,19 @@ class ExportSimulationsWidget(ipw.VBox):
                     )
 
                     if last_export:
-                        first_atom_model = utils.find_first_atomistic_model(
-                            self.openbis_session,
-                            last_export,
-                            OPENBIS_OBJECT_TYPES["Atomistic Model"],
-                        )
+                        if not isinstance(last_export, tuple):
+                            last_export = (last_export,)
 
-                        if len(first_atom_model.parents) == 0:
-                            first_atom_model.parents = atom_model_parents
-                            utils.update_openbis_object(first_atom_model)
+                        for export in last_export:
+                            first_atom_model = utils.find_first_atomistic_model(
+                                self.openbis_session,
+                                export,
+                                OPENBIS_OBJECT_TYPES["Atomistic Model"],
+                            )
+
+                            if len(first_atom_model.parents) == 0:
+                                first_atom_model.parents = atom_model_parents
+                                utils.update_openbis_object(first_atom_model)
                         display(Javascript(data="alert('Upload successful!')"))
                     else:
                         display(

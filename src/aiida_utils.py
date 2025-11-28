@@ -655,7 +655,7 @@ def create_and_export_AiiDA_archive(openbis_session, uuid):
     return obobject
 
 
-def NanoribbonsWorkChain_export(
+def NanoribbonWorkChain_export(
     openbis_session, experiment_id, workchain_uuid, uuids
 ):  # is SUB of QeAppWorkChain
     workchain = orm.load_node(workchain_uuid)
@@ -670,7 +670,7 @@ def NanoribbonsWorkChain_export(
         if node.label in targets and targets[node.label] is None:
             targets[node.label] = node
 
-    cell_opt2 = targets["cell_op2"]
+    cell_opt2 = targets["cell_opt2"]
     scf = targets["scf"]
     bands = targets["bands"]
     export_pdos = targets["export_pdos"]
@@ -684,7 +684,7 @@ def NanoribbonsWorkChain_export(
         "xc_functional": "PBE",
         "plus_u": "False",
         "spin_orbit_coupling": "False",
-        "uks": output_parameters["lsda"],
+        "uks": scf.outputs.output_parameters.get_dict()["lsda"],
         "charge": float(scf.inputs.parameters["SYSTEM"]["tot_charge"]),
         "vdw_corr": "",
     }
@@ -705,7 +705,7 @@ def NanoribbonsWorkChain_export(
     }
 
     if workchain.description:
-        workchain_name = workchain.caller.description[:30]
+        workchain_name = workchain.description[:30]
         dictionary["name"] = f"BANDS - {workchain_name}"
 
     # Create BANDSTRUCURE object
@@ -776,7 +776,7 @@ def NanoribbonsWorkChain_export(
             "xc_functional": "PBE",
             "plus_u": "False",
             "spin_orbit_coupling": "False",
-            "uks": output_parameters["lsda"],
+            "uks": scf.outputs.output_parameters.get_dict()["lsda"],
             "charge": float(scf.inputs.parameters["SYSTEM"]["tot_charge"]),
             "vdw_corr": "",
         }
@@ -1376,7 +1376,7 @@ def get_codes_info(workchain_uuid):
 
 
 workchain_exporters = {
-    "NanoribbonsWorkChain": NanoribbonsWorkChain_export,
+    "NanoribbonWorkChain": NanoribbonWorkChain_export,
     "PwRelaxWorkChain": PwRelaxWorkChain_export,
     "BandsWorkChain": BandsWorkChain_export,
     "PdosWorkChain": PdosWorkChain_export,
@@ -1416,7 +1416,6 @@ def export_workchain(openbis_session, experiment_id, workchain_uuid):
                         main_wc_uuid,
                         simulation_uuids_oBIS["structure_uuids"],
                     )
-                    export.props["aiida_node"] = AiiDA_archive.permId
                     # In teh case of NanoribonsWorkChain we have to link both geoopt and bands
                     if isinstance(export, tuple):
                         for obj in export:
@@ -1424,6 +1423,7 @@ def export_workchain(openbis_session, experiment_id, workchain_uuid):
                                 obj.props["aiida_node"] = AiiDA_archive.permId
                                 utils.update_openbis_object(obj)
                     else:
+                        export.props["aiida_node"] = AiiDA_archive.permId
                         utils.update_openbis_object(export)
 
                     # Update current status of openBIS simulations
@@ -1451,5 +1451,4 @@ def export_workchain(openbis_session, experiment_id, workchain_uuid):
                             simulation_uuids_oBIS = get_uuids_from_oBIS(openbis_session)
                         # else:
                         #    print(wc.process_label,' should not be exported')
-
     return export
