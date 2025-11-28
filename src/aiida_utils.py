@@ -744,7 +744,10 @@ def NanoribbonWorkChain_export(
     os.remove("projections_json.json")
     os.remove("band_structure_json.json")
 
-    input_structure = workchain.inputs.structure
+    if cell_opt2 is not None:
+        input_structure = cell_opt2.outputs.output_structure
+    else:
+        input_structure = workchain.inputs.structure
     # if missing create oBIS object and obtain uuid
     input_structure = structure_to_atomistic_model(
         openbis_session, input_structure.uuid, uuids
