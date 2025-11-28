@@ -670,7 +670,7 @@ def NanoribbonsWorkChain_export(
         if node.label in targets and targets[node.label] is None:
             targets[node.label] = node
 
-    cell_op2 = targets["cell_op2"]
+    cell_opt2 = targets["cell_op2"]
     scf = targets["scf"]
     bands = targets["bands"]
     export_pdos = targets["export_pdos"]
@@ -718,10 +718,10 @@ def NanoribbonsWorkChain_export(
     )
 
     # Create datasets in openbis and link them to the openBIS object
-    pdos_json = aiida_data_to_json(root_out.projwfc.Dos.uuid)
-    pbands_json = aiida_data_to_json(root_out.projwfc.bands.uuid)
-    projections_json = aiida_data_to_json(root_out.projwfc.projections.uuid)
-    band_structure_json = aiida_data_to_json(root_out.band_structure.uuid)
+    pdos_json = aiida_data_to_json(export_pdos.outputs.Dos.uuid)
+    pbands_json = aiida_data_to_json(export_pdos.outputs.bands.uuid)
+    projections_json = aiida_data_to_json(export_pdos.outputs.projections.uuid)
+    band_structure_json = aiida_data_to_json(bands.outputs.output_band.uuid)
     utils.write_json(pdos_json, "pdos_json.json")
     utils.write_json(pbands_json, "pbands_json.json")
     utils.write_json(projections_json, "projections_json.json")
