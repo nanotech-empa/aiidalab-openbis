@@ -1,5 +1,6 @@
 {
     "QeAppWorkChain": "/apps/quantum-espresso/qe.ipynb",
     "Cp2kGeoOptWorkChain": "/apps/surfaces/view_geometry_optimization.ipynb",
-    "Cp2kStmWorkChain": "/apps/surfaces/view_stm.ipynb"
+    "Cp2kStmWorkChain": "/apps/surfaces/view_stm.ipynb",
+    "NanoribbonWorkChain": "/apps/nanoribbons/show.ipynb"
 }
