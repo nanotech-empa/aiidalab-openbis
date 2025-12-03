@@ -10,6 +10,16 @@ sys.path.append("/home/jovyan/apps/aiidalab-openbis/")
 from src import utils
 from nanonis_importer.nanonis_importer import process_measurement_files
 
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    filename="logs/aiidalab_openbis_interface.log",
+    encoding="utf-8",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+)
+
 
 class NewFileHandler(FileSystemEventHandler):
     def __init__(self, custom_function):
@@ -37,7 +47,12 @@ def monitor_folder(path_to_watch, custom_function):
 
 # Example of a custom function
 def process_new_file(
-    file_path, openbis_url, openbis_token, measurement_session_id, logging_filepath
+    file_path,
+    openbis_session,
+    openbis_url,
+    openbis_token,
+    measurement_session_id,
+    logging_filepath,
 ):
     data_folder = os.path.dirname(file_path)
     process_measurement_files(
@@ -47,6 +62,42 @@ def process_new_file(
         measurement_session_id,
         logging_filepath,
     )
+
+    openbis_bug_solved = False
+
+    if openbis_bug_solved:
+        logging_data = utils.read_json(logging_filepath)
+
+        uploaded_files = logging_data.get("processed_files", [])
+
+        # List files in the data folder
+        all_local_files = [
+            os.path.join(data_folder, f)
+            for f in os.listdir(data_folder)
+            if os.path.isfile(os.path.join(data_folder, f))
+        ]
+
+        # Determine which files need uploading
+        missing_files = [
+            f
+            for f in all_local_files
+            if f not in uploaded_files and not f.endswith((".json", ".ini"))
+        ]
+
+        # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
+        for file_path in missing_files:
+            measurement_session_obj = openbis_session.get_object(measurement_session_id)
+
+            utils.create_openbis_dataset(
+                openbis_session,
+                type="ATTACHMENT",
+                sample=measurement_session_obj,
+                files=[file_path],
+            )
+
+            logging_data["processed_files"].append(file_path)
+            utils.write_json(logging_data, logging_filepath)
+            logger.info(f"Uploaded file: {file_path}")
 
 
 if __name__ == "__main__":
@@ -108,6 +159,7 @@ if __name__ == "__main__":
         def custom_function(file_path):
             return process_new_file(
                 file_path,
+                openbis_session=openbis_session,
                 openbis_url=openbis_url,
                 openbis_token=openbis_token,
                 measurement_session_id=measurement_session_id,
@@ -121,5 +173,43 @@ if __name__ == "__main__":
             measurement_session_id,
             logging_filepath,
         )
+
+        openbis_bug_solved = False
+
+        if openbis_bug_solved:
+            logging_data = utils.read_json(logging_filepath)
+
+            uploaded_files = logging_data.get("processed_files", [])
+
+            # List files in the data folder
+            all_local_files = [
+                os.path.join(data_folder, f)
+                for f in os.listdir(data_folder)
+                if os.path.isfile(os.path.join(data_folder, f))
+            ]
+
+            # Determine which files need uploading
+            missing_files = [
+                f
+                for f in all_local_files
+                if f not in uploaded_files and not f.endswith((".json", ".ini"))
+            ]
+
+            # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
+            for file_path in missing_files:
+                measurement_session_obj = openbis_session.get_object(
+                    measurement_session_id
+                )
+
+                utils.create_openbis_dataset(
+                    openbis_session,
+                    type="ATTACHMENT",
+                    sample=measurement_session_obj,
+                    files=[file_path],
+                )
+
+                logging_data["processed_files"].append(file_path)
+                utils.write_json(logging_data, logging_filepath)
+                logger.info(f"Uploaded file: {file_path}")
 
         monitor_folder(data_folder, custom_function)
