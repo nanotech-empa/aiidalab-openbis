@@ -650,10 +650,13 @@ def process_measurement_files(
     for f in measurement_files:
         # sxm and dat files
         if f.endswith((".sxm", ".dat")):
-            img = spm(f"{data_folder}/{f}")
-            img_datetime = img.record_datetime
-            readable_measurement_files.append(f)
-            measurement_datetimes.append(img_datetime)
+            try:
+                img = spm(f"{data_folder}/{f}")
+                img_datetime = img.record_datetime
+                readable_measurement_files.append(f)
+                measurement_datetimes.append(img_datetime)
+            except Exception as e:
+                logging.info(f"Cannot read {f}. Reason: {e}")
 
     # Sort files by datetime first, then filename
     paired = list(zip(measurement_datetimes, readable_measurement_files))
