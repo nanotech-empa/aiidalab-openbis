@@ -1001,7 +1001,7 @@ class SelectExperimentWidget(ipw.VBox):
                         props=experiment_props,
                     )
                     self.create_new_experiment_widgets.children = []
-                    self.experiment_dropdown.options = self.load_experiments()
+                    self.load_experiments()
                     self.experiment_dropdown.value = new_experiment.permId
                     display(
                         Javascript(data="alert('Experiment successfully created!')")
