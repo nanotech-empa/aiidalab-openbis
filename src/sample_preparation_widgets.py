@@ -3387,8 +3387,8 @@ class RegisterObservableWidget(ipw.VBox):
         # Create structures directory if it does not exist
         for filename in self.upload_readings_widget.value:
             file_info = self.upload_readings_widget.value[filename]
-            content = file_info["content"].decode("utf-8")
             try:
+                content = file_info["content"].decode("utf-8")
                 df = pd.read_csv(io.StringIO(content), sep=",")
 
                 if df.shape[1] < 2:
