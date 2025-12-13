@@ -95,7 +95,7 @@ class OpenBISAgent:
             # Experiments
             tools.get_sample_provenance,
             tools.get_samples_by_substance,
-            # tools.get_samples_by_crystal,
+            tools.get_samples_by_crystal,
             tools.get_measurements_by_sample,
             # RAG
             tools.get_processes_documents,
