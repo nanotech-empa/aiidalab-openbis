@@ -2378,7 +2378,7 @@ class RegisterActionWidget(ipw.VBox):
         gas_list = utils.get_openbis_objects(
             self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Gas Bottles"]
         )
-        gas_options = [(obj.props["name"], obj.permId) for obj in gas_list]
+        gas_options = [(obj.props["name"], obj.permId) for obj in gas_list if obj.type == "GAS_BOTTLE"]
         gas_options.insert(0, ("Select a dosing gas...", "-1"))
         self.gas_dropdown = ipw.Dropdown(options=gas_options, value="-1")
         self.gas_hbox = ipw.HBox(children=[self.gas_label, self.gas_dropdown])
