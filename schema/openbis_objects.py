@@ -3008,7 +3008,7 @@ class Deposition(Action):
 
 
 class Dosing(Action):
-    gas: Substance = Field(
+    gas: GasBottle = Field(
         default=None,
         title="Dosing gas",
         description="Gas used for dosing",
