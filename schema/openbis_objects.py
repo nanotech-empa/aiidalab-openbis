@@ -11,7 +11,6 @@ from datetime import datetime
 
 # Enums
 
-
 class ComponentMainCategoryEnum(str, Enum):
     Auxiliary = "Auxiliary"
     Microscope_Core_Components = "Microscope Core Components"
@@ -232,22 +231,11 @@ class ComponentActionSettings(BaseModel):
     )
 
 
-class ObservableReading(BaseModel):
-    reading_source: str = Field(default="", description="Reading source name")
-    reading_unit: str = Field(default="", description="Reading unit")
-    reading_variable: str = Field(
-        default="", description="Reading variable"
-    )  # TODO: Ask Bruno what is this
-
-
 class ComponentObservableSettings(BaseModel):
     observable_type: str = Field(default="", description="Type of observable")
     component_properties: List[str] = Field(
         default_factory=list,
         description="List of properties of the component that are used by this observable type",
-    )
-    observable_readings: List[ObservableReading] = Field(
-        default_factory=list, description="List of readings (channels) details"
     )
 
 
@@ -326,7 +314,6 @@ class ObservableSettings(BaseModel):
 class ProcessStepSettings(BaseModel):
     name: str = Field(default="")
     description: str = Field(default="")
-    instrument: str = Field(default="")
     comments: str = Field(default="")
     actions_settings: List[ActionSettings] = Field(default_factory=list)
     observables_settings: List[ObservableSettings] = Field(default_factory=list)
@@ -376,6 +363,38 @@ class OpenBISObject(BaseModel):
         description="Additional comments about the object",
         metadata={"type": "MULTILINE_VARCHAR"},
     )
+    
+class OpenBISDataset(BaseModel):
+    permId: str = Field(
+        default="",
+        title="PermID",
+        description="Permanent identifier for the OpenBIS object",
+        metadata={"type": "No type"},
+    )
+    name: str = Field(
+        default="",
+        title="Name",
+        description="Name of the OpenBIS object",
+        metadata={"type": "VARCHAR"},
+    )
+    description: str = Field(
+        default="",
+        title="Description",
+        description="Description of the OpenBIS object",
+        metadata={"type": "VARCHAR"},
+    )
+    registration_date: str = Field(
+        default="",
+        title="Registration date",
+        description="Date when the object was registered",
+        metadata={"type": "No type"},
+    )
+    comments: str = Field(
+        default="",
+        title="Comments",
+        description="Additional comments about the object",
+        metadata={"type": "MULTILINE_VARCHAR"},
+    )
 
 
 class Grant(OpenBISObject):
@@ -385,10 +404,10 @@ class Grant(OpenBISObject):
         description="Identifier of the project",
         metadata={"type": "VARCHAR"},
     )
-    acknowledgement_sentence: str = Field(
+    acknowledgement_text: str = Field(
         default=None,
-        title="Acknowledgement sentence",
-        description="Acknowledgement sentence",
+        title="Acknowledgement text",
+        description="Acknowledgement text",
         metadata={"type": "MULTILINE_VARCHAR"},
     )
     budget: CurrencyValue = Field(
@@ -477,17 +496,11 @@ class Organisation(OpenBISObject):
 
 
 class Group(OpenBISObject):
-    group: "Group" = Field(
-        default=None,
-        title="Group",
-        description="Parent group (if applicable)",
-        metadata={"type": "SAMPLE"},
-    )
     organisation: Organisation = Field(
         default=None,
         title="Organisation",
         description="Organisation to which the group belongs to",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -518,6 +531,12 @@ class Person(OpenBISObject):
         description="Mobile phone number",
         metadata={"type": "VARCHAR"},
     )
+    job_title: str = Field(
+        default="",
+        title="Job title",
+        description="Job title of the person",
+        metadata={"type": "VARCHAR"},
+    )
     work_phone: str = Field(
         default="",
         title="Work phone",
@@ -540,13 +559,13 @@ class Person(OpenBISObject):
         default_factory=list,
         title="Organisation(s)",
         description="Organisation(s) to which the person belongs. Only used if the person does not belong to any group.",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
     )
     groups: List[Group] = Field(
         default_factory=list,
         title="Group(s)",
         description="Group(s) to which the person belongs",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
     )
     nanotech_surfaces_subgroup: NanotechSurfacesSubgroupEnum = Field(
         default=None,
@@ -569,13 +588,13 @@ class Author(OpenBISObject):
         default=None,
         title="Person",
         description="Person",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
-    groups: List[Group] = Field(
-        default=None,
-        title="Group(s)",
-        description="Group(s) to which the person belonged when the publication was done",
-        metadata={"type": "SAMPLE", "multivalue": True},
+    affiliation: List[Union[Group, Organisation]] = Field(
+        default_factory=list,
+        title="Affiliation",
+        description="Affiliation of the author at the time of publication",
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -619,12 +638,6 @@ class Molecule(OpenBISObject):
         description="IUPAC standardised chemical name, e.g. 1,3,7-Trimethyl-3,7-dihydro-1H-purine-2,6-dione for caffeine.",
         metadata={"type": "VARCHAR"},
     )
-    substances: List["Substance"] = Field(
-        default_factory=list,
-        title="Substance(s)",
-        description="List of substances that contain this molecule",
-        metadata={"type": "SAMPLE", "multivalue": True},
-    )
 
     @classmethod
     def get_code(cls) -> str:
@@ -640,7 +653,7 @@ class GasBottle(OpenBISObject):
         default_factory=list,
         title="Molecules",
         description="List of molecules that gas bottle contains",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
     )
     amount: Optional[Union[MassValue, VolumeValue]] = Field(
         default=None,
@@ -710,7 +723,7 @@ class Substance(OpenBISObject):
         default_factory=list,
         title="Molecule(s)",
         description="List of molecules that substance contains",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
     )
     empa_number: int = Field(
         default=0,
@@ -864,7 +877,7 @@ class Crystal(OpenBISObject):
         default=None,
         title="Crystal concept",
         description="Crystal concept information",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
     face: str = Field(
         default="",
@@ -1487,7 +1500,13 @@ class ReactionProductConcept(OpenBISObject):
         default_factory=list,
         title="Molecule(s)",
         description="List of molecules involved",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
+    )
+    crystal_concepts: List[CrystalConcept] = Field(
+        default_factory=list,
+        title="Crystal concept(s)",
+        description="List of crystal concepts associated",
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -1516,7 +1535,7 @@ class ReactionProduct(OpenBISObject):
         default=None,
         title="Reaction product concept",
         description="Concept associated with the reaction product",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
     sample: Sample = Field(
         default=None,
@@ -1604,16 +1623,6 @@ class DeviceSubstrate(OpenBISObject):
         return v
 
 
-class WaferSample(OpenBISObject):
-    @classmethod
-    def get_code(cls) -> str:
-        return "WFSB"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Wafer Substrate"
-
-
 class SampleHolder(OpenBISObject):
     location: Optional[Union["Room", "Instrument", "InstrumentSTM"]] = Field(
         default=None,
@@ -1650,7 +1659,7 @@ class Component(OpenBISObject):
         description="Sub category of the component",
         metadata={"type": "CONTROLLEDVOCABULARY"},
     )
-    manufacturer: Optional[Union[Organisation, Person]] = Field(
+    manufacturer: Optional[Union[Organisation, Group, Person]] = Field(
         default=None,
         title="Manufacturer",
         description="Manufacturer of the component",
@@ -1832,6 +1841,12 @@ class EvaporatorSlot(Component):
         description="EP percentage",
         metadata={"type": "REAL"},
     )
+    evaporator: Evaporator = Field(
+        default=None,
+        title="Evaporator",
+        description="Evaporator to which the slot belongs.",
+        metadata={"type": "PARENT"}
+    )
 
     @classmethod
     def get_code(cls) -> str:
@@ -1843,12 +1858,6 @@ class EvaporatorSlot(Component):
 
 
 class Evaporator(Component):
-    evaporator_slots: List[EvaporatorSlot] = Field(
-        default_factory=list,
-        title="Evaporator slot(s)",
-        description="List of evaporator slots attached to the evaporator.",
-        metadata={"type": "SAMPLE", "multivalue": True},
-    )
     target_temperature: TemperatureValue = Field(
         default=None,
         title="Target temperature",
@@ -1959,7 +1968,7 @@ class AFMSensor(Component):
         default="",
         title="Wire",
         description="Wire used in the AFM sensor",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
     fabrication_date: str = Field(
         default=None,
@@ -2005,7 +2014,7 @@ class STMTip(Component):
         default="",
         title="Wire",
         description="Wire used in the STM sensor",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
     fabrication_date: str = Field(
         default=None,
@@ -2232,25 +2241,6 @@ class InstrumentSTM(Instrument):
         description="Consumables inside the instrument.",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
-    # Materials
-    substances: List[Substance] = Field(
-        default_factory=list,
-        title="Substance(s)",
-        description="Substances inside the instrument.",
-        metadata={"type": "SAMPLE", "multivalue": True},
-    )
-    single_crystals: List[Crystal] = Field(
-        default_factory=list,
-        title="Crystal(s)",
-        description="Crystals inside the instrument.",
-        metadata={"type": "SAMPLE", "multivalue": True},
-    )
-    wafer_samples: List[WaferSample] = Field(
-        default_factory=list,
-        title="Wafer sample(s)",
-        description="Wafer samples inside the instrument.",
-        metadata={"type": "SAMPLE", "multivalue": True},
-    )
     # Accessories
     tip_sensors: List[Component] = Field(
         default_factory=list,
@@ -2281,11 +2271,11 @@ class InstrumentSTM(Instrument):
         return "Instrument.STM"
 
 
-class Code(OpenBISObject):
+class Script(OpenBISObject):
     version: str = Field(
         default="",
         title="Version",
-        description="Version of the code",
+        description="Version of the script",
         metadata={"type": "VARCHAR"},
     )
     filepath_executable: str = Field(
@@ -2297,18 +2287,17 @@ class Code(OpenBISObject):
     repository_url: str = Field(
         default="",
         title="Repository URL",
-        description="URL of the code repository",
+        description="URL of the script repository",
         metadata={"type": "VARCHAR"},
     )
 
     @classmethod
     def get_code(cls) -> str:
-        return "CODE"
+        return "SRPT"
 
     @classmethod
     def get_label(cls) -> str:
-        return "Code"
-
+        return "Script"
 
 class Software(OpenBISObject):
     version: str = Field(
@@ -2440,11 +2429,11 @@ class BandStructure(Simulation):
         description="List of atomistic models",
         metadata={"type": "PARENT"},
     )
-    codes: List[Code] = Field(
+    scripts: List[Script] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used in the band structure calculation",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        title="Script(s)",
+        description="List of scripts used in the band structure calculation",
+        metadata={"type": "PARENT"},
     )
     aiida_node: "AiidaNode" = Field(
         default_factory=list,
@@ -2523,10 +2512,10 @@ class GeometryOptimisation(Simulation):
         description="List of atomistic models",
         metadata={"type": "PARENT"},
     )
-    codes: List[Code] = Field(
+    scripts: List[Script] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used",
+        title="Script(s)",
+        description="List of scripts used",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
     aiida_node: "AiidaNode" = Field(
@@ -2545,7 +2534,7 @@ class GeometryOptimisation(Simulation):
         return "Geometry Optimisation"
 
 
-class MeanFieldHubbard(OpenBISObject):
+class MeanFieldHubbard(Simulation):
     charge: int = Field(
         default=None, title="Charge", description="Charge", metadata={"type": "INTEGER"}
     )
@@ -2619,7 +2608,7 @@ class MeanFieldHubbard(OpenBISObject):
         return "Mean Field Hubbard"
 
 
-class MinimumEnergyPotential(OpenBISObject):
+class MinimumEnergyPotential(Simulation):
     energies: List[EnergyValue] = Field(
         default_factory=list,
         title="Energies",
@@ -2709,10 +2698,10 @@ class PDOS(Simulation):
         description="List of atomistic models",
         metadata={"type": "PARENT"},
     )
-    codes: List[Code] = Field(
+    scripts: List[Script] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used in the PDOS calculation",
+        title="Script(s)",
+        description="List of scripts used in the PDOS calculation",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
     aiida_node: "AiidaNode" = Field(
@@ -2750,10 +2739,10 @@ class UnclassifiedSimulation(Simulation):
         description="List of atomistic models",
         metadata={"type": "PARENT"},
     )
-    codes: List[Code] = Field(
+    scripts: List[Script] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used in the simulation",
+        title="Script(s)",
+        description="List of scripts used in the simulation",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
     aiida_node: "AiidaNode" = Field(
@@ -2803,10 +2792,10 @@ class VibrationalSpectroscopy(Simulation):
         description="List of atomistic models",
         metadata={"type": "PARENT"},
     )
-    codes: List[Code] = Field(
+    scripts: List[Script] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used in the vibrational spectroscopy calculation",
+        title="Script(s)",
+        description="List of scripts used in the vibrational spectroscopy calculation",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
     aiida_node: "AiidaNode" = Field(
@@ -2862,10 +2851,10 @@ class PotentialEnergyCalculation(Simulation):
         description="List of atomistic models",
         metadata={"type": "PARENT"},
     )
-    codes: List[Code] = Field(
+    scripts: List[Script] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used in the potential energy calculation",
+        title="Script(s)",
+        description="List of scripts used in the potential energy calculation",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
     aiida_node: "AiidaNode" = Field(
@@ -2895,7 +2884,7 @@ class Action(OpenBISObject):
         default=None,
         title="Component",
         description="Component used in the action",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
     component_settings: Dict = Field(
         default_factory=dict,
@@ -2995,7 +2984,7 @@ class Deposition(Action):
         default=None,
         title="Substance",
         description="Substance being deposited",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -3008,11 +2997,11 @@ class Deposition(Action):
 
 
 class Dosing(Action):
-    gas: Substance = Field(
+    gas: GasBottle = Field(
         default=None,
         title="Dosing gas",
         description="Gas used for dosing",
-        metadata={"type": "SAMPLE"},
+        metadata={"type": "PARENT"},
     )
     pressure: PressureValue = Field(
         default=None,
@@ -3069,7 +3058,7 @@ class FieldEmission(Action):
 class LightIrradiation(Action):
     @classmethod
     def get_code(cls) -> str:
-        return "LITE"
+        return "LIIR"
 
     @classmethod
     def get_label(cls) -> str:
@@ -3109,7 +3098,7 @@ class Sputtering(Action):
         description="Pressure during sputtering",
         metadata={"type": "JSON"},
     )
-    current: CurrencyValue = Field(
+    current: CurrentValue = Field(
         default=None,
         title="Current",
         description="Current applied during sputtering",
@@ -3155,15 +3144,15 @@ class Room(OpenBISObject):
 
 
 class Analysis(OpenBISObject):
-    codes: List[Code] = Field(
+    scripts: List[Script] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used in the analysis",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        title="Script(s)",
+        description="List of scripts used in the analysis",
+        metadata={"type": "PARENT"},
     )
-    measurements: List["MeasurementSession"] = Field(
+    measurement_sessions: List["MeasurementSession"] = Field(
         default_factory=list,
-        title="Measurement(s)",
+        title="Measurement session(s)",
         description="List of measurement sessions used in the analysis",
         metadata={"type": "PARENT"},
     )
@@ -3171,7 +3160,7 @@ class Analysis(OpenBISObject):
         default_factory=list,
         title="Software",
         description="List of software used in the analysis",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -3191,16 +3180,16 @@ class Result(OpenBISObject):
         metadata={"type": "PARENT"},
     )
     simulations: List[
-        Union[BandStructure, GeometryOptimisation, PDOS, VibrationalSpectroscopy]
+        Union[BandStructure, GeometryOptimisation, PDOS, VibrationalSpectroscopy, STMSimulation]
     ] = Field(
         default_factory=list,
         title="Simulation(s)",
         description="List of simulations",
         metadata={"type": "PARENT"},
     )
-    measurements: List["MeasurementSession"] = Field(
+    measurement_sessions: List["MeasurementSession"] = Field(
         default_factory=list,
-        title="Measurement(s)",
+        title="Measurement session(s)",
         description="List of associated measurement sessions",
         metadata={"type": "PARENT"},
     )
@@ -3254,12 +3243,41 @@ class AiidaNode(OpenBISObject):
         return "Aiida Node"
 
 
-class Observable(OpenBISObject):
+class Observable(OpenBISDataset):
+    # Current
+    # Elemental Composition
+    # Flux
+    # Force
+    # Inductance
+    # pH Value
+    # Pressure
+    # Resistance
+    # Speed
+    # Temperature
+    # Voltage
     channel_name: str = Field(
         default=None,
         title="Channel name",
         description="Name of the reading channel",
         metadata={"type": "VARCHAR"},
+    )
+    channel_unit: str = Field(
+        default=None,
+        title="Channel unit",
+        description="Unit of the reading channel",
+        metadata={"type": "VARCHAR"},
+    )
+    start_time: datetime = Field(
+        default=None,
+        title="Start time",
+        description="Start time of the observable recording",
+        metadata={"type": "TIMESTAMP"},
+    )
+    end_time: datetime = Field(
+        default=None,
+        title="End time",
+        description="End time of the observable recording",
+        metadata={"type": "TIMESTAMP"},
     )
     component: Component = Field(
         default=None,
@@ -3281,116 +3299,6 @@ class Observable(OpenBISObject):
     @classmethod
     def get_label(cls) -> str:
         return "Observable"
-
-
-class CurrentObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "CURR"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Current Observable"
-
-
-class ElementalCompositionObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "ELEM"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Elemental Composition Observable"
-
-
-class FluxObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "FLUX"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Flux Observable"
-
-
-class ForceObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "FORC"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Force Observable"
-
-
-class InductanceObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "INDU"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Inductance Observable"
-
-
-class PHValueObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "PHVA"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "pH Value Observable"
-
-
-class PressureObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "PRES"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Pressure Observable"
-
-
-class ResistanceObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "RESI"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Resistance Observable"
-
-
-class SpeedObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "SPED"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Speed Observable"
-
-
-class TemperatureObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "TEMP"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Temperature Observable"
-
-
-class VoltageObservable(Observable):
-    @classmethod
-    def get_code(cls) -> str:
-        return "VOLT"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Voltage Observable"
 
 
 class STMSimulation(Simulation):
@@ -3418,14 +3326,20 @@ class STMSimulation(Simulation):
         description="Output parameters from the simulation",
         metadata={"type": "JSON"},
     )
-    codes: List[Code] = Field(
+    atomistic_models: List["AtomisticModel"] = Field(
         default_factory=list,
-        title="Code(s)",
-        description="List of codes used in the band structure calculation",
+        title="Atomistic model(s)",
+        description="List of atomistic models",
+        metadata={"type": "PARENT"},
+    )
+    scripts: List[Script] = Field(
+        default_factory=list,
+        title="Script(s)",
+        description="List of scripts used in the band structure calculation",
         metadata={"type": "SAMPLE", "multivalue": True},
     )
     aiida_node: "AiidaNode" = Field(
-        default_factory=list,
+        default=None,
         title="AiiDA archive",
         description="Main AiiDA node containing AiiDA archive file",
         metadata={"type": "SAMPLE", "multivalue": False},
@@ -3482,6 +3396,12 @@ class MeasurementSession(OpenBISObject):
         title="Measurement folder path",
         description="Path to the measurement folder",
         metadata={"type": "VARCHAR"},
+    )
+    preparation: Preparation = Field(
+        default=None,
+        title="Preparation",
+        description="Preparation associated with the measurement session",
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -3557,16 +3477,6 @@ class OpticalMicroscopy(OpenBISObject):
 #         return "Errors and Problems"
 
 
-# class Status(OpenBISObject):
-#     @classmethod
-#     def get_code(cls) -> str:
-#         return "STAT"
-
-#     @classmethod
-#     def get_label(cls) -> str:
-#         return "Status"
-
-
 # class CalibrationOptimisaton(OpenBISObject):
 #     @classmethod
 #     def get_code(cls) -> str:
@@ -3587,24 +3497,14 @@ class OpticalMicroscopy(OpenBISObject):
 #         return "Cryostat Filling"
 
 
-# class ChangeLocation(OpenBISObject):
+# class Transfer(OpenBISObject):
 #     @classmethod
 #     def get_code(cls) -> str:
-#         return "LOCA"
+#         return "TRSF"
 
 #     @classmethod
 #     def get_label(cls) -> str:
-#         return "Change Location"
-
-# class ChangeProperty(OpenBISObject):
-#     @classmethod
-#     def get_code(cls) -> str:
-#         return "PROP"
-
-#     @classmethod
-#     def get_label(cls) -> str:
-#         return "Change Property"
-
+#         return "Transfer"
 
 # class Degasing(OpenBISObject):
 #     @classmethod
@@ -3653,12 +3553,6 @@ class Process(OpenBISObject):
         description="Short name for the process",
         metadata={"type": "VARCHAR"},
     )
-    instrument: Optional[Union[Instrument, InstrumentSTM]] = Field(
-        default=None,
-        title="Instrument",
-        description="Instrument used for the process",
-        metadata={"type": "SAMPLE"},
-    )
     process_steps_settings: List[ProcessStepSettings] = Field(
         default_factory=list,
         title="Process steps settings",
@@ -3686,13 +3580,19 @@ class ProcessStep(OpenBISObject):
         default_factory=list,
         title="Observable(s)",
         description="List of observables recorded in this step",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "DATASET"},
     )
-    instrument: Optional[Union[Instrument, InstrumentSTM]] = Field(
+    sample_in: Sample = Field(
+        default=None,
+        title="Sample",
+        description="Sample used in this step",
+        metadata={"type": "PARENT"},
+    )
+    instrument: Union[Instrument, InstrumentSTM] = Field(
         default=None,
         title="Instrument",
-        description="Instrument used for this step",
-        metadata={"type": "SAMPLE"},
+        description="Instrument",
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -3705,12 +3605,6 @@ class ProcessStep(OpenBISObject):
 
 
 class Preparation(OpenBISObject):
-    process_steps: List[ProcessStep] = Field(
-        default_factory=list,
-        title="Process step(s)",
-        description="List of process steps",
-        metadata={"type": "CHILDREN"},
-    )
 
     @classmethod
     def get_code(cls) -> str:
@@ -3756,7 +3650,7 @@ class Publication(OpenBISObject):
         default_factory=list,
         title="Author(s)",
         description="List of authors",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
     )
     drafts: List[Draft] = Field(
         default_factory=list,
@@ -3768,7 +3662,7 @@ class Publication(OpenBISObject):
         default_factory=list,
         title="Grant(s)",
         description="Grants supporting the publication",
-        metadata={"type": "SAMPLE", "multivalue": True},
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
