@@ -20,6 +20,11 @@ def get_openbis_collections(openbis_session, **kwargs):
 def get_openbis_projects(openbis_session, **kwargs):
     return openbis_session.get_projects(**kwargs)
 
+def get_openbis_datasets(openbis_session, **kwargs):
+    return openbis_session.get_datasets(**kwargs)
+
+def get_openbis_dataset(openbis_session, **kwargs):
+    return openbis_session.get_dataset(**kwargs)
 
 def get_openbis_objects(openbis_session, **kwargs):
     return openbis_session.get_objects(**kwargs)

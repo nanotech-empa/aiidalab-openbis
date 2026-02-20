@@ -4,23 +4,23 @@
             "Experiments": [
                 "<div style='display: flex;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='sample_preparation.ipynb' target='_blank' style='font-size: 13px;'>Sample preparation</a></li>",
-                "<li><a href='sample_measurement.ipynb' target='_blank' style='font-size: 13px;'>Sample measurement</a></li>",
+                "<li><a href='1_sample_preparation.ipynb' target='_blank' style='font-size: 13px;'>Sample preparation</a></li>",
+                "<li><a href='2_sample_measurement.ipynb' target='_blank' style='font-size: 13px;'>Sample measurement</a></li>",
                 "</div>",
                 "</div>"
             ],
             "Simulations": [
                 "<div style='display: flex;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='import_export_simulations.ipynb' target='_blank' style='font-size: 13px;'>Import/export simulations from/to openBIS</a></li>",
+                "<li><a href='3_import_export_simulations.ipynb' target='_blank' style='font-size: 13px;'>Import/export simulations from/to openBIS</a></li>",
                 "</div>",
                 "</div>"
             ],
             "AI Agent": [
                 "<div style='display: flex;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='openbis_chatbot.ipynb' target='_blank' style='font-size: 13px;'>Open openBIS chatbot</a></li>",
-                "<li><a href='setup_chatbot.ipynb' target='_blank' style='font-size: 13px;'>Setup openBIS chatbot</a></li>",
+                "<li><a href='4_openbis_chatbot.ipynb' target='_blank' style='font-size: 13px;'>Open openBIS chatbot</a></li>",
+                "<li><a href='5_setup_chatbot.ipynb' target='_blank' style='font-size: 13px;'>Setup openBIS chatbot</a></li>",
                 "</div>",
                 "</div>"
             ]
@@ -29,23 +29,23 @@
             "Experiments": [
                 "<div id='box' style='display: flex; pointer-events: none;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='sample_preparation.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Sample preparation</a></li>",
-                "<li><a href='sample_measurement.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Sample measurement</a></li>",
+                "<li><a href='1_sample_preparation.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Sample preparation</a></li>",
+                "<li><a href='2_sample_measurement.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Sample measurement</a></li>",
                 "</div>",
                 "</div>"
             ],
             "Simulations": [
                 "<div id='box' style='display: flex; pointer-events: none;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='import_export_simulations.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Import/export simulations from/to openBIS</a></li>",
+                "<li><a href='3_import_export_simulations.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Import/export simulations from/to openBIS</a></li>",
                 "</div>",
                 "</div>"
             ],
             "AI Agent": [
                 "<div id='box' style='display: flex; pointer-events: none;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='openbis_chatbot.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Open openBIS chatbot</a></li>",
-                "<li><a href='setup_chatbot.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Setup openBIS chatbot</a></li>",
+                "<li><a href='4_openbis_chatbot.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Open openBIS chatbot</a></li>",
+                "<li><a href='5_setup_chatbot.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Setup openBIS chatbot</a></li>",
                 "</div>",
                 "</div>"
             ]

@@ -32,314 +32,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 
-
-class CreateSampleWidget(ipw.VBox):
-    def __init__(self, openbis_session):
-        super().__init__()
-        self.openbis_session = openbis_session
-
-        self.select_material_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select material</span>"
-        )
-
-        material_type_options = [(key, value) for key, value in MATERIALS_TYPES.items()]
-        material_type_options.insert(0, ("Select material type...", "-1"))
-
-        self.material_type_dropdown = ipw.Dropdown(
-            options=material_type_options, value=material_type_options[0][1]
-        )
-
-        self.material_details_vbox = ipw.VBox()
-
-        self.sample_name_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Sample name</span>"
-        )
-
-        self.sample_name_textbox = ipw.Text(placeholder="Write sample name...")
-
-        self.save_button = ipw.Button(
-            description="",
-            disabled=False,
-            button_style="",
-            tooltip="Save",
-            icon="save",
-            layout=ipw.Layout(width="100px", height="50px"),
-        )
-
-        self.children = [
-            self.select_material_title,
-            self.material_type_dropdown,
-            self.material_details_vbox,
-            self.sample_name_title,
-            self.sample_name_textbox,
-            self.save_button,
-        ]
-
-        self.material_type_dropdown.observe(
-            self.load_material_type_widgets, names="value"
-        )
-
-        self.save_button.on_click(self.save_sample)
-
-    def load_material_type_widgets(self, change):
-        if self.material_type_dropdown.value == "-1":
-            self.material_details_vbox.children = []
-            logger.info("Material type is not selected.")
-            return
-        else:
-            material_options = [("Select material...", "-1")]
-
-            material_dropdown = ipw.Dropdown(
-                options=material_options, value=material_options[0][1]
-            )
-
-            sort_material_label = ipw.Label(
-                value="Sort by:",
-                layout=ipw.Layout(margin="0px", width="50px"),
-                style={"description_width": "initial"},
-            )
-
-            name_checkbox = ipw.Checkbox(
-                indent=False, layout=ipw.Layout(margin="2px", width="20px")
-            )
-
-            name_label = ipw.Label(
-                value="Name",
-                layout=ipw.Layout(margin="0px", width="50px"),
-                style={"description_width": "initial"},
-            )
-
-            registration_date_checkbox = ipw.Checkbox(
-                indent=False, layout=ipw.Layout(margin="2px", width="20px")
-            )
-
-            registration_date_label = ipw.Label(
-                value="Registration date",
-                layout=ipw.Layout(margin="0px", width="110px"),
-                style={"description_width": "initial"},
-            )
-
-            select_material_box = ipw.HBox(
-                children=[
-                    material_dropdown,
-                    sort_material_label,
-                    name_checkbox,
-                    name_label,
-                    registration_date_checkbox,
-                    registration_date_label,
-                ]
-            )
-
-            material_details_html = ipw.HTML()
-
-            self.material_details_vbox.children = [
-                select_material_box,
-                material_details_html,
-            ]
-
-            material_type = self.material_type_dropdown.value
-            material_objects = utils.get_openbis_objects(
-                self.openbis_session, type=material_type
-            )
-            materials_objects_names_permids = [
-                (obj.props["name"], obj.permId) for obj in material_objects
-            ]
-            material_options += materials_objects_names_permids
-            material_dropdown.options = material_options
-
-            def sort_material_dropdown(change):
-                options = material_options[1:]
-
-                df = pd.DataFrame(options, columns=["name", "registration_date"])
-                if name_checkbox.value and not registration_date_checkbox.value:
-                    df = df.sort_values(by="name", ascending=True)
-                elif not name_checkbox.value and registration_date_checkbox.value:
-                    df = df.sort_values(by="registration_date", ascending=False)
-                elif name_checkbox.value and registration_date_checkbox.value:
-                    df = df.sort_values(
-                        by=["name", "registration_date"], ascending=[True, False]
-                    )
-
-                options = list(df.itertuples(index=False, name=None))
-                options.insert(0, material_options[0])
-                material_dropdown.options = options
-
-            def load_material_details(change):
-                obj_permid = material_dropdown.value
-                if obj_permid == "-1":
-                    logger.info("Material is not selected.")
-                    return
-                else:
-                    obj = utils.get_openbis_object(
-                        self.openbis_session, sample_ident=obj_permid
-                    )
-                    obj_props = obj.props.all()
-                    obj_name = obj_props.get("name", "") or ""
-                    obj_details_string = "<div style='border: 1px solid grey; padding: 10px; margin: 10px;'>"
-                    for key, value in obj_props.items():
-                        if value:
-                            prop_type = utils.get_openbis_property_type(
-                                self.openbis_session, code=key
-                            )
-                            prop_label = prop_type.label
-                            prop_datatype = prop_type.dataType
-                            if prop_datatype == "SAMPLE":
-                                if isinstance(value, list):
-                                    prop_obj_names = []
-                                    for id in value:
-                                        prop_obj = utils.get_openbis_object(
-                                            self.openbis_session, sample_ident=id
-                                        )
-                                        prop_obj_name = prop_obj.props["name"] or ""
-                                        prop_obj_names.append(prop_obj_name)
-                                    value = ", ".join(prop_obj_names)
-                                else:
-                                    obj = utils.get_openbis_object(
-                                        self.openbis_session, sample_ident=value
-                                    )
-                                    value = obj.props["name"] or ""
-
-                            elif prop_datatype == "JSON":
-                                json_content = json.loads(value)
-                                if utils.is_quantity_value(json_content):
-                                    value = f"<p>{json_content['value']} {json_content['unit']}</p>"
-                                else:
-                                    value = "<ul>"
-                                    for k, v in json_content.items():
-                                        if isinstance(v, dict):
-                                            if utils.is_quantity_value(v):
-                                                value += f"<li><b>{k}:</b> {v['value']} {v['unit']}</li>"
-                                            else:
-                                                value += f"<li><b>{k}:</b> {v}</li>"
-                                        else:
-                                            value += f"<li><b>{k}:</b> {v}</li>"
-
-                                    value += "</ul>"
-
-                            elif (
-                                prop_datatype == "XML"
-                                and prop_type.metaData["custom_widget"] == "Spreadsheet"
-                            ):
-                                table_headers = value.headers
-                                table_data = value.data
-
-                                # Build table header
-                                table_html = "<table style='width:100%; border-collapse:collapse;'>"
-                                table_html += "<thead><tr>"
-                                for h in table_headers:
-                                    table_html += f"<th style='padding:0; text-align:left; font-weight:bold;'>{h}</th>"
-                                table_html += "</tr></thead>"
-
-                                # Build table body
-                                table_html += "<tbody>"
-                                for row in table_data:
-                                    table_html += "<tr>"
-                                    for cell in row:
-                                        table_html += (
-                                            f"<td style='padding:0;'>{cell}</td>"
-                                        )
-                                    table_html += "</tr>"
-                                table_html += "</tbody></table>"
-                                value = table_html
-
-                            obj_details_string += f"<p><b>{prop_label}:</b> {value}</p>"
-                        else:
-                            logger.info(f"{key} has no value.")
-
-                    obj_details_string += "</div>"
-
-                    material_details_html.value = obj_details_string
-
-                    current_datetime = utils.get_current_datetime()
-                    current_datetime_str = utils.convert_datetime_to_string(
-                        current_datetime
-                    )
-                    self.sample_name_textbox.value = (
-                        f"{current_datetime_str}_{obj_name}"
-                    )
-
-            name_checkbox.observe(sort_material_dropdown, names="value")
-            registration_date_checkbox.observe(sort_material_dropdown, names="value")
-            material_dropdown.observe(load_material_details, names="value")
-
-    def save_sample(self, b):
-        if self.material_type_dropdown.value == "-1":
-            logger.info("Material type is not selected.")
-            return
-        else:
-            if self.material_details_vbox.children[0].children[0].value == "-1":
-                logger.info("Material is not selected.")
-                return
-            else:
-                material_id = self.material_details_vbox.children[0].children[0].value
-
-                material_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=material_id
-                )
-
-                # Check samples that use this material which are still active
-                sample_objects = utils.get_openbis_objects(
-                    self.openbis_session,
-                    type=OPENBIS_OBJECT_TYPES["Sample"],
-                    where={"object_status": "ACTIVE"},
-                    attrs=["parents"],
-                )
-
-                for sample in sample_objects:
-                    obj = sample
-                    while obj:
-                        parents = obj.parents
-                        found_parent = False
-
-                        for parent_id in parents:
-                            parent = utils.get_openbis_object(
-                                self.openbis_session, sample_ident=parent_id
-                            )
-                            parent_type = parent.type.code
-
-                            if parent_type in [
-                                OPENBIS_OBJECT_TYPES["Process Step"],
-                                OPENBIS_OBJECT_TYPES["Sample"],
-                            ]:
-                                obj = parent
-                                found_parent = True
-                                break
-
-                            elif (
-                                parent_type == material_object.type.code
-                                and parent.permId == material_object.permId
-                            ):
-                                sample.props["object_status"] = "DISPOSED"
-                                utils.update_openbis_object(sample)
-                                found_parent = True
-                                break
-
-                        if not found_parent:
-                            obj = None
-
-                        if sample.props["object_status"] == "DISPOSED":
-                            break
-
-                sample_name = self.sample_name_textbox.value
-                sample_type = OPENBIS_OBJECT_TYPES["Sample"]
-                sample_props = {"name": sample_name, "object_status": "ACTIVE"}
-                sample_object = utils.create_openbis_object(
-                    self.openbis_session,
-                    type=sample_type,
-                    collection=OPENBIS_COLLECTIONS_PATHS["Sample"],
-                    props=sample_props,
-                    parents=[material_object],
-                )
-
-                display(Javascript(data="alert('Sample created successfully!')"))
-
-                logger.info(f"Sample {sample_object.permId} created successfully!")
-
-                # Clear interface
-                self.material_type_dropdown.value = "-1"
-                self.sample_name_textbox.value = ""
-
-
 class SampleHistoryWidget(ipw.VBox):
     def __init__(self, openbis_session):
         super().__init__()
@@ -454,14 +146,19 @@ class ProcessStepHistoryWidget(ipw.VBox):
 
         self.registration_date = self.openbis_object.registrationDate
 
-        if openbis_object_props["instrument"]:
-            instrument_id = openbis_object_props["instrument"]
-
-            instrument_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=instrument_id
-            )
-
-            self.instrument_html.value = instrument_object.props["name"]
+        instruments_codes = [
+            OPENBIS_OBJECT_CODES["Instrument"],
+            OPENBIS_OBJECT_CODES["Instrument STM"],
+        ]
+        openbis_object_parents = self.openbis_object.parents
+        for parent in openbis_object_parents:
+            parent_code = parent.split("/")[-1]
+            if parent_code[0:4] in instruments_codes:
+                instrument_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=parent
+                )
+                self.instrument_html.value = instrument_object.props["name"]
+                break
 
         self.load_actions()
         self.load_observables()
@@ -482,14 +179,14 @@ class ProcessStepHistoryWidget(ipw.VBox):
             self.actions_accordion.children = actions_accordion_children
 
     def load_observables(self):
-        observables_ids = self.openbis_object.props["observables"]
+        observables_ids = self.openbis_object.get_datasets(type="OBSERVABLE")
         if observables_ids:
             observables_accordion_children = []
             for i, obs_id in enumerate(observables_ids):
-                obs_object = utils.get_openbis_object(
+                obs_dataset = utils.get_openbis_dataset(
                     self.openbis_session, sample_ident=obs_id
                 )
-                obs_widget = ObservableHistoryWidget(self.openbis_session, obs_object)
+                obs_widget = ObservableHistoryWidget(self.openbis_session, obs_dataset)
                 observables_accordion_children.append(obs_widget)
                 obs_title = obs_widget.name_html.value
                 self.observables_accordion.set_title(i, obs_title)
@@ -541,40 +238,7 @@ class ActionHistoryWidget(ipw.VBox):
 
         widget_children = [self.name_hbox, self.description_hbox, self.duration_hbox]
 
-        if self.object_type == OPENBIS_OBJECT_TYPES["Annealing"]:
-            self.target_temperature_label = ipw.Label(value="Target temperature:")
-            self.target_temperature_html = ipw.HTML()
-            self.target_temperature_hbox = ipw.HBox(
-                children=[self.target_temperature_label, self.target_temperature_html]
-            )
-            widget_children.append(self.target_temperature_hbox)
-
-        elif self.object_type == OPENBIS_OBJECT_TYPES["Cooldown"]:
-            self.target_temperature_label = ipw.Label(value="Target temperature:")
-            self.target_temperature_html = ipw.HTML()
-            self.target_temperature_hbox = ipw.HBox(
-                children=[self.target_temperature_label, self.target_temperature_html]
-            )
-
-            self.cryogen_label = ipw.Label(value="Cryogen:")
-            self.cryogen_html = ipw.HTML()
-            self.cryogen_hbox = ipw.HBox(
-                children=[self.cryogen_label, self.cryogen_html]
-            )
-
-            widget_children.append(self.cryogen_hbox)
-            widget_children.append(self.target_temperature_hbox)
-
-        elif self.object_type == OPENBIS_OBJECT_TYPES["Deposition"]:
-            self.substrate_temperature_label = ipw.Label(value="Substrate temperature:")
-            self.substrate_temperature_html = ipw.HTML()
-            self.substrate_temperature_hbox = ipw.HBox(
-                children=[
-                    self.substrate_temperature_label,
-                    self.substrate_temperature_html,
-                ]
-            )
-
+        if self.object_type == OPENBIS_OBJECT_TYPES["Deposition"]:
             self.substance_label = ipw.Label(value="Substance:")
             self.substance_html = ipw.HTML()
             self.substance_hbox = ipw.HBox(
@@ -582,24 +246,8 @@ class ActionHistoryWidget(ipw.VBox):
             )
 
             widget_children.append(self.substance_hbox)
-            widget_children.append(self.substrate_temperature_hbox)
 
         elif self.object_type == OPENBIS_OBJECT_TYPES["Dosing"]:
-            self.substrate_temperature_label = ipw.Label(value="Substrate temperature:")
-            self.substrate_temperature_html = ipw.HTML()
-            self.substrate_temperature_hbox = ipw.HBox(
-                children=[
-                    self.substrate_temperature_label,
-                    self.substrate_temperature_html,
-                ]
-            )
-
-            self.pressure_label = ipw.Label(value="Pressure:")
-            self.pressure_html = ipw.HTML()
-            self.pressure_hbox = ipw.HBox(
-                children=[self.pressure_label, self.pressure_html]
-            )
-
             self.dosing_gas_label = ipw.Label(value="Dosing gas:")
             self.dosing_gas_html = ipw.HTML()
             self.dosing_gas_hbox = ipw.HBox(
@@ -607,46 +255,6 @@ class ActionHistoryWidget(ipw.VBox):
             )
 
             widget_children.append(self.dosing_gas_hbox)
-            widget_children.append(self.pressure_hbox)
-            widget_children.append(self.substrate_temperature_hbox)
-
-        elif self.object_type == OPENBIS_OBJECT_TYPES["Sputtering"]:
-            self.sputter_ion_label = ipw.Label(value="Sputter ion:")
-            self.sputter_ion_html = ipw.HTML()
-            self.sputter_ion_hbox = ipw.HBox(
-                children=[self.sputter_ion_label, self.sputter_ion_html]
-            )
-
-            self.pressure_label = ipw.Label(value="Pressure:")
-            self.pressure_html = ipw.HTML()
-            self.pressure_hbox = ipw.HBox(
-                children=[self.pressure_label, self.pressure_html]
-            )
-
-            self.current_label = ipw.Label(value="Current:")
-            self.current_html = ipw.HTML()
-            self.current_hbox = ipw.HBox(
-                children=[self.current_label, self.current_html]
-            )
-
-            self.angle_label = ipw.Label(value="Angle:")
-            self.angle_html = ipw.HTML()
-            self.angle_hbox = ipw.HBox(children=[self.angle_label, self.angle_html])
-
-            self.substrate_temperature_label = ipw.Label(value="Substrate temperature:")
-            self.substrate_temperature_html = ipw.HTML()
-            self.substrate_temperature_hbox = ipw.HBox(
-                children=[
-                    self.substrate_temperature_label,
-                    self.substrate_temperature_html,
-                ]
-            )
-
-            widget_children.append(self.sputter_ion_hbox)
-            widget_children.append(self.pressure_hbox)
-            widget_children.append(self.current_hbox)
-            widget_children.append(self.angle_hbox)
-            widget_children.append(self.substrate_temperature_hbox)
 
         widget_children.append(self.comments_hbox)
         widget_children.append(self.component_hbox)
@@ -669,46 +277,13 @@ class ActionHistoryWidget(ipw.VBox):
         if openbis_object_props["comments"]:
             self.comments_html.value = openbis_object_props["comments"]
 
-        if "target_temperature" in openbis_object_props:
-            target_temperature = openbis_object_props["target_temperature"]
-            if target_temperature:
-                self.target_temperature_html.value = utils.stringify_quantity_value(
-                    target_temperature, "unit"
-                )
-
-        if "cryogen" in openbis_object_props:
-            if openbis_object_props["cryogen"]:
-                self.cryogen_html.value = openbis_object_props["cryogen"]
-
-        if "substrate_temperature" in openbis_object_props:
-            substrate_temperature = openbis_object_props["substrate_temperature"]
-            if substrate_temperature:
-                self.substrate_temperature_html.value = utils.stringify_quantity_value(
-                    substrate_temperature, "unit"
-                )
-
         if "dosing_gas" in openbis_object_props:
-            if openbis_object_props["gas"]:
-                self.dosing_gas_html.value = openbis_object_props["gas"]
-
-        if "pressure" in openbis_object_props:
-            pressure = openbis_object_props["pressure"]
-            if pressure:
-                self.pressure_html.value = utils.stringify_quantity_value(
-                    pressure, "unit"
+            gas_id = openbis_object_props["dosing_gas"]
+            if gas_id:
+                gas_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=gas_id
                 )
-
-        if "current" in openbis_object_props:
-            current = openbis_object_props["current"]
-            if current:
-                self.current_html.value = utils.stringify_quantity_value(
-                    current, "unit"
-                )
-
-        if "angle" in openbis_object_props:
-            angle = openbis_object_props["angle"]
-            if angle:
-                self.angle_html.value = utils.stringify_quantity_value(angle, "unit")
+                self.dosing_gas_html.value = gas_object.props["name"]
 
         if "substance" in openbis_object_props:
             substance_id = openbis_object_props["substance"]
@@ -746,43 +321,44 @@ class ActionHistoryWidget(ipw.VBox):
                     # Erase file after downloading it
                     shutil.rmtree(f"images/{molecule_obj_preview.permId}")
 
-        component_id = openbis_object_props["component"]
-        if component_id:
-            component_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=component_id
-            )
-            self.component_html.value = component_object.props["name"]
+        for prop in openbis_object_props.keys():
+            if openbis_object_props[prop]:
+                prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
+                prop_sample_type = prop_type.sampleType
+                prop_sample_settings_type = prop_sample_type + "_SETTINGS"
+                
+                if prop_sample_type in OPENBIS_OBJECT_TYPES.values() and prop_sample_settings_type in OPENBIS_OBJECT_TYPES.values():
+                    component_id = openbis_object_props[prop]
+                    component_obj = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=component_id
+                    )
+                    component_name = component_obj.props["name"]
+                    self.component_settings_html.value += f"<p><b>Component:</b></p>" + component_name
+                    
+                    component_settings_id = openbis_object_props[prop + "_settings"]
+                    
+                    if component_settings_id:
+                        component_settings_obj = utils.get_openbis_object(
+                            self.openbis_session, sample_ident=component_settings_id
+                        )
+                        component_settings_obj = component_settings_obj.props()
+                        component_settings_obj.pop("name", None)
+                        component_settings_string = ""
+                        for prop_key, prop_value in component_settings_obj.items():
+                            prop_setting_type = utils.get_openbis_property_type(
+                                self.openbis_session, code=prop_key
+                            )
+                            prop_setting_label = prop_setting_type.label
+                            component_settings_string += f"<p>&bull; {prop_setting_label}: {prop_value}</p>"
 
-        if openbis_object_props["component_settings"]:
-            component_settings = json.loads(openbis_object_props["component_settings"])
-            component_settings_string = ""
-            for prop_key, prop_value in component_settings.items():
-                prop_type = utils.get_openbis_property_type(
-                    self.openbis_session, code=prop_key
-                )
-                prop_label = prop_type.label
-
-                # Convert quantity values from json objects to strings
-                if prop_value and isinstance(prop_value, dict):
-                    unit_type = ""
-                    for key in prop_value.keys():
-                        if key == "unit":
-                            unit_type = key
-                            break
-                    prop_value = utils.stringify_quantity_value(prop_value, unit_type)
-
-                component_settings_string += f"<p>&bull; {prop_label}: {prop_value}</p>"
-
-            self.component_settings_html.value = component_settings_string
+                        self.component_settings_html.value += f"<p><b>Component settings:</b></p>" + component_settings_string
 
 
 class ObservableHistoryWidget(ipw.VBox):
-    def __init__(self, openbis_session, openbis_object):
+    def __init__(self, openbis_session, openbis_dataset):
         super().__init__()
         self.openbis_session = openbis_session
-        self.openbis_object = openbis_object
-        self.observable_type = self.openbis_object.type.code
-        self.observable_type_lower = self.observable_type.lower()
+        self.openbis_dataset= openbis_dataset
 
         self.name_label = ipw.Label(value="Name:")
         self.name_html = ipw.HTML()
@@ -794,26 +370,30 @@ class ObservableHistoryWidget(ipw.VBox):
             children=[self.description_label, self.description_html]
         )
 
-        self.ch_name_label = ipw.Label(value="Channel name:")
-        self.ch_name_html = ipw.HTML()
-        self.ch_name_hbox = ipw.HBox(children=[self.ch_name_label, self.ch_name_html])
-
-        self.component_label = ipw.Label(value="Component:")
-        self.component_html = ipw.HTML()
-        self.component_hbox = ipw.HBox(
-            children=[self.component_label, self.component_html]
+        self.ch_names_label = ipw.Label(value="Channel(s) name(s):")
+        self.ch_names_html = ipw.HTML()
+        self.ch_names_hbox = ipw.HBox(children=[self.ch_names_label, self.ch_names_html])
+        
+        self.ch_units_label = ipw.Label(value="Channel(s) unit(s):")
+        self.ch_units_html = ipw.HTML()
+        self.ch_units_hbox = ipw.HBox(children=[self.ch_units_label, self.ch_units_html])
+        
+        self.timeseries_start_time_label = ipw.Label(value="Timeseries start time:")
+        self.timeseries_start_time_html = ipw.HTML()
+        self.timeseries_start_time_hbox = ipw.HBox(
+            children=[self.timeseries_start_time_label, self.timeseries_start_time_html]
+        )
+        
+        self.timeseries_end_time_label = ipw.Label(value="Timeseries end time:")
+        self.timeseries_end_time_html = ipw.HTML()
+        self.timeseries_end_time_hbox = ipw.HBox(
+            children=[self.timeseries_end_time_label, self.timeseries_end_time_html]
         )
 
-        self.component_settings_label = ipw.Label(value="Component settings:")
-        self.component_settings_html = ipw.HTML()
-        self.component_settings_hbox = ipw.HBox(
-            children=[self.component_settings_label, self.component_settings_html]
-        )
-
-        self.comments_label = ipw.Label(value="Comments:")
-        self.comments_html = ipw.HTML()
-        self.comments_hbox = ipw.HBox(
-            children=[self.comments_label, self.comments_html]
+        self.components_label = ipw.Label(value="Components:")
+        self.components_html = ipw.HTML()
+        self.components_hbox = ipw.HBox(
+            children=[self.components_label, self.components_html]
         )
 
         self.load_observable_data()
@@ -821,56 +401,41 @@ class ObservableHistoryWidget(ipw.VBox):
         self.children = [
             self.name_hbox,
             self.description_hbox,
-            self.comments_hbox,
-            self.ch_name_hbox,
-            self.component_hbox,
-            self.component_settings_hbox,
+            self.ch_names_hbox,
+            self.ch_units_hbox,
+            self.timeseries_start_time_hbox,
+            self.timeseries_end_time_hbox,
+            self.components_hbox,
         ]
 
     def load_observable_data(self):
-        openbis_object_props = self.openbis_object.props.all()
-        if openbis_object_props["name"]:
-            self.name_html.value = openbis_object_props["name"]
+        openbis_dataset_props = self.openbis_dataset.props.all()
+        if openbis_dataset_props["name"]:
+            self.name_html.value = openbis_dataset_props["name"]
 
-        if openbis_object_props["description"]:
-            self.description_html.value = openbis_object_props["description"]
+        if openbis_dataset_props["description"]:
+            self.description_html.value = openbis_dataset_props["description"]
 
-        if openbis_object_props["channel_name"]:
-            self.ch_name_html.value = openbis_object_props["channel_name"]
+        if openbis_dataset_props["channels_names"]:
+            self.ch_names_html.value = ", ".join(openbis_dataset_props["channels_names"])
 
-        if openbis_object_props["comments"]:
-            self.comments_html.value = openbis_object_props["comments"]
+        if openbis_dataset_props["channels_units"]:
+            self.ch_units_html.value = ", ".join(openbis_dataset_props["channels_units"])
 
-        component_id = openbis_object_props["component"]
+        if openbis_dataset_props["timeseries_start_time"]:
+            self.timeseries_start_time_html.value = openbis_dataset_props["timeseries_start_time"]
 
-        if component_id:
-            component_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=component_id
-            )
-            self.component_html.value = component_object.props["name"]
+        if openbis_dataset_props["timeseries_end_time"]:
+            self.timeseries_end_time_html.value = openbis_dataset_props["timeseries_end_time"]
 
-        if openbis_object_props["component_settings"]:
-            component_settings = json.loads(openbis_object_props["component_settings"])
-            component_settings_string = ""
-            for prop_key, prop_value in component_settings.items():
-                prop_type = utils.get_openbis_property_type(
-                    self.openbis_session, code=prop_key
+        components_ids = openbis_dataset_props["component"]
+
+        if components_ids:
+            for component_id in components_ids:
+                component_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=component_id
                 )
-                prop_label = prop_type.label
-
-                # Convert quantity values from json objects to strings
-                if prop_value and isinstance(prop_value, dict):
-                    unit_type = ""
-                    for key in prop_value.keys():
-                        if key == "unit":
-                            unit_type = key
-                            break
-                    prop_value = utils.stringify_quantity_value(prop_value, unit_type)
-
-                component_settings_string += f"<p>&bull; {prop_label}: {prop_value}</p>"
-
-            self.component_settings_html.value = component_settings_string
-
+                self.components_html.value += f"<p>{component_object.props['name']}</p>"
 
 class RegisterProcessWidget(ipw.VBox):
     def __init__(self, openbis_session):
