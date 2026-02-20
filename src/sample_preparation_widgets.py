@@ -324,7 +324,7 @@ class ActionHistoryWidget(ipw.VBox):
         for prop in openbis_object_props.keys():
             if openbis_object_props[prop]:
                 prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
-                prop_sample_type = prop_type.sampleType
+                prop_sample_type = str(prop_type.sampleType)
                 prop_sample_settings_type = prop_sample_type + "_SETTINGS"
                 
                 if prop_sample_type in OPENBIS_OBJECT_TYPES.values() and prop_sample_settings_type in OPENBIS_OBJECT_TYPES.values():
@@ -333,7 +333,7 @@ class ActionHistoryWidget(ipw.VBox):
                         self.openbis_session, sample_ident=component_id
                     )
                     component_name = component_obj.props["name"]
-                    self.component_settings_html.value += f"<p><b>Component:</b></p>" + component_name
+                    self.component_html.value += f"<p>{component_name}</p>"
                     
                     component_settings_id = openbis_object_props[prop + "_settings"]
                     
@@ -351,7 +351,7 @@ class ActionHistoryWidget(ipw.VBox):
                             prop_setting_label = prop_setting_type.label
                             component_settings_string += f"<p>&bull; {prop_setting_label}: {prop_value}</p>"
 
-                        self.component_settings_html.value += f"<p><b>Component settings:</b></p>" + component_settings_string
+                        self.component_settings_html.value += component_settings_string
 
 
 class ObservableHistoryWidget(ipw.VBox):
