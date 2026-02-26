@@ -3,13 +3,14 @@ from . import utils, widgets
 import pandas as pd
 import json
 from IPython.display import display, Javascript
-from collections import Counter
+from collections import Counter, defaultdict
 import shutil
 import base64
 import io
 import os
 import matplotlib.pyplot as plt
 import logging
+import custom_widgets as cw
 
 OBSERVABLES_TYPES = utils.read_json("metadata/observables_types.json")
 ACTIONS_TYPES = utils.read_json("metadata/actions_types.json")
@@ -1751,14 +1752,17 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.children = [
             self.name_hbox,
             self.description_hbox,
-            self.instrument_hbox,
             self.comments_hbox,
+            self.instrument_hbox,
             self.actions_vbox,
             self.observables_vbox,
             self.remove_process_step_button,
         ]
 
     def load_process_step(self, settings):
+        '''
+        Load process step settings from process template and populate the widgets accordingly.
+        '''
         self.name_textbox.value = settings.get("name", "")
         self.description_textbox.value = settings.get("description", "")
         self.instrument_dropdown.value = settings.get("instrument", "-1")
@@ -1853,6 +1857,7 @@ class RegisterActionWidget(ipw.VBox):
         self.actions_accordion = actions_accordion
         self.action_index = action_index
         self.instrument_permid = instrument_permid
+        self.instrument_components = self.find_instrument_components(instrument_permid)
 
         self.action_type_label = ipw.Label(value="Action type")
         action_type_options = [(key, value) for key, value in ACTIONS_TYPES.items()]
@@ -1866,278 +1871,12 @@ class RegisterActionWidget(ipw.VBox):
             children=[self.action_type_label, self.action_type_dropdown]
         )
         self.action_properties_widgets = ipw.VBox()
-
-        self.name_label = ipw.Label(value="Name")
-        self.name_textbox = ipw.Text()
-        self.name_hbox = ipw.HBox(children=[self.name_label, self.name_textbox])
-
-        self.description_label = ipw.Label(value="Description")
-        self.description_textbox = ipw.Text()
-        self.description_hbox = ipw.HBox(
-            children=[self.description_label, self.description_textbox]
-        )
-
-        self.duration_label = ipw.Label(value="Duration")
-        self.duration_days_intbox = ipw.BoundedIntText(
-            value=0, min=0, layout=ipw.Layout(width="40px")
-        )
-        self.duration_days_label = ipw.Label("days")
-        self.duration_hours_intbox = ipw.BoundedIntText(
-            value=0, max=23, layout=ipw.Layout(width="40px")
-        )
-        self.duration_hours_label = ipw.Label(":")
-        self.duration_minutes_intbox = ipw.BoundedIntText(
-            value=0, max=59, layout=ipw.Layout(width="40px")
-        )
-        self.duration_minutes_label = ipw.Label(":")
-        self.duration_seconds_intbox = ipw.BoundedIntText(
-            value=0, max=59, layout=ipw.Layout(width="40px")
-        )
-        self.duration_hbox = ipw.HBox(
-            children=[
-                self.duration_label,
-                self.duration_days_intbox,
-                self.duration_days_label,
-                self.duration_hours_intbox,
-                self.duration_hours_label,
-                self.duration_minutes_intbox,
-                self.duration_minutes_label,
-                self.duration_seconds_intbox,
-            ]
-        )
-
-        self.substance_label = ipw.Label(value="Substance")
-        substances_list = utils.get_openbis_objects(
-            self.openbis_session,
-            collection=OPENBIS_COLLECTIONS_PATHS["Precursor Substance"],
-            type=OPENBIS_OBJECT_TYPES["Substance"],
-        )
-
-        substances_names_ids = []
-        for obj in substances_list:
-            obj_props = obj.props.all()
-            if "empa_number" in obj_props and "batch" in obj_props:
-                name = obj_props["empa_number"] + obj_props["batch"]
-                if "vial" in obj_props:
-                    if obj_props["vial"]:
-                        name += obj_props["vial"]
-                substances_names_ids.append((name, obj.permId))
-            else:
-                logging.info(f"Substance {obj.permId} is missing EMPA number or batch.")
-
-        substance_options = substances_names_ids
-        substance_options.insert(0, ("Select a substance...", "-1"))
-        self.substance_dropdown = ipw.Dropdown(options=substance_options, value="-1")
-        self.substance_mol_image = ipw.Image(
-            layout=ipw.Layout(width="100px", height="100px")
-        )
-        self.substance_hbox = ipw.HBox(
-            children=[
-                self.substance_label,
-                self.substance_dropdown,
-                self.substance_mol_image,
-            ]
-        )
-
-        self.gas_label = ipw.Label(value="Dosing gas")
-        gas_list = utils.get_openbis_objects(
-            self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Chemical"]
-        )
-        gas_options = [(obj.props["name"], obj.permId) for obj in gas_list]
-        gas_options.insert(0, ("Select a dosing gas...", "-1"))
-        self.gas_dropdown = ipw.Dropdown(options=gas_options, value="-1")
-        self.gas_hbox = ipw.HBox(children=[self.gas_label, self.gas_dropdown])
-
-        self.target_temperature_label = ipw.Label("Target temperature")
-        self.target_temperature_value_textbox = ipw.Text()
-        self.target_temperature_unit_dropdown = ipw.Dropdown(
-            options=["K", "C"], value="C"
-        )
-        self.target_temperature_hbox = ipw.HBox(
-            children=[
-                self.target_temperature_label,
-                self.target_temperature_value_textbox,
-                self.target_temperature_unit_dropdown,
-            ]
-        )
-
-        self.cryogen_label = ipw.Label("Cryogen")
-        self.cryogen_textbox = ipw.Text()
-        self.cryogen_hbox = ipw.HBox(
-            children=[self.cryogen_label, self.cryogen_textbox]
-        )
-
-        self.substrate_temperature_label = ipw.Label("Substrate temperature")
-        self.substrate_temperature_value_textbox = ipw.Text()
-        self.substrate_temperature_unit_dropdown = ipw.Dropdown(
-            options=["K", "C"], value="C"
-        )
-        self.substrate_temperature_hbox = ipw.HBox(
-            children=[
-                self.substrate_temperature_label,
-                self.substrate_temperature_value_textbox,
-                self.substrate_temperature_unit_dropdown,
-            ]
-        )
-
-        self.pressure_label = ipw.Label("Pressure")
-        self.pressure_value_textbox = ipw.Text()
-        self.pressure_unit_dropdown = ipw.Dropdown(options=["mBar", "Pa"], value="mBar")
-        self.pressure_hbox = ipw.HBox(
-            children=[
-                self.pressure_label,
-                self.pressure_value_textbox,
-                self.pressure_unit_dropdown,
-            ]
-        )
-
-        self.sputter_ion_label = ipw.Label("Sputter Ion")
-        self.sputter_ion_textbox = ipw.Text()
-        self.sputter_ion_hbox = ipw.HBox(
-            children=[self.sputter_ion_label, self.sputter_ion_textbox]
-        )
-
-        self.current_label = ipw.Label("Current")
-        self.current_value_textbox = ipw.Text()
-        self.current_unit_dropdown = ipw.Dropdown(options=["A", "mA"], value="A")
-        self.current_hbox = ipw.HBox(
-            children=[
-                self.current_label,
-                self.current_value_textbox,
-                self.current_unit_dropdown,
-            ]
-        )
-
-        self.angle_label = ipw.Label("Angle")
-        self.angle_value_textbox = ipw.Text()
-        self.angle_unit_dropdown = ipw.Dropdown(options=["deg"], value="deg")
-        self.angle_hbox = ipw.HBox(
-            children=[
-                self.angle_label,
-                self.angle_value_textbox,
-                self.angle_unit_dropdown,
-            ]
-        )
-
-        self.instrument_type_components_dictionary = {
-            OPENBIS_OBJECT_TYPES["Instrument STM"]: [
-                "pumps",
-                "gauges",
-                "vacuum_chambers",
-                "ports_valves",
-                "preparation_tools",
-                "analysers",
-                "mechanical_components",
-                "stm_components",
-                "control_data_acquisition",
-                "temperature_environment_control",
-                "auxiliary_components",
-                "tips_sensors",
-                "accessories",
-            ]
-        }
-
-        self.component_label = ipw.Label(value="Component")
-        self.component_dropdown = ipw.Dropdown()
-        self.component_hbox = ipw.HBox(
-            children=[self.component_label, self.component_dropdown]
-        )
-        self.component_settings_label = ipw.Label(value="Component settings:")
-        self.component_settings_vbox = ipw.VBox()
-        self.component_settings_hbox = ipw.HBox(
-            children=[self.component_settings_label, self.component_settings_vbox]
-        )
-        self.component_vbox = ipw.VBox(
-            children=[self.component_hbox, self.component_settings_hbox]
-        )
-
-        # BEGIN - Widgets for component properties
-        self.bias_voltage_label = ipw.Label("Bias voltage")
-        self.bias_voltage_value_textbox = ipw.Text()
-        self.bias_voltage_unit_dropdown = ipw.Dropdown(options=["V", "mV"], value="V")
-        self.bias_voltage_hbox = ipw.HBox(
-            children=[
-                self.bias_voltage_label,
-                self.bias_voltage_value_textbox,
-                self.bias_voltage_unit_dropdown,
-            ]
-        )
-
-        self.discharge_voltage_label = ipw.Label("Discharge voltage")
-        self.discharge_voltage_value_textbox = ipw.Text()
-        self.discharge_voltage_unit_dropdown = ipw.Dropdown(
-            options=["V", "kV"], value="V"
-        )
-        self.discharge_voltage_hbox = ipw.HBox(
-            children=[
-                self.discharge_voltage_label,
-                self.discharge_voltage_value_textbox,
-                self.discharge_voltage_unit_dropdown,
-            ]
-        )
-
-        self.discharge_current_label = ipw.Label("Discharge current")
-        self.discharge_current_value_textbox = ipw.Text()
-        self.discharge_current_unit_dropdown = ipw.Dropdown(
-            options=["A", "mA"], value="A"
-        )
-        self.discharge_current_hbox = ipw.HBox(
-            children=[
-                self.discharge_current_label,
-                self.discharge_current_value_textbox,
-                self.discharge_current_unit_dropdown,
-            ]
-        )
-
-        # Target temperature set in the component
-        self.target_temperature_comp_label = ipw.Label("Target temperature")
-        self.target_temperature_value_comp_textbox = ipw.Text()
-        self.target_temperature_unit_comp_dropdown = ipw.Dropdown(
-            options=["K", "C"], value="C"
-        )
-        self.target_temperature_comp_hbox = ipw.HBox(
-            children=[
-                self.target_temperature_comp_label,
-                self.target_temperature_value_comp_textbox,
-                self.target_temperature_unit_comp_dropdown,
-            ]
-        )
-
-        self.evaporator_p_value_label = ipw.Label("P-value")
-        self.evaporator_p_value_textbox = ipw.Text()
-        self.evaporator_p_value_hbox = ipw.HBox(
-            children=[self.evaporator_p_value_label, self.evaporator_p_value_textbox]
-        )
-
-        self.evaporator_i_value_label = ipw.Label("I-value")
-        self.evaporator_i_value_textbox = ipw.Text()
-        self.evaporator_i_value_hbox = ipw.HBox(
-            children=[self.evaporator_i_value_label, self.evaporator_i_value_textbox]
-        )
-
-        self.ep_percentage_label = ipw.Label("EP (%)")
-        self.ep_percentage_textbox = ipw.Text()
-        self.ep_percentage_hbox = ipw.HBox(
-            children=[self.ep_percentage_label, self.ep_percentage_textbox]
-        )
-
-        self.components_properties_widgets = {
-            "target_temperature": self.target_temperature_comp_hbox,
-            "bias_voltage": self.bias_voltage_hbox,
-            "discharge_voltage": self.discharge_voltage_hbox,
-            "discharge_current": self.discharge_current_hbox,
-            "p_value": self.evaporator_p_value_hbox,
-            "i_value": self.evaporator_i_value_hbox,
-            "ep_percentage": self.ep_percentage_hbox,
-        }
-        # END - Widgets for component properties
-
-        self.comments_label = ipw.Label(value="Comments")
-        self.comments_textarea = ipw.Textarea()
-        self.comments_hbox = ipw.HBox(
-            children=[self.comments_label, self.comments_textarea]
-        )
-
+        
+        self.all_actions_properties = dict()
+        for action_type in ACTIONS_TYPES.values():
+            action_type_props = utils.get_openbis_object_type(openbis_session, type=action_type).get_property_assignments().df.code.values
+            self.all_actions_properties.update({prop: None for prop in action_type_props})
+        
         self.remove_action_button = ipw.Button(
             description="Remove",
             disabled=False,
@@ -2145,13 +1884,8 @@ class RegisterActionWidget(ipw.VBox):
             tooltip="Remove action",
             layout=ipw.Layout(width="150px", height="25px"),
         )
-
-        self.name_textbox.observe(self.change_action_title, names="value")
+        
         self.action_type_dropdown.observe(self.load_action_properties, names="value")
-        self.component_dropdown.observe(
-            self.load_component_settings_list, names="value"
-        )
-        self.substance_dropdown.observe(self.load_substance_mol_image, names="value")
         self.remove_action_button.on_click(self.remove_action)
 
         if action_settings:
@@ -2162,16 +1896,48 @@ class RegisterActionWidget(ipw.VBox):
             self.action_properties_widgets,
             self.remove_action_button,
         ]
+    
+    def find_instrument_components(self, instrument_permid):
+        obj = self.openbis_session.get_object(instrument_permid)
+        obj_type = str(obj.type)
+        
+        assignments_df = utils.get_openbis_object_type(self.openbis_session, type=obj_type).get_property_assignments().df
+        
+        component_ids_to_fetch = []
+        
+        for _, row in assignments_df.iterrows():
+            prop_code = row['code']
+            prop_type = row.get('dataType')
+            if not prop_type:
+                prop_type = utils.get_property_type(self.openbis_session, prop_code).dataType
+                
+            if prop_type == "SAMPLE":
+                prop_value = obj.props[prop_code.lower()]
+                if prop_value:
+                    if not isinstance(prop_value, list):
+                        prop_value = [prop_value]
+                    
+                    component_ids_to_fetch.extend(prop_value)
+        
+        all_components = defaultdict(list)
+        if component_ids_to_fetch:
+            fetched_components = utils.get_openbis_objects(self.openbis_session, component_ids_to_fetch)
+            for comp_obj in fetched_components:
+                comp_obj_type = str(comp_obj.type)
+                all_components[comp_obj_type].append(comp_obj)
+                
+        return dict(all_components)
 
     def load_substance_mol_image(self, change):
-        substance_id = self.substance_dropdown.value
+        print(change)
+        substance_id = change["new"]
         if substance_id == "-1":
             self.substance_mol_image.value = b""
         else:
             substance_obj = utils.get_openbis_object(
                 self.openbis_session, sample_ident=substance_id
             )
-            substance_mols_ids = substance_obj.props["molecules"]
+            substance_mols_ids = substance_obj.get_parents(type="MOLECULE").df.permId.values
             if substance_mols_ids:
                 mol_id = substance_mols_ids[0]
                 molecule_obj = utils.get_openbis_object(
@@ -2320,219 +2086,189 @@ class RegisterActionWidget(ipw.VBox):
         action_type = self.action_type_dropdown.value
         if action_type == "-1":
             self.action_properties_widgets.children = []
-        else:
-            action_properties = [
-                self.name_hbox,
-                self.description_hbox,
-                self.duration_hbox,
-            ]
+            return
 
-            if action_type == OPENBIS_OBJECT_TYPES["Annealing"]:
-                action_properties.append(self.target_temperature_hbox)
-                self.action_icon = "🔥"
-
-            elif action_type == OPENBIS_OBJECT_TYPES["Cooldown"]:
-                action_properties.append(self.target_temperature_hbox)
-                action_properties.append(self.cryogen_hbox)
-                self.action_icon = "❄️"
-
-            elif action_type == OPENBIS_OBJECT_TYPES["Deposition"]:
-                action_properties.append(self.substance_hbox)
-                action_properties.append(self.substrate_temperature_hbox)
-                self.action_icon = "🟫"
-
-            elif action_type == OPENBIS_OBJECT_TYPES["Dosing"]:
-                action_properties.append(self.substrate_temperature_hbox)
-                action_properties.append(self.pressure_hbox)
-                action_properties.append(self.gas_hbox)
-                self.action_icon = "💧"
-
-            elif action_type == OPENBIS_OBJECT_TYPES["Sputtering"]:
-                action_properties.append(self.pressure_hbox)
-                action_properties.append(self.current_hbox)
-                action_properties.append(self.angle_hbox)
-                action_properties.append(self.substrate_temperature_hbox)
-                action_properties.append(self.sputter_ion_hbox)
-                self.action_icon = "🔫"
-
-            elif action_type == OPENBIS_OBJECT_TYPES["Coating"]:
-                self.action_icon = "🧥"
-            elif action_type == OPENBIS_OBJECT_TYPES["Delamination"]:
-                self.action_icon = "🧩"
-            elif action_type == OPENBIS_OBJECT_TYPES["Etching"]:
-                self.action_icon = "📌"
-            elif action_type == OPENBIS_OBJECT_TYPES["Fishing"]:
-                self.action_icon = "🎣"
-            elif action_type == OPENBIS_OBJECT_TYPES["Field Emission"]:
-                self.action_icon = "⚡"
-            elif action_type == OPENBIS_OBJECT_TYPES["Light Irradiation"]:
-                self.action_icon = "💡"
-            elif action_type == OPENBIS_OBJECT_TYPES["Mechanical Pressing"]:
-                self.action_icon = "🔩"
-            elif action_type == OPENBIS_OBJECT_TYPES["Rinse"]:
-                self.action_icon = "🚿"
-
-            action_properties.append(self.component_hbox)
-            action_properties.append(self.component_settings_hbox)
-            action_properties.append(self.comments_hbox)
-
-            component_options = self.get_instrument_components(
-                self.instrument_permid, action_type
-            )
-            component_options.insert(0, ("Select a component...", "-1"))
-            self.component_dropdown.options = component_options
-            self.component_dropdown.value = "-1"
-
-            self.action_properties_widgets.children = action_properties
-
-            self.actions_accordion.set_title(self.action_index, self.action_icon)
-
-    def get_instrument_components(self, instrument_permid, action_type):
-        component_list = []
-        if instrument_permid != "-1":
-            instrument_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=instrument_permid
-            )
-            instrument_type = instrument_object.type.code
-            instrument_components_properties = (
-                self.instrument_type_components_dictionary[instrument_type]
-            )
-            all_instrument_components = []
-            for prop in instrument_components_properties:
-                prop_value = instrument_object.props[prop]
-                if prop_value:
-                    for component_id in prop_value:
-                        component_object = utils.get_openbis_object(
-                            self.openbis_session, sample_ident=component_id
-                        )
-                        all_instrument_components.append(component_object)
-
-                        # Evaporators contain sub-components (evaporator slots)
-                        evaporator_type = OPENBIS_OBJECT_TYPES["Evaporator"]
-                        if component_object.type == evaporator_type:
-                            evaporator_slots = component_object.props[
-                                "evaporator_slots"
-                            ]
-                            if evaporator_slots:
-                                for evaporator_slot_id in evaporator_slots:
-                                    evaporator_slot_object = utils.get_openbis_object(
-                                        self.openbis_session,
-                                        sample_ident=evaporator_slot_id,
-                                    )
-                                    all_instrument_components.append(
-                                        evaporator_slot_object
-                                    )
-
-            for component_object in all_instrument_components:
-                component_actions_settings_prop = component_object.props[
-                    "actions_settings"
-                ]
-                if component_actions_settings_prop:
-                    component_actions_settings = json.loads(
-                        component_actions_settings_prop
-                    )
-                    for component_action_settings in component_actions_settings:
-                        component_action_type = component_action_settings["action_type"]
-                        if action_type == component_action_type:
-                            component_list.append(
-                                (
-                                    component_object.props["name"],
-                                    component_object.permId,
-                                )
-                            )
-        return component_list
-
-    def load_component_settings_list(self, change):
-        action_type = self.action_type_dropdown.value
-        if action_type != "-1":
-            component_permid = self.component_dropdown.value
-            if component_permid != "-1":
-                component_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=component_permid
+        icon_mapping = {
+            OPENBIS_OBJECT_TYPES.get("Annealing"): "🔥",
+            OPENBIS_OBJECT_TYPES.get("Cooldown"): "❄️",
+            OPENBIS_OBJECT_TYPES.get("Deposition"): "🟫",
+            OPENBIS_OBJECT_TYPES.get("Dosing"): "💧",
+            OPENBIS_OBJECT_TYPES.get("Sputtering"): "🔫",
+            OPENBIS_OBJECT_TYPES.get("Coating"): "🧥",
+            OPENBIS_OBJECT_TYPES.get("Delamination"): "🧩",
+            OPENBIS_OBJECT_TYPES.get("Etching"): "📌",
+            OPENBIS_OBJECT_TYPES.get("Fishing"): "🎣",
+            OPENBIS_OBJECT_TYPES.get("Field Emission"): "⚡",
+            OPENBIS_OBJECT_TYPES.get("Light Irradiation"): "💡",
+            OPENBIS_OBJECT_TYPES.get("Mechanical Pressing"): "🔩",
+            OPENBIS_OBJECT_TYPES.get("Rinse"): "🚿"
+        }
+        self.action_icon = icon_mapping.get(action_type, "⚙️")
+        self.actions_accordion.set_title(self.action_index, self.action_icon)
+        
+        action_properties = utils.get_openbis_object_type(
+            self.openbis_session, type=action_type
+        ).get_property_assignments().df.code.values
+        
+        action_component_types = []
+        action_properties_widgets = []
+        component_widgets_appended = False
+        
+        comp_widget_ref = None
+        comp_settings_widget_ref = None
+        
+        widget_type_map = {
+            "VARCHAR": ipw.Text,
+            "MULTILINE_VARCHAR": ipw.Textarea,
+            "BOOLEAN": ipw.Checkbox,
+            "REAL": ipw.FloatText,
+            "INTEGER": ipw.IntText
+        }
+        
+        for prop in action_properties:
+            prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
+            prop_label = str(prop_type.label)
+            prop_dataType = str(prop_type.dataType)
+            prop_sampleType = str(prop_type.sampleType)
+            
+            if f"{prop}_SETTINGS" in action_properties and prop_dataType in ["SAMPLE", "OBJECT"]:
+                action_component_types.append(prop_sampleType)
+                if not component_widgets_appended:
+                    component_widgets_appended = True
+                    comp_widget_ref = cw.HBox(children=[ipw.Label(value="Component"), ipw.Text()], metadata={"property_name": "COMPONENT"})
+                    comp_settings_widget_ref = cw.HBox(children=[ipw.Label(value="Component settings"), ipw.Text()], metadata={"property_name": "COMPONENT_SETTINGS"})
+                    action_properties_widgets.extend([comp_widget_ref, comp_settings_widget_ref])
+                
+            elif prop == "DURATION":
+                duration_widgets = cw.HBox(
+                    children=[
+                        ipw.Label(value="Duration"),
+                        ipw.BoundedIntText(value=0, min=0, layout=ipw.Layout(width="40px")), ipw.Label("days"),
+                        ipw.BoundedIntText(value=0, max=23, layout=ipw.Layout(width="40px")), ipw.Label(":"),
+                        ipw.BoundedIntText(value=0, max=59, layout=ipw.Layout(width="40px")), ipw.Label(":"),
+                        ipw.BoundedIntText(value=0, max=59, layout=ipw.Layout(width="40px")),
+                    ],
+                    metadata={"property_name": prop}
                 )
-                component_settings_property = component_object.props["actions_settings"]
-                component_settings_widgets = []
-                if component_settings_property:
-                    component_settings = json.loads(component_settings_property)
-                    for settings in component_settings:
-                        if action_type == settings["action_type"]:
-                            settings_properties = settings.get(
-                                "component_properties", {}
-                            )
-                            for prop in settings_properties:
-                                setting_widget = self.components_properties_widgets.get(
-                                    prop, None
-                                )
-                                if setting_widget:
-                                    if component_object.props[prop]:
-                                        if prop == "target_temperature":
-                                            target_temperature_comp = json.loads(
-                                                component_object.props[prop]
-                                            )
-                                            self.target_temperature_value_comp_textbox.value = target_temperature_comp[
-                                                "value"
-                                            ]
-                                            self.target_temperature_unit_comp_dropdown.value = target_temperature_comp[
-                                                "unit"
-                                            ]
+                action_properties_widgets.append(duration_widgets)
+                
+            elif prop == "SUBSTANCE":
+                substances_list = utils.get_openbis_objects(
+                    self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Precursor Substance"], type=OPENBIS_OBJECT_TYPES["Substance"]
+                )
+                substance_options = [("Select a substance...", "-1")]
+                for obj in substances_list:
+                    props = obj.props.all()
+                    if "empa_number" in props and "batch" in props:
+                        name = f"{props['empa_number']}{props['batch']}"
+                        substance_options.append((name, obj.permId))
+                    else:
+                        logging.info(f"Substance {obj.permId} is missing EMPA number or batch.")
+                
+                self.substance_dropdown = ipw.Dropdown(options=substance_options, value="-1")
+                self.substance_mol_image = ipw.Image(layout=ipw.Layout(width="100px", height="100px"))
+                
+                self.substance_dropdown.observe(self.load_substance_mol_image, names="value")
 
-                                        elif prop == "bias_voltage":
-                                            bias_voltage_comp = json.loads(
-                                                component_object.props[prop]
-                                            )
-                                            self.bias_voltage_value_textbox.value = (
-                                                bias_voltage_comp["value"]
-                                            )
-                                            self.bias_voltage_unit_dropdown.value = (
-                                                bias_voltage_comp["unit"]
-                                            )
+                substance_widgets = cw.HBox(
+                    children=[
+                        ipw.Label(value="Substance"), 
+                        self.substance_dropdown, 
+                        self.substance_mol_image
+                    ],
+                    metadata={"property_name": prop}
+                )
+                action_properties_widgets.append(substance_widgets)
+            
+            elif prop == "GAS":
+                gas_list = utils.get_openbis_objects(self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Chemical"])
+                gas_options = [("Select a dosing gas...", "-1")] + [(obj.props["name"], obj.permId) for obj in gas_list]
+                action_properties_widgets.append(cw.HBox(children=[ipw.Label(value="Dosing gas"), ipw.Dropdown(options=gas_options, value="-1")], metadata={"property_name": prop}))
+                
+            else:
+                if prop_dataType not in widget_type_map:
+                    continue
+                
+                prop_value_widget = widget_type_map[prop_dataType]()
+                if prop == "NAME":
+                    prop_value_widget.observe(self.change_action_title, names="value")
+                
+                action_properties_widgets.append(cw.HBox(children=[ipw.Label(value=prop_label), prop_value_widget], metadata={"property_name": prop}))
+        
+        actions_components = [("Select a component...", "-1")]
+        for component_type in action_component_types:
+            component_objs = utils.get_openbis_objects(self.openbis_session, type=component_type)
+            actions_components.extend([(obj.props["name"], obj.permId) for obj in component_objs])
+        
+        if len(actions_components) > 1 and comp_widget_ref and comp_settings_widget_ref:
+            component_dropdown = ipw.Dropdown(options=actions_components, value="-1")
+            component_settings_dropdown = ipw.Dropdown(options=[("Select component settings...", "-1")], value="-1")
+            
+            comp_widget_ref.children = [comp_widget_ref.children[0], component_dropdown]
+            comp_settings_widget_ref.children = [comp_settings_widget_ref.children[0], component_settings_dropdown]
 
-                                        elif prop == "discharge_voltage":
-                                            discharge_voltage_comp = json.loads(
-                                                component_object.props[prop]
-                                            )
-                                            self.discharge_voltage_value_textbox.value = discharge_voltage_comp[
-                                                "value"
-                                            ]
-                                            self.discharge_voltage_unit_dropdown.value = discharge_voltage_comp[
-                                                "unit"
-                                            ]
+            def load_component_settings(change):
+                permid = change["new"]
+                settings_vbox = comp_settings_widget_ref.children[-1] if len(comp_settings_widget_ref.children) > 2 else None
+                if not settings_vbox: return
+                
+                if permid != "-1":
+                    component_settings_obj = utils.get_openbis_object(self.openbis_session, sample_ident=permid)
+                    props = {k.upper(): v for k, v in component_settings_obj.props().items()}
+                    
+                    for widget in settings_vbox.children:
+                        prop_name = widget.metadata["property_name"]
+                        if prop_name in props:
+                            widget.children[1].value = props[prop_name]
+                else:
+                    # Reset widgets
+                    for widget in settings_vbox.children:
+                        target = widget.children[1]
+                        if isinstance(target, (ipw.Text, ipw.Textarea)): target.value = ""
+                        elif isinstance(target, ipw.Checkbox): target.value = False
+                        elif isinstance(target, (ipw.FloatText, ipw.IntText)): target.value = 0
 
-                                        elif prop == "discharge_current":
-                                            discharge_current_comp = json.loads(
-                                                component_object.props[prop]
-                                            )
-                                            self.discharge_current_value_textbox.value = discharge_current_comp[
-                                                "value"
-                                            ]
-                                            self.discharge_current_unit_dropdown.value = discharge_current_comp[
-                                                "unit"
-                                            ]
+            def load_component_settings_list(change):
+                permid = change["new"]
+                # Reset children to just label and dropdown
+                comp_settings_widget_ref.children = [comp_settings_widget_ref.children[0], component_settings_dropdown]
+                
+                if permid != "-1":
+                    component_obj = utils.get_openbis_object(self.openbis_session, sample_ident=permid)
+                    settings_type = f"{component_obj.type}_SETTINGS"
+                    
+                    settings_objs = utils.get_openbis_objects(self.openbis_session, type=settings_type)
+                    component_settings_dropdown.options = [("Select component settings...", "-1")] + [(obj.props()["name"], obj.permId) for obj in settings_objs]
+                    component_settings_dropdown.value = "-1"
+                    
+                    # Generate settings property widgets dynamically
+                    prop_types = utils.get_openbis_object_type(self.openbis_session, type=settings_type).get_property_assignments().df.code.values
+                    settings_props_widgets = []
+                    for s_prop in prop_types:
+                        if s_prop == "NAME": continue
+                        s_prop_type = utils.get_openbis_property_type(self.openbis_session, code=s_prop)
+                        s_dataType = str(s_prop_type.dataType)
+                        
+                        if s_dataType in widget_type_map:
+                            w = widget_type_map[s_dataType]()
+                            settings_props_widgets.append(cw.HBox(children=[ipw.Label(value=str(s_prop_type.label)), w], metadata={"property_name": s_prop}))
+                    
+                    # Append VBox of new properties
+                    comp_settings_widget_ref.children = list(comp_settings_widget_ref.children) + [ipw.VBox(children=settings_props_widgets)]
+                    component_settings_dropdown.observe(load_component_settings, names="value")
+                else:
+                    component_settings_dropdown.options = [("Select component settings...", "-1")]
+                    component_settings_dropdown.value = "-1"
+                
+                self.action_properties_widgets.children = action_properties_widgets
 
-                                        elif prop == "p_value":
-                                            self.evaporator_p_value_textbox.value = str(
-                                                component_object.props[prop]
-                                            )
+            component_dropdown.observe(load_component_settings_list, names="value")
 
-                                        elif prop == "i_value":
-                                            self.evaporator_i_value_textbox.value = str(
-                                                component_object.props[prop]
-                                            )
-
-                                        elif prop == "ep_percentage":
-                                            self.ep_percentage_textbox.value = str(
-                                                component_object.props[prop]
-                                            )
-
-                                    component_settings_widgets.append(
-                                        self.components_properties_widgets[prop]
-                                    )
-                self.component_settings_vbox.children = component_settings_widgets
-
+        self.action_properties_widgets.children = action_properties_widgets
+        
     def change_action_title(self, change):
-        title = self.name_textbox.value
         self.actions_accordion.set_title(
-            self.action_index, f"{self.action_icon} {title}"
+            self.action_index, f"{self.action_icon} {change['new']}"
         )
 
     def remove_action(self, b):

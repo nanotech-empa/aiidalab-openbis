@@ -13,33 +13,35 @@ string_io = io.StringIO()
 # OpenBIS-AiiDAlab functions
 
 
-def get_openbis_collections(openbis_session, **kwargs):
-    return openbis_session.get_collections(**kwargs)
+def get_openbis_collections(openbis_session, *args, **kwargs):
+    return openbis_session.get_collections(*args, **kwargs)
 
 
-def get_openbis_projects(openbis_session, **kwargs):
-    return openbis_session.get_projects(**kwargs)
+def get_openbis_projects(openbis_session, *args, **kwargs):
+    return openbis_session.get_projects(*args, **kwargs)
 
-def get_openbis_datasets(openbis_session, **kwargs):
-    return openbis_session.get_datasets(**kwargs)
+def get_openbis_datasets(openbis_session, *args, **kwargs):
+    return openbis_session.get_datasets(*args, **kwargs)
 
-def get_openbis_dataset(openbis_session, **kwargs):
-    return openbis_session.get_dataset(**kwargs)
+def get_openbis_dataset(openbis_session, *args, **kwargs):
+    return openbis_session.get_dataset(*args, **kwargs)
 
-def get_openbis_objects(openbis_session, **kwargs):
-    return openbis_session.get_objects(**kwargs)
-
-
-def get_openbis_object(openbis_session, **kwargs):
-    return openbis_session.get_object(**kwargs)
+def get_openbis_objects(openbis_session, *args, **kwargs):
+    return openbis_session.get_objects(*args, **kwargs)
 
 
-def get_openbis_collection(openbis_session, **kwargs):
-    return openbis_session.get_collection(**kwargs)
+def get_openbis_object(openbis_session, *args, **kwargs):
+    return openbis_session.get_object(*args, **kwargs)
 
 
-def get_openbis_property_type(openbis_session, **kwargs):
-    return openbis_session.get_property_type(**kwargs)
+def get_openbis_collection(openbis_session, *args, **kwargs):
+    return openbis_session.get_collection(*args, **kwargs)
+
+def get_openbis_object_type(openbis_session, *args, **kwargs):
+    return openbis_session.get_object_type(*args, **kwargs)
+
+def get_openbis_property_type(openbis_session, *args, **kwargs):
+    return openbis_session.get_property_type(*args, **kwargs)
 
 
 def find_first_atomistic_model(openbis_session, openbis_object, openbis_type):
