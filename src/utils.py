@@ -40,6 +40,9 @@ def get_openbis_collection(openbis_session, *args, **kwargs):
 def get_openbis_object_type(openbis_session, *args, **kwargs):
     return openbis_session.get_object_type(*args, **kwargs)
 
+def get_openbis_dataset_type(openbis_session, *args, **kwargs):
+    return openbis_session.get_dataset_type(*args, **kwargs)
+
 def get_openbis_property_type(openbis_session, *args, **kwargs):
     return openbis_session.get_property_type(*args, **kwargs)
 

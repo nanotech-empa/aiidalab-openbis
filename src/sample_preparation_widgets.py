@@ -201,158 +201,141 @@ class ActionHistoryWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.openbis_object = openbis_object
         self.object_type = self.openbis_object.type.code
-        self.object_type_lower = self.object_type.lower()
-
-        self.name_label = ipw.Label(value="Name:")
+        
+        # Standard Properties
         self.name_html = ipw.HTML()
-        self.name_hbox = ipw.HBox(children=[self.name_label, self.name_html])
-
-        self.duration_label = ipw.Label(value="Duration:")
         self.duration_html = ipw.HTML()
-        self.duration_hbox = ipw.HBox(
-            children=[self.duration_label, self.duration_html]
-        )
-
-        self.description_label = ipw.Label(value="Description:")
         self.description_html = ipw.HTML()
-        self.description_hbox = ipw.HBox(
-            children=[self.description_label, self.description_html]
-        )
-
-        self.component_label = ipw.Label(value="Component:")
-        self.component_html = ipw.HTML()
-        self.component_hbox = ipw.HBox(
-            children=[self.component_label, self.component_html]
-        )
-
-        self.component_settings_label = ipw.Label(value="Component settings:")
-        self.component_settings_html = ipw.HTML()
-        self.component_settings_hbox = ipw.HBox(
-            children=[self.component_settings_label, self.component_settings_html]
-        )
-
-        self.comments_label = ipw.Label(value="Comments:")
         self.comments_html = ipw.HTML()
-        self.comments_hbox = ipw.HBox(
-            children=[self.comments_label, self.comments_html]
-        )
+        
+        # We replace the two separate component HBoxes with one unified HTML block
+        self.components_html = ipw.HTML()
 
-        widget_children = [self.name_hbox, self.description_hbox, self.duration_hbox]
+        widget_children = [
+            ipw.HBox(children=[ipw.Label("Name:", layout=ipw.Layout(width="100px", font_weight="bold")), self.name_html]),
+            ipw.HBox(children=[ipw.Label("Description:", layout=ipw.Layout(width="100px", font_weight="bold")), self.description_html]),
+            ipw.HBox(children=[ipw.Label("Duration:", layout=ipw.Layout(width="100px", font_weight="bold")), self.duration_html]),
+        ]
 
-        if self.object_type == OPENBIS_OBJECT_TYPES["Deposition"]:
-            self.substance_label = ipw.Label(value="Substance:")
+        # Conditional Properties
+        if self.object_type == OPENBIS_OBJECT_TYPES.get("Deposition"):
             self.substance_html = ipw.HTML()
-            self.substance_hbox = ipw.HBox(
-                children=[self.substance_label, self.substance_html]
-            )
+            widget_children.append(ipw.HBox(children=[ipw.Label("Substance:", layout=ipw.Layout(width="100px", font_weight="bold")), self.substance_html]))
 
-            widget_children.append(self.substance_hbox)
-
-        elif self.object_type == OPENBIS_OBJECT_TYPES["Dosing"]:
-            self.dosing_gas_label = ipw.Label(value="Dosing gas:")
+        elif self.object_type == OPENBIS_OBJECT_TYPES.get("Dosing"):
             self.dosing_gas_html = ipw.HTML()
-            self.dosing_gas_hbox = ipw.HBox(
-                children=[self.dosing_gas_label, self.dosing_gas_html]
-            )
+            widget_children.append(ipw.HBox(children=[ipw.Label("Dosing gas:", layout=ipw.Layout(width="100px", font_weight="bold")), self.dosing_gas_html]))
 
-            widget_children.append(self.dosing_gas_hbox)
-
-        widget_children.append(self.comments_hbox)
-        widget_children.append(self.component_hbox)
-        widget_children.append(self.component_settings_hbox)
+        widget_children.append(ipw.HBox(children=[ipw.Label("Comments:", layout=ipw.Layout(width="100px", font_weight="bold")), self.comments_html]))
+        
+        # Unified Components display at the bottom
+        widget_children.append(ipw.HBox(children=[ipw.Label("Components:", layout=ipw.Layout(width="100px", font_weight="bold")), self.components_html]))
 
         self.load_action_data()
         self.children = widget_children
 
     def load_action_data(self):
-        openbis_object_props = self.openbis_object.props.all()
-        if openbis_object_props["name"]:
-            self.name_html.value = openbis_object_props["name"]
+        props = self.openbis_object.props.all()
+        
+        # 1. Load Standard Props safely
+        self.name_html.value = props.get("name", "") if props.get("name", "") else ""
+        self.description_html.value = props.get("description", "") if props.get("description", "") else ""
+        self.duration_html.value = props.get("duration", "") if props.get("duration", "") else ""
+        self.comments_html.value = props.get("comments", "") if props.get("comments", "") else ""
 
-        if openbis_object_props["description"]:
-            self.description_html.value = openbis_object_props["description"]
+        # 2. Load Dosing Gas
+        gas_id = props.get("dosing_gas")
+        if gas_id:
+            gas_object = utils.get_openbis_object(self.openbis_session, sample_ident=gas_id)
+            self.dosing_gas_html.value = gas_object.props.get("name", "")
 
-        if openbis_object_props["duration"]:
-            self.duration_html.value = openbis_object_props["duration"]
-
-        if openbis_object_props["comments"]:
-            self.comments_html.value = openbis_object_props["comments"]
-
-        if "dosing_gas" in openbis_object_props:
-            gas_id = openbis_object_props["dosing_gas"]
-            if gas_id:
-                gas_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=gas_id
-                )
-                self.dosing_gas_html.value = gas_object.props["name"]
-
-        if "substance" in openbis_object_props:
-            substance_id = openbis_object_props["substance"]
-            if substance_id:
-                substance_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=substance_id
-                )
-                substance_empa_number = substance_object.props["empa_number"]
-                substance_batch = substance_object.props["batch"]
-                substance_vial = substance_object.props["vial"]
-                self.substance_html.value = (
-                    "Identifier: " + substance_empa_number + substance_batch
-                )
-                if substance_vial:
-                    self.substance_html.value += f"-{substance_vial}"
-
-                substance_mols_ids = substance_object.props["molecules"]
-                if substance_mols_ids:
-                    mol_id = substance_mols_ids[0]
-                    molecule_obj = utils.get_openbis_object(
-                        self.openbis_session, sample_ident=mol_id
-                    )
-                    molecule_obj_datasets = molecule_obj.get_datasets(
-                        type="ELN_PREVIEW"
-                    )
-                    molecule_obj_preview = molecule_obj_datasets[0]
-                    molecule_obj_preview.download(destination="images")
-                    object_image_filepath = molecule_obj_preview.file_list[0]
-                    html_image = utils.read_file(
-                        f"images/{molecule_obj_preview.permId}/{object_image_filepath}"
-                    )
-                    image_encoded = base64.b64encode(html_image).decode("utf-8")
-                    self.substance_html.value += f""" Molecule sketch: <img src="data:image/png;base64,{image_encoded}" width="100">"""
-
-                    # Erase file after downloading it
-                    shutil.rmtree(f"images/{molecule_obj_preview.permId}")
-
-        for prop in openbis_object_props.keys():
-            if openbis_object_props[prop]:
-                prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
-                prop_sample_type = str(prop_type.sampleType)
-                prop_sample_settings_type = prop_sample_type + "_SETTINGS"
+        # 3. Load Substance (with safe image extraction)
+        substance_id = props.get("substance")
+        if substance_id:
+            sub_obj = utils.get_openbis_object(self.openbis_session, sample_ident=substance_id)
+            empa_num = sub_obj.props.get("empa_number", "")
+            batch = sub_obj.props.get("batch", "")
+            vial = sub_obj.props.get("vial", "")
+            
+            sub_text = f"Identifier: {empa_num}{batch}"
+            if vial: sub_text += f"-{vial}"
+            
+            mols_ids = sub_obj.props.get("molecules", [])
+            if mols_ids:
+                mol_obj = utils.get_openbis_object(self.openbis_session, sample_ident=mols_ids[0])
+                datasets = mol_obj.get_datasets(type="ELN_PREVIEW")
                 
-                if prop_sample_type in OPENBIS_OBJECT_TYPES.values() and prop_sample_settings_type in OPENBIS_OBJECT_TYPES.values():
-                    component_id = openbis_object_props[prop]
-                    component_obj = utils.get_openbis_object(
-                        self.openbis_session, sample_ident=component_id
-                    )
-                    component_name = component_obj.props["name"]
-                    self.component_html.value += f"<p>{component_name}</p>"
+                if datasets and datasets[0].file_list:
+                    preview_ds = datasets[0]
+                    preview_ds.download(destination="images")
+                    dataset_folder = os.path.join("images", preview_ds.permId)
+                    img_path = os.path.join(dataset_folder, preview_ds.file_list[0])
                     
-                    component_settings_id = openbis_object_props[prop + "_settings"]
-                    
-                    if component_settings_id:
-                        component_settings_obj = utils.get_openbis_object(
-                            self.openbis_session, sample_ident=component_settings_id
-                        )
-                        component_settings_obj = component_settings_obj.props()
-                        component_settings_obj.pop("name", None)
-                        component_settings_string = ""
-                        for prop_key, prop_value in component_settings_obj.items():
-                            prop_setting_type = utils.get_openbis_property_type(
-                                self.openbis_session, code=prop_key
-                            )
-                            prop_setting_label = prop_setting_type.label
-                            component_settings_string += f"<p>&bull; {prop_setting_label}: {prop_value}</p>"
+                    try:
+                        html_image = utils.read_file(img_path)
+                        image_encoded = base64.b64encode(html_image).decode("utf-8")
+                        sub_text += f"""<br>Molecule sketch:<br><img src="data:image/png;base64,{image_encoded}" width="100">"""
+                    finally:
+                        if os.path.exists(dataset_folder):
+                            shutil.rmtree(dataset_folder, ignore_errors=True)
+                            
+            self.substance_html.value = sub_text
 
-                        self.component_settings_html.value += component_settings_string
+        # 4. Process Components and their Settings into a Hierarchical UI
+        components_html_content = ""
+        
+        for prop_key, prop_value in props.items():
+            if not prop_value or prop_key.endswith("_settings"):
+                continue # Skip empty values and skip settings properties (we fetch them via the component property)
+                
+            try:
+                prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop_key)
+                prop_sample_type = str(prop_type.sampleType)
+                prop_sample_settings_type = f"{prop_sample_type}_SETTINGS"
+            except Exception:
+                continue # Skip if property type data isn't found
+            
+            # Identify if this property holds a Component
+            if prop_sample_type in OPENBIS_OBJECT_TYPES.values() and prop_sample_settings_type in OPENBIS_OBJECT_TYPES.values():
+                comp_obj = utils.get_openbis_object(self.openbis_session, sample_ident=prop_value)
+                comp_name = comp_obj.props["name"]
+                
+                # Create a visually distinct block for this component
+                components_html_content += f"""
+                <div style="margin-bottom: 15px; padding: 10px; border-left: 3px solid #007bff; background-color: #f8f9fa;">
+                    <div style="font-weight: bold; font-size: 1.1em; margin-bottom: 5px;">🛠️ {comp_name}</div>
+                """
+                
+                # Fetch corresponding settings
+                settings_id = props.get(f"{prop_key}_settings")
+                if settings_id:
+                    settings_obj = utils.get_openbis_object(self.openbis_session, sample_ident=settings_id)
+                    s_props = settings_obj.props()
+                    s_props.pop("name", None) # Hide the generic name field
+                    
+                    if s_props:
+                        components_html_content += "<ul style='margin-top: 0; padding-left: 20px;'>"
+                        for s_key, s_val in s_props.items():
+                            if s_val is None or s_val == "": continue
+                            
+                            try:
+                                s_label = utils.get_openbis_property_type(self.openbis_session, code=s_key).label
+                            except:
+                                s_label = s_key # Fallback to code if label fetch fails
+                                
+                            components_html_content += f"<li><b>{s_label}:</b> {s_val}</li>"
+                        components_html_content += "</ul>"
+                    else:
+                        components_html_content += "<div style='color: #6c757d; font-style: italic;'>No settings values defined.</div>"
+                else:
+                    components_html_content += "<div style='color: #6c757d; font-style: italic;'>No settings attached.</div>"
+                
+                components_html_content += "</div>" # Close component block
+
+        if not components_html_content:
+            components_html_content = "<div style='color: #6c757d; font-style: italic;'>No components used.</div>"
+            
+        self.components_html.value = components_html_content
 
 
 class ObservableHistoryWidget(ipw.VBox):
@@ -1859,27 +1842,21 @@ class RegisterActionWidget(ipw.VBox):
         self.instrument_permid = instrument_permid
         self.instrument_components = self.find_instrument_components(instrument_permid)
 
-        self.action_type_label = ipw.Label(value="Action type")
-        action_type_options = [(key, value) for key, value in ACTIONS_TYPES.items()]
-        action_type_options.insert(0, ("Select an action type...", "-1"))
-
-        self.action_type_dropdown = ipw.Dropdown(
-            options=action_type_options, value="-1"
-        )
-
+        action_type_options = [("Select an action type...", "-1")] + list(ACTIONS_TYPES.items())
+        
+        self.action_type_dropdown = ipw.Dropdown(options=action_type_options, value="-1")
         self.action_type_hbox = ipw.HBox(
-            children=[self.action_type_label, self.action_type_dropdown]
+            children=[ipw.Label(value="Action type"), self.action_type_dropdown]
         )
         self.action_properties_widgets = ipw.VBox()
         
-        self.all_actions_properties = dict()
+        self.all_actions_properties = {}
         for action_type in ACTIONS_TYPES.values():
-            action_type_props = utils.get_openbis_object_type(openbis_session, type=action_type).get_property_assignments().df.code.values
-            self.all_actions_properties.update({prop: None for prop in action_type_props})
+            props = utils.get_openbis_object_type(openbis_session, type=action_type).get_property_assignments().df.code.values
+            self.all_actions_properties.update(dict.fromkeys(props, None))
         
         self.remove_action_button = ipw.Button(
             description="Remove",
-            disabled=False,
             button_style="danger",
             tooltip="Remove action",
             layout=ipw.Layout(width="150px", height="25px"),
@@ -1902,7 +1879,6 @@ class RegisterActionWidget(ipw.VBox):
         obj_type = str(obj.type)
         
         assignments_df = utils.get_openbis_object_type(self.openbis_session, type=obj_type).get_property_assignments().df
-        
         component_ids_to_fetch = []
         
         for _, row in assignments_df.iterrows():
@@ -1918,41 +1894,45 @@ class RegisterActionWidget(ipw.VBox):
                         prop_value = [prop_value]
                     
                     component_ids_to_fetch.extend(prop_value)
-        
         all_components = defaultdict(list)
         if component_ids_to_fetch:
-            fetched_components = utils.get_openbis_objects(self.openbis_session, component_ids_to_fetch)
-            for comp_obj in fetched_components:
+            for comp_id in component_ids_to_fetch:
+                comp_obj = utils.get_openbis_object(self.openbis_session, sample_ident=comp_id)
                 comp_obj_type = str(comp_obj.type)
-                all_components[comp_obj_type].append(comp_obj)
-                
+                if comp_obj_type not in ["PERSON", "ORGANISATION", "TEAM", "GROUP", "ROOM"]:
+                    all_components[comp_obj_type].append(comp_obj)
         return dict(all_components)
 
     def load_substance_mol_image(self, change):
-        print(change)
         substance_id = change["new"]
         if substance_id == "-1":
             self.substance_mol_image.value = b""
-        else:
-            substance_obj = utils.get_openbis_object(
-                self.openbis_session, sample_ident=substance_id
-            )
-            substance_mols_ids = substance_obj.get_parents(type="MOLECULE").df.permId.values
-            if substance_mols_ids:
-                mol_id = substance_mols_ids[0]
-                molecule_obj = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=mol_id
-                )
-                molecule_obj_datasets = molecule_obj.get_datasets(type="ELN_PREVIEW")
-                molecule_obj_preview = molecule_obj_datasets[0]
-                molecule_obj_preview.download(destination="images")
-                object_image_filepath = molecule_obj_preview.file_list[0]
-                self.substance_mol_image.value = utils.read_file(
-                    f"images/{molecule_obj_preview.permId}/{object_image_filepath}"
-                )
-
-                # Erase file after downloading it
-                shutil.rmtree(f"images/{molecule_obj_preview.permId}")
+            return
+        
+        substance_obj = utils.get_openbis_object(self.openbis_session, sample_ident=substance_id)
+        mols_ids = substance_obj.get_parents(type="MOLECULE").df.permId.values
+        if len(mols_ids) == 0:
+            self.substance_mol_image.value = b""
+            return
+            
+        molecule_obj = utils.get_openbis_object(self.openbis_session, sample_ident=mols_ids[0])
+        datasets = molecule_obj.get_datasets(type="ELN_PREVIEW")
+        
+        if not datasets or not datasets[0].file_list:
+            self.substance_mol_image.value = b"" 
+            return
+            
+        preview_ds = datasets[0]
+        preview_ds.download(destination="images")
+        
+        dataset_folder = os.path.join("images", preview_ds.permId)
+        img_path = os.path.join(dataset_folder, preview_ds.file_list[0])
+        
+        try:
+            self.substance_mol_image.value = utils.read_file(img_path)
+        finally:
+            if os.path.exists(dataset_folder):
+                shutil.rmtree(dataset_folder, ignore_errors=True)
 
     def load_action(self, settings):
         action_permid = settings["action"]
@@ -2115,7 +2095,6 @@ class RegisterActionWidget(ipw.VBox):
         component_widgets_appended = False
         
         comp_widget_ref = None
-        comp_settings_widget_ref = None
         
         widget_type_map = {
             "VARCHAR": ipw.Text,
@@ -2135,9 +2114,13 @@ class RegisterActionWidget(ipw.VBox):
                 action_component_types.append(prop_sampleType)
                 if not component_widgets_appended:
                     component_widgets_appended = True
-                    comp_widget_ref = cw.HBox(children=[ipw.Label(value="Component"), ipw.Text()], metadata={"property_name": "COMPONENT"})
-                    comp_settings_widget_ref = cw.HBox(children=[ipw.Label(value="Component settings"), ipw.Text()], metadata={"property_name": "COMPONENT_SETTINGS"})
-                    action_properties_widgets.extend([comp_widget_ref, comp_settings_widget_ref])
+                    comp_dropdown_widget = ipw.Dropdown(options=[("Loading...", "-1")], value="-1")
+                    comp_widget_ref = cw.HBox(
+                        children=[ipw.Label(value="Component"), comp_dropdown_widget],
+                        metadata={"property_name": ""}
+                    )
+                    selected_components_vbox = cw.VBox(metadata={"property_name": "COMPONENT"})
+                    action_properties_widgets.extend([comp_widget_ref, selected_components_vbox])
                 
             elif prop == "DURATION":
                 duration_widgets = cw.HBox(
@@ -2194,76 +2177,111 @@ class RegisterActionWidget(ipw.VBox):
                     prop_value_widget.observe(self.change_action_title, names="value")
                 
                 action_properties_widgets.append(cw.HBox(children=[ipw.Label(value=prop_label), prop_value_widget], metadata={"property_name": prop}))
-        
-        actions_components = [("Select a component...", "-1")]
-        for component_type in action_component_types:
-            component_objs = utils.get_openbis_objects(self.openbis_session, type=component_type)
-            actions_components.extend([(obj.props["name"], obj.permId) for obj in component_objs])
-        
-        if len(actions_components) > 1 and comp_widget_ref and comp_settings_widget_ref:
-            component_dropdown = ipw.Dropdown(options=actions_components, value="-1")
-            component_settings_dropdown = ipw.Dropdown(options=[("Select component settings...", "-1")], value="-1")
+
+        if action_component_types:
+            unique_component_types = list(set(action_component_types))
             
-            comp_widget_ref.children = [comp_widget_ref.children[0], component_dropdown]
-            comp_settings_widget_ref.children = [comp_settings_widget_ref.children[0], component_settings_dropdown]
-
-            def load_component_settings(change):
+            # Master dictionary of available components: {permId: (name, type)}
+            available_components_dict = {} 
+            for c_type in unique_component_types:
+                c_objs = self.instrument_components.get(c_type, [])
+                for obj in c_objs:
+                    available_components_dict[obj.permId] = (obj.props["name"], c_type)
+            
+            # Populate the initial "Component" dropdown
+            comp_dropdown_widget.options = [("Select a component to add...", "-1")] + [
+                (name, permId) for permId, (name, c_type) in available_components_dict.items()
+            ]
+            comp_dropdown_widget.value = "-1"
+            
+            def add_component_ui(change):
                 permid = change["new"]
-                settings_vbox = comp_settings_widget_ref.children[-1] if len(comp_settings_widget_ref.children) > 2 else None
-                if not settings_vbox: return
+                if permid == "-1": return
                 
-                if permid != "-1":
-                    component_settings_obj = utils.get_openbis_object(self.openbis_session, sample_ident=permid)
-                    props = {k.upper(): v for k, v in component_settings_obj.props().items()}
-                    
-                    for widget in settings_vbox.children:
-                        prop_name = widget.metadata["property_name"]
-                        if prop_name in props:
-                            widget.children[1].value = props[prop_name]
-                else:
-                    # Reset widgets
-                    for widget in settings_vbox.children:
-                        target = widget.children[1]
-                        if isinstance(target, (ipw.Text, ipw.Textarea)): target.value = ""
-                        elif isinstance(target, ipw.Checkbox): target.value = False
-                        elif isinstance(target, (ipw.FloatText, ipw.IntText)): target.value = 0
-
-            def load_component_settings_list(change):
-                permid = change["new"]
-                # Reset children to just label and dropdown
-                comp_settings_widget_ref.children = [comp_settings_widget_ref.children[0], component_settings_dropdown]
+                c_name, c_type = available_components_dict[permid]
                 
-                if permid != "-1":
-                    component_obj = utils.get_openbis_object(self.openbis_session, sample_ident=permid)
-                    settings_type = f"{component_obj.type}_SETTINGS"
-                    
-                    settings_objs = utils.get_openbis_objects(self.openbis_session, type=settings_type)
-                    component_settings_dropdown.options = [("Select component settings...", "-1")] + [(obj.props()["name"], obj.permId) for obj in settings_objs]
-                    component_settings_dropdown.value = "-1"
-                    
-                    # Generate settings property widgets dynamically
-                    prop_types = utils.get_openbis_object_type(self.openbis_session, type=settings_type).get_property_assignments().df.code.values
-                    settings_props_widgets = []
-                    for s_prop in prop_types:
-                        if s_prop == "NAME": continue
-                        s_prop_type = utils.get_openbis_property_type(self.openbis_session, code=s_prop)
-                        s_dataType = str(s_prop_type.dataType)
-                        
-                        if s_dataType in widget_type_map:
-                            w = widget_type_map[s_dataType]()
-                            settings_props_widgets.append(cw.HBox(children=[ipw.Label(value=str(s_prop_type.label)), w], metadata={"property_name": s_prop}))
-                    
-                    # Append VBox of new properties
-                    comp_settings_widget_ref.children = list(comp_settings_widget_ref.children) + [ipw.VBox(children=settings_props_widgets)]
-                    component_settings_dropdown.observe(load_component_settings, names="value")
-                else:
-                    component_settings_dropdown.options = [("Select component settings...", "-1")]
-                    component_settings_dropdown.value = "-1"
+                # 1. Build the UI wrapper for this specific component
+                remove_btn = ipw.Button(description="X", button_style="danger", layout=ipw.Layout(width="40px"))
+                header = cw.HBox(children=[ipw.Label(value=f"⚙️ {c_name}", style={'font_weight': 'bold'}), remove_btn])
                 
-                self.action_properties_widgets.children = action_properties_widgets
+                # 2. Build Settings Dropdown
+                settings_type = f"{c_type}_SETTINGS"
+                settings_objs = utils.get_openbis_objects(self.openbis_session, type=settings_type)
+                settings_options = [("Select settings...", "-1")] + [(obj.props["name"], obj.permId) for obj in settings_objs]
+                settings_dropdown = ipw.Dropdown(options=settings_options, value="-1")
+                settings_dropdown_hbox = cw.HBox(children=[ipw.Label(value="Settings"), settings_dropdown])
+                
+                # 3. Build Input Fields
+                prop_types = utils.get_openbis_object_type(self.openbis_session, type=settings_type).get_property_assignments().df.code.values
+                settings_props_widgets = []
+                for s_prop in prop_types:
+                    if s_prop == "NAME": continue
+                    s_prop_type = utils.get_openbis_property_type(self.openbis_session, code=s_prop)
+                    s_dataType = str(s_prop_type.dataType)
+                    if s_dataType in widget_type_map:
+                        w = widget_type_map[s_dataType]()
+                        settings_props_widgets.append(cw.HBox(children=[ipw.Label(value=str(s_prop_type.label)), w], metadata={"property_name": s_prop}))
+                
+                settings_fields_vbox = ipw.VBox(children=settings_props_widgets)
+                
+                # 4. Settings Value Callback
+                def load_settings_values(s_change):
+                    s_permid = s_change["new"]
+                    if s_permid != "-1":
+                        s_obj = utils.get_openbis_object(self.openbis_session, sample_ident=s_permid)
+                        props = {k.upper(): v for k, v in s_obj.props().items()}
+                        for widget in settings_fields_vbox.children:
+                            prop_name = widget.metadata["property_name"]
+                            if prop_name in props:
+                                widget.children[1].value = props[prop_name]
+                    else:
+                        for widget in settings_fields_vbox.children:
+                            target = widget.children[1]
+                            if isinstance(target, (ipw.Text, ipw.Textarea)): target.value = ""
+                            elif isinstance(target, ipw.Checkbox): target.value = False
+                            elif isinstance(target, (ipw.FloatText, ipw.IntText)): target.value = 0
+                            
+                settings_dropdown.observe(load_settings_values, names="value")
+                
+                component_block = ipw.VBox(
+                    children=[header, settings_dropdown_hbox, settings_fields_vbox], 
+                    layout=ipw.Layout(border='1px solid #d3d3d3', padding='10px', margin='10px 0', border_radius='5px'),
+                    metadata={"property_name": c_type}
+                )
+                
+                # 5. Handle "Remove" Button clicks
+                def remove_this_component(b):
+                    selected_components_vbox.children = [c for c in selected_components_vbox.children if c != component_block]
+                    
+                    # Add ALL components of this specific type back to the dropdown
+                    components_to_restore = [
+                        (name, pid) for pid, (name, t) in available_components_dict.items() if t == c_type
+                    ]
+                    
+                    comp_dropdown_widget.unobserve(add_component_ui, names="value")
+                    current_options = list(comp_dropdown_widget.options)
+                    current_options.extend(components_to_restore)
+                    comp_dropdown_widget.options = current_options
+                    comp_dropdown_widget.value = "-1"
+                    comp_dropdown_widget.observe(add_component_ui, names="value")
 
-            component_dropdown.observe(load_component_settings_list, names="value")
+                remove_btn.on_click(remove_this_component)
+                
+                # 6. Finally: Apply changes to the UI
+                selected_components_vbox.children = list(selected_components_vbox.children) + [component_block]
+                
+                # Remove ALL components of the newly added type from the main dropdown
+                comp_dropdown_widget.unobserve(add_component_ui, names="value")
+                new_options = [
+                    opt for opt in comp_dropdown_widget.options 
+                    if opt[1] == "-1" or available_components_dict[opt[1]][1] != c_type
+                ]
+                comp_dropdown_widget.options = new_options
+                comp_dropdown_widget.value = "-1"
+                comp_dropdown_widget.observe(add_component_ui, names="value")
 
+            comp_dropdown_widget.observe(add_component_ui, names="value")
+        
         self.action_properties_widgets.children = action_properties_widgets
         
     def change_action_title(self, change):
@@ -2272,20 +2290,22 @@ class RegisterActionWidget(ipw.VBox):
         )
 
     def remove_action(self, b):
-        actions_accordion_children = list(self.actions_accordion.children)
-        num_actions = len(actions_accordion_children)
-        actions_accordion_children.pop(self.action_index)
-
-        for index, action in enumerate(actions_accordion_children):
-            if index >= self.action_index:
-                action.action_index -= 1
-                self.actions_accordion.set_title(
-                    action.action_index, action.name_textbox.value
-                )
-
-        self.actions_accordion.set_title(num_actions - 1, "")
-        self.actions_accordion.children = actions_accordion_children
-
+        for w in self.action_properties_widgets.children:
+            if w.metadata["property_name"] == "COMPONENT":
+                print(w)
+                
+        children = list(self.actions_accordion.children)
+        children.pop(self.action_index)
+        
+        for i in range(self.action_index, len(children)):
+            children[i].action_index = i
+            
+        self.actions_accordion.children = children
+        
+        for i, action in enumerate(children):
+            self.actions_accordion.set_title(i, action.name_textbox.value)
+        
+        self.actions_accordion.set_title(len(children), "")
 
 class RegisterObservableWidget(ipw.VBox):
     def __init__(
@@ -2301,124 +2321,86 @@ class RegisterObservableWidget(ipw.VBox):
         self.observables_accordion = observables_accordion
         self.observable_index = observable_index
         self.instrument_permid = instrument_permid
+        self.instrument_components = self.find_instrument_components(instrument_permid)
+        
+        observable_prop_types = utils.get_openbis_dataset_type(
+            self.openbis_session, type="OBSERVABLE"
+        ).get_property_assignments().df.code.values
+        
+        observable_properties_widgets = []
+        for prop in observable_prop_types:
+            prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
+            prop_label = str(prop_type.label)
+            prop_dataType = str(prop_type.dataType)
+            prop_sampleType = str(prop_type.sampleType)
+            prop_multiValue = prop_type.multiValue
+            
+            if prop_multiValue:
+                if prop_dataType == "SAMPLE":
+                    sample_options = []
+                    for obj_type, obj_list in self.instrument_components.items():
+                        for obj in obj_list:
+                            sample_options.append((obj.props["name"], obj.permId))
+                    widget = ipw.SelectMultiple(
+                        options=sample_options, 
+                        value=[],
+                        layout=ipw.Layout(height="300px", width="200px")
+                    )
+                
+                else:
+                    multi_widget_map = {
+                        "VARCHAR": (ipw.Text, {"placeholder": "Enter comma-separated values"}),
+                        "BOOLEAN": (ipw.Text, {"placeholder": "Enter comma-separated True/False"}), 
+                        "REAL": (ipw.Text, {"placeholder": "Enter comma-separated numbers"}),
+                        "INTEGER": (ipw.Text, {"placeholder": "Enter comma-separated integers"}),
+                        "TIMESTAMP": (ipw.Text, {"placeholder": "Enter comma-separated dates"}),
+                    }
+                    
+                    if prop_dataType not in multi_widget_map:
+                        continue
+                    
+                    widget_class, widget_kwargs = multi_widget_map[prop_dataType]
+                    widget = widget_class(**widget_kwargs)
 
-        self.observable_type_label = ipw.Label(value="Observable type")
-        observable_type_options = [
-            (key, value) for key, value in OBSERVABLES_TYPES.items()
-        ]
-        observable_type_options.insert(0, ("Select an observable type...", "-1"))
-        self.observable_type_dropdown = ipw.Dropdown(
-            options=observable_type_options, value="-1"
-        )
+            else:
+                if prop_dataType == "SAMPLE":
+                    sample_options = []
+                    for obj_type, obj_list in self.instrument_components.items():
+                        for obj in obj_list:
+                            sample_options.append((obj.props["name"], obj.permId))
+                    widget = ipw.Dropdown(options=sample_options, value="-1")
+                
+                else:
+                    single_widget_map = {
+                        "VARCHAR": ipw.Text,
+                        "MULTILINE_VARCHAR": ipw.Textarea,
+                        "BOOLEAN": ipw.Checkbox,
+                        "REAL": ipw.FloatText,
+                        "INTEGER": ipw.IntText,
+                        "TIMESTAMP": ipw.Text,  # Could be enhanced with ipw.DatePicker()
+                    }
+                    
+                    if prop_dataType not in single_widget_map:
+                        continue
+                        
+                    # Create the single-value widget directly
+                    widget_class = single_widget_map[prop_dataType]
+                    widget = widget_class()
+            
+            if prop == "NAME":
+                widget.observe(self.change_observable_title, names="value")
+                
+            observable_properties_widgets.append(cw.HBox(children=[ipw.Label(value=prop_label), widget], metadata={"property_name": prop}))
 
-        self.observable_type_hbox = ipw.HBox(
-            children=[self.observable_type_label, self.observable_type_dropdown]
-        )
-        self.observable_properties_widgets = ipw.VBox()
-
-        self.name_label = ipw.Label(value="Name")
-        self.name_textbox = ipw.Text()
-        self.name_hbox = ipw.HBox(children=[self.name_label, self.name_textbox])
-
-        self.description_label = ipw.Label(value="Description")
-        self.description_textbox = ipw.Text()
-        self.description_hbox = ipw.HBox(
-            children=[self.description_label, self.description_textbox]
-        )
-
-        self.ch_name_label = ipw.Label(value="Channel name")
-        self.ch_name_textbox = ipw.Text()
-        self.ch_name_hbox = ipw.HBox(
-            children=[self.ch_name_label, self.ch_name_textbox]
-        )
-
-        self.instrument_type_components_dictionary = {
-            OPENBIS_OBJECT_TYPES["Instrument STM"]: [
-                "pumps",
-                "gauges",
-                "vacuum_chambers",
-                "ports_valves",
-                "preparation_tools",
-                "analysers",
-                "mechanical_components",
-                "stm_components",
-                "control_data_acquisition",
-                "temperature_environment_control",
-                "auxiliary_components",
-                "tips_sensors",
-                "accessories",
-            ]
-        }
-
-        self.component_label = ipw.Label(value="Component")
-        self.component_dropdown = ipw.Dropdown()
-        self.component_hbox = ipw.HBox(
-            children=[self.component_label, self.component_dropdown]
-        )
-        self.component_settings_label = ipw.Label(value="Component settings:")
-        self.component_settings_vbox = ipw.VBox()
-        self.component_settings_hbox = ipw.HBox(
-            children=[self.component_settings_label, self.component_settings_vbox]
-        )
-        self.component_vbox = ipw.VBox(
-            children=[self.component_hbox, self.component_settings_hbox]
-        )
-
-        # BEGIN - Widgets for component properties
-        self.filament_label = ipw.Label("Filament")
-        self.filament_textbox = ipw.Text()
-        self.filament_hbox = ipw.HBox(
-            children=[self.filament_label, self.filament_textbox]
-        )
-
-        self.filament_current_label = ipw.Label("Filament current")
-        self.filament_current_value_textbox = ipw.Text()
-        self.filament_current_unit_dropdown = ipw.Dropdown(
-            options=["A", "mA"], value="A"
-        )
-        self.filament_current_hbox = ipw.HBox(
-            children=[
-                self.filament_current_label,
-                self.filament_current_value_textbox,
-                self.filament_current_unit_dropdown,
-            ]
-        )
-
-        self.density_label = ipw.Label("Density")
-        self.density_value_textbox = ipw.Text()
-        self.density_unit_dropdown = ipw.Dropdown(
-            options=["g/m3", "g/cm3"], value="g/m3"
-        )
-        self.density_hbox = ipw.HBox(
-            children=[
-                self.density_label,
-                self.density_value_textbox,
-                self.density_unit_dropdown,
-            ]
-        )
-        # END
-
-        self.components_properties_widgets = {
-            "filament": self.filament_hbox,
-            "filament_current": self.filament_current_hbox,
-            "density": self.density_hbox,
-        }
-
-        self.comments_label = ipw.Label(value="Comments")
-        self.comments_textarea = ipw.Textarea()
-        self.comments_hbox = ipw.HBox(
-            children=[self.comments_label, self.comments_textarea]
-        )
-
+        self.observable_properties_widgets = ipw.VBox(children = observable_properties_widgets)
+        
         self.upload_readings_label = ipw.Label(value="Upload readings")
         self.upload_readings_widget = ipw.FileUpload(
-            multiple=False, accept=".csv, .txt"
+            multiple=True
         )
         self.upload_readings_hbox = ipw.HBox(
             children=[self.upload_readings_label, self.upload_readings_widget]
         )
-
-        self.plot_readings_widget = ipw.Output()
 
         self.remove_observable_button = ipw.Button(
             description="Remove",
@@ -2428,70 +2410,45 @@ class RegisterObservableWidget(ipw.VBox):
             layout=ipw.Layout(width="150px", height="25px"),
         )
 
-        self.name_textbox.observe(self.change_observable_title, names="value")
-        self.observable_type_dropdown.observe(
-            self.load_observable_properties, names="value"
-        )
-        self.component_dropdown.observe(
-            self.load_component_settings_list, names="value"
-        )
-        self.upload_readings_widget.observe(self.plot_readings, names="value")
         self.remove_observable_button.on_click(self.remove_observable)
 
         if observable_settings:
             self.load_observable(observable_settings)
 
         self.children = [
-            self.observable_type_hbox,
             self.observable_properties_widgets,
+            self.upload_readings_hbox,
             self.remove_observable_button,
         ]
 
-    def load_observable(self, settings):
-        observable_permid = settings["observable"]
-        observable_object = utils.get_openbis_object(
-            self.openbis_session, sample_ident=observable_permid
-        )
-        observable_props = observable_object.props.all()
-        observable_type = observable_object.type.code
-        self.observable_type_dropdown.value = observable_type
-        self.name_textbox.value = observable_props["name"] or ""
-        self.description_textbox.value = observable_props["description"] or ""
-        self.ch_name_textbox.value = observable_props["channel_name"] or ""
-        self.comments_textarea.value = observable_props["comments"] or ""
-
-        component_permid = observable_props.get("component", {})
-        if component_permid:
-            component_settings = observable_props.get("component_settings", {})
-            if component_settings:
-                component_settings = json.loads(component_settings)
-                self.component_dropdown.value = component_permid
-                if "density" in component_settings:
-                    self.density_value_textbox.value = str(
-                        component_settings["density"]["value"]
-                    )
-                    self.density_unit_dropdown.value = component_settings["density"][
-                        "unit"
-                    ]
-                if "filament_current" in component_settings:
-                    self.filament_current_value_textbox.value = str(
-                        component_settings["filament_current"]["value"]
-                    )
-                    self.filament_current_unit_dropdown.value = component_settings[
-                        "filament_current"
-                    ]["unit"]
-
-                self.filament_textbox.value = str(
-                    component_settings.get("filament", "")
-                )
-            else:
-                logging.info(
-                    f"No component settings found for observable {observable_permid}."
-                )
-        else:
-            logging.info(
-                f"No component associated with observable {observable_permid}."
-            )
+    def find_instrument_components(self, instrument_permid):
+        obj = self.openbis_session.get_object(instrument_permid)
+        obj_type = str(obj.type)
+        
+        assignments_df = utils.get_openbis_object_type(self.openbis_session, type=obj_type).get_property_assignments().df
+        component_ids_to_fetch = []
+        
+        for _, row in assignments_df.iterrows():
+            prop_code = row['code']
+            prop_type = row.get('dataType')
+            if not prop_type:
+                prop_type = utils.get_property_type(self.openbis_session, prop_code).dataType
+                
+            if prop_type == "SAMPLE":
+                prop_value = obj.props[prop_code.lower()]
+                if prop_value:
+                    if not isinstance(prop_value, list):
+                        prop_value = [prop_value]
+                    
+                    component_ids_to_fetch.extend(prop_value)
+        all_components = defaultdict(list)
+        if component_ids_to_fetch:
+            for comp_id in component_ids_to_fetch:
+                comp_obj = utils.get_openbis_object(self.openbis_session, sample_ident=comp_id)
+                comp_obj_type = str(comp_obj.type)
+                if comp_obj_type not in ["PERSON", "ORGANISATION", "TEAM", "GROUP", "ROOM"]:
+                    all_components[comp_obj_type].append(comp_obj)
+        return dict(all_components)
 
     def load_observable_properties(self, change):
         observable_type = self.observable_type_dropdown.value
@@ -2547,126 +2504,9 @@ class RegisterObservableWidget(ipw.VBox):
                 self.observable_index, self.observable_icon
             )
 
-    def get_instrument_components(self, instrument_permid, observable_type):
-        component_list = []
-        if instrument_permid != "-1":
-            instrument_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=instrument_permid
-            )
-            instrument_type = str(instrument_object.type)
-            instrument_components_properties = (
-                self.instrument_type_components_dictionary[instrument_type]
-            )
-            all_instrument_components = []
-            for prop in instrument_components_properties:
-                prop_value = instrument_object.props[prop]
-                if prop_value:
-                    for component_id in prop_value:
-                        component_object = utils.get_openbis_object(
-                            self.openbis_session, sample_ident=component_id
-                        )
-                        all_instrument_components.append(component_object)
-
-                        # Evaporators contain sub-components (evaporator slots)
-                        evaporator_type = OPENBIS_OBJECT_TYPES["Evaporator"]
-                        if component_object.type == evaporator_type:
-                            evaporator_slots = component_object.props[
-                                "evaporator_slots"
-                            ]
-                            if evaporator_slots:
-                                for evaporator_slot_id in evaporator_slots:
-                                    evaporator_slot_object = utils.get_openbis_object(
-                                        self.openbis_session,
-                                        sample_ident=evaporator_slot_id,
-                                    )
-                                    all_instrument_components.append(
-                                        evaporator_slot_object
-                                    )
-
-            for component_object in all_instrument_components:
-                component_observables_settings_prop = component_object.props[
-                    "observables_settings"
-                ]
-                if component_observables_settings_prop:
-                    component_observables_settings = json.loads(
-                        component_observables_settings_prop
-                    )
-                    for component_observable_settings in component_observables_settings:
-                        component_observable_type = component_observable_settings[
-                            "observable_type"
-                        ]
-                        if observable_type == component_observable_type:
-                            component_list.append(
-                                (
-                                    component_object.props["name"],
-                                    component_object.permId,
-                                )
-                            )
-
-        return component_list
-
-    def load_component_settings_list(self, change):
-        observable_type = self.observable_type_dropdown.value
-        if observable_type != "-1":
-            component_permid = self.component_dropdown.value
-            if component_permid != "-1":
-                component_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=component_permid
-                )
-                component_settings_property = component_object.props[
-                    "observables_settings"
-                ]
-                component_settings_widgets = []
-                if component_settings_property:
-                    component_settings = json.loads(component_settings_property)
-                    for settings in component_settings:
-                        if observable_type == settings["observable_type"]:
-                            settings_properties = settings.get(
-                                "component_properties", {}
-                            )
-                            for prop in settings_properties:
-                                setting_widget = self.components_properties_widgets.get(
-                                    prop, None
-                                )
-                                if setting_widget:
-                                    if component_object.props[prop]:
-                                        if prop == "density":
-                                            density_comp = json.loads(
-                                                component_object.props[prop]
-                                            )
-                                            self.density_value_textbox.value = (
-                                                density_comp["value"]
-                                            )
-                                            self.density_unit_dropdown.value = (
-                                                density_comp["unit"]
-                                            )
-
-                                        elif prop == "filament_current":
-                                            filament_current_comp = json.loads(
-                                                component_object.props[prop]
-                                            )
-                                            self.filament_current_value_textbox.value = filament_current_comp[
-                                                "value"
-                                            ]
-                                            self.filament_current_unit_dropdown.value = filament_current_comp[
-                                                "unit"
-                                            ]
-
-                                        elif prop == "filament":
-                                            self.filament_textbox.value = (
-                                                component_object.props[prop]
-                                            )
-
-                                    component_settings_widgets.append(
-                                        self.components_properties_widgets[prop]
-                                    )
-
-                self.component_settings_vbox.children = component_settings_widgets
-
     def change_observable_title(self, change):
-        title = self.name_textbox.value
         self.observables_accordion.set_title(
-            self.observable_index, f"{self.observable_icon} {title}"
+            self.observable_index, f"📈 {change['new']}"
         )
 
     def remove_observable(self, b):
@@ -2684,25 +2524,3 @@ class RegisterObservableWidget(ipw.VBox):
         self.observables_accordion.set_title(num_observables - 1, "")
         self.observables_accordion.children = observables_accordion_children
 
-    def plot_readings(self, change):
-        # Create structures directory if it does not exist
-        for filename in self.upload_readings_widget.value:
-            file_info = self.upload_readings_widget.value[filename]
-            try:
-                content = file_info["content"].decode("utf-8")
-                df = pd.read_csv(io.StringIO(content), sep=",")
-
-                if df.shape[1] < 2:
-                    raise ValueError("Dataframe has less than 2 columns.")
-
-                self.plot_readings_widget.clear_output()
-                with self.plot_readings_widget:
-                    plt.figure(figsize=(6, 4))
-                    plt.plot(df.iloc[:, 0], df.iloc[:, 1])
-                    plt.xlabel(df.columns[0])
-                    plt.ylabel(df.columns[1])
-                    plt.grid(True)
-                    plt.show()
-
-            except Exception:
-                display(Javascript(data="alert('Data cannot be plotted!')"))
