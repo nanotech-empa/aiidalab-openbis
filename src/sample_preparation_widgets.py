@@ -174,18 +174,18 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 )
                 act_widget = ActionHistoryWidget(self.openbis_session, act_object)
                 actions_accordion_children.append(act_widget)
-                act_title = act_widget.name_html.value
+                act_title = act_widget.name
                 self.actions_accordion.set_title(i, act_title)
 
             self.actions_accordion.children = actions_accordion_children
 
     def load_observables(self):
-        observables_ids = self.openbis_object.get_datasets(type="OBSERVABLE")
+        observables_ids = self.openbis_object.get_datasets(type="OBSERVABLE").df.permId.values
         if observables_ids:
             observables_accordion_children = []
             for i, obs_id in enumerate(observables_ids):
                 obs_dataset = utils.get_openbis_dataset(
-                    self.openbis_session, sample_ident=obs_id
+                    self.openbis_session, obs_id
                 )
                 obs_widget = ObservableHistoryWidget(self.openbis_session, obs_dataset)
                 observables_accordion_children.append(obs_widget)
@@ -201,142 +201,127 @@ class ActionHistoryWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.openbis_object = openbis_object
         self.object_type = self.openbis_object.type.code
-        
-        # Standard Properties
-        self.name_html = ipw.HTML()
-        self.duration_html = ipw.HTML()
-        self.description_html = ipw.HTML()
-        self.comments_html = ipw.HTML()
-        
-        # We replace the two separate component HBoxes with one unified HTML block
-        self.components_html = ipw.HTML()
-
-        widget_children = [
-            ipw.HBox(children=[ipw.Label("Name:", layout=ipw.Layout(width="100px", font_weight="bold")), self.name_html]),
-            ipw.HBox(children=[ipw.Label("Description:", layout=ipw.Layout(width="100px", font_weight="bold")), self.description_html]),
-            ipw.HBox(children=[ipw.Label("Duration:", layout=ipw.Layout(width="100px", font_weight="bold")), self.duration_html]),
-        ]
-
-        # Conditional Properties
-        if self.object_type == OPENBIS_OBJECT_TYPES.get("Deposition"):
-            self.substance_html = ipw.HTML()
-            widget_children.append(ipw.HBox(children=[ipw.Label("Substance:", layout=ipw.Layout(width="100px", font_weight="bold")), self.substance_html]))
-
-        elif self.object_type == OPENBIS_OBJECT_TYPES.get("Dosing"):
-            self.dosing_gas_html = ipw.HTML()
-            widget_children.append(ipw.HBox(children=[ipw.Label("Dosing gas:", layout=ipw.Layout(width="100px", font_weight="bold")), self.dosing_gas_html]))
-
-        widget_children.append(ipw.HBox(children=[ipw.Label("Comments:", layout=ipw.Layout(width="100px", font_weight="bold")), self.comments_html]))
-        
-        # Unified Components display at the bottom
-        widget_children.append(ipw.HBox(children=[ipw.Label("Components:", layout=ipw.Layout(width="100px", font_weight="bold")), self.components_html]))
-
-        self.load_action_data()
-        self.children = widget_children
+        self.name = self.openbis_object.props["name"]
+        self.children = self.load_action_data()
 
     def load_action_data(self):
         props = self.openbis_object.props.all()
-        
-        # 1. Load Standard Props safely
-        self.name_html.value = props.get("name", "") if props.get("name", "") else ""
-        self.description_html.value = props.get("description", "") if props.get("description", "") else ""
-        self.duration_html.value = props.get("duration", "") if props.get("duration", "") else ""
-        self.comments_html.value = props.get("comments", "") if props.get("comments", "") else ""
-
-        # 2. Load Dosing Gas
-        gas_id = props.get("dosing_gas")
-        if gas_id:
-            gas_object = utils.get_openbis_object(self.openbis_session, sample_ident=gas_id)
-            self.dosing_gas_html.value = gas_object.props.get("name", "")
-
-        # 3. Load Substance (with safe image extraction)
-        substance_id = props.get("substance")
-        if substance_id:
-            sub_obj = utils.get_openbis_object(self.openbis_session, sample_ident=substance_id)
-            empa_num = sub_obj.props.get("empa_number", "")
-            batch = sub_obj.props.get("batch", "")
-            vial = sub_obj.props.get("vial", "")
-            
-            sub_text = f"Identifier: {empa_num}{batch}"
-            if vial: sub_text += f"-{vial}"
-            
-            mols_ids = sub_obj.props.get("molecules", [])
-            if mols_ids:
-                mol_obj = utils.get_openbis_object(self.openbis_session, sample_ident=mols_ids[0])
-                datasets = mol_obj.get_datasets(type="ELN_PREVIEW")
-                
-                if datasets and datasets[0].file_list:
-                    preview_ds = datasets[0]
-                    preview_ds.download(destination="images")
-                    dataset_folder = os.path.join("images", preview_ds.permId)
-                    img_path = os.path.join(dataset_folder, preview_ds.file_list[0])
-                    
-                    try:
-                        html_image = utils.read_file(img_path)
-                        image_encoded = base64.b64encode(html_image).decode("utf-8")
-                        sub_text += f"""<br>Molecule sketch:<br><img src="data:image/png;base64,{image_encoded}" width="100">"""
-                    finally:
-                        if os.path.exists(dataset_folder):
-                            shutil.rmtree(dataset_folder, ignore_errors=True)
-                            
-            self.substance_html.value = sub_text
-
-        # 4. Process Components and their Settings into a Hierarchical UI
+        props_widgets = []
         components_html_content = ""
         
-        for prop_key, prop_value in props.items():
-            if not prop_value or prop_key.endswith("_settings"):
-                continue # Skip empty values and skip settings properties (we fetch them via the component property)
+        # Helper function to stop repeating widget layout code
+        def make_row(label, val, prop_name):
+            lbl = ipw.Label(value=str(label), layout=ipw.Layout(width="100px", font_weight="bold"))
+            html = ipw.HTML(value=str(val))
+            return cw.HBox(children=[lbl, html], metadata={"property_name": prop_name})
+        
+        # ONE unified loop for everything
+        for prop_key, prop_val in props.items():
+            if not prop_val or str(prop_key).endswith("_settings"):
+                continue # Skip empty values and raw settings IDs
                 
             try:
                 prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop_key)
-                prop_sample_type = str(prop_type.sampleType)
-                prop_sample_settings_type = f"{prop_sample_type}_SETTINGS"
+                prop_label = prop_type.label
+                prop_dataType = prop_type.dataType
+                prop_sampleType = prop_type.sampleType
             except Exception:
                 continue # Skip if property type data isn't found
             
-            # Identify if this property holds a Component
-            if prop_sample_type in OPENBIS_OBJECT_TYPES.values() and prop_sample_settings_type in OPENBIS_OBJECT_TYPES.values():
-                comp_obj = utils.get_openbis_object(self.openbis_session, sample_ident=prop_value)
+            # 1. Standard Fields
+            if prop_dataType in ["VARCHAR", "MULTILINE_VARCHAR", "INTEGER", "FLOAT", "BOOLEAN"]:
+                props_widgets.append(make_row(prop_label, prop_val, prop_key))
+                
+            # 2. Gas Bottle
+            elif prop_sampleType == "GAS_BOTTLE":
+                gas_obj = utils.get_openbis_object(self.openbis_session, sample_ident=prop_val)
+                gas_name = gas_obj.props.get("name", "") if gas_obj else ""
+                props_widgets.append(make_row(prop_label, gas_name, prop_key))
+
+            # 3. Substance & Image logic
+            elif prop_sampleType == "SUBSTANCE":
+                sub_obj = utils.get_openbis_object(self.openbis_session, sample_ident=prop_val)
+                empa = sub_obj.props["empa_number"]
+                batch = sub_obj.props["batch"]
+                vial = sub_obj.props["vial"]
+                
+                sub_text = f"Identifier: {empa}{batch}" + (f"-{vial}" if vial else "")
+                
+                # Iterate parents directly to find ALL molecules
+                molecule_images_html = ""
+                for parent_id in sub_obj.parents:
+                    parent_obj = utils.get_openbis_object(self.openbis_session, sample_ident=parent_id)
+                    
+                    if parent_obj.type.code == "MOLECULE":
+                        datasets = parent_obj.get_datasets(type="ELN_PREVIEW")
+                        
+                        if datasets and datasets[0].file_list:
+                            preview_ds = datasets[0]
+                            preview_ds.download(destination="images")
+                            dataset_folder = os.path.join("images", preview_ds.permId)
+                            img_path = os.path.join(dataset_folder, preview_ds.file_list[0])
+                            
+                            try:
+                                html_image = utils.read_file(img_path)
+                                image_encoded = base64.b64encode(html_image).decode("utf-8")
+                                # Add each image to our gallery string with a little margin and a subtle border
+                                molecule_images_html += f"""
+                                <img src="data:image/png;base64,{image_encoded}" width="100" 
+                                     style="margin-right: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; padding: 2px; background-color: white;">
+                                """
+                            finally:
+                                if os.path.exists(dataset_folder):
+                                    shutil.rmtree(dataset_folder, ignore_errors=True)
+                
+                # If we found any images, append them to the text using a flexbox container
+                if molecule_images_html:
+                    sub_text += f"""
+                    <div style="margin-top: 10px;">Molecule sketches:</div>
+                    <div style="display: flex; flex-wrap: wrap; margin-top: 5px;">
+                        {molecule_images_html}
+                    </div>
+                    """
+                
+                props_widgets.append(make_row(prop_label, sub_text, prop_key))
+
+            # 4. Components & Settings HTML block
+            elif prop_sampleType in OPENBIS_OBJECT_TYPES.values() and f"{prop_sampleType}_SETTINGS" in OPENBIS_OBJECT_TYPES.values():
+                comp_obj = utils.get_openbis_object(self.openbis_session, sample_ident=prop_val)
                 comp_name = comp_obj.props["name"]
                 
-                # Create a visually distinct block for this component
-                components_html_content += f"""
-                <div style="margin-bottom: 15px; padding: 10px; border-left: 3px solid #007bff; background-color: #f8f9fa;">
-                    <div style="font-weight: bold; font-size: 1.1em; margin-bottom: 5px;">🛠️ {comp_name}</div>
-                """
+                # Fixed missing opening <div> here
+                components_html_content += f"<div style='margin-bottom: 10px;'>⚙️ {comp_name}"
                 
-                # Fetch corresponding settings
                 settings_id = props.get(f"{prop_key}_settings")
                 if settings_id:
-                    settings_obj = utils.get_openbis_object(self.openbis_session, sample_ident=settings_id)
-                    s_props = settings_obj.props()
-                    s_props.pop("name", None) # Hide the generic name field
+                    s_obj = utils.get_openbis_object(self.openbis_session, sample_ident=settings_id)
+                    s_props = s_obj.props()
+                    s_props.pop("name", None)
                     
                     if s_props:
                         components_html_content += "<ul style='margin-top: 0; padding-left: 20px;'>"
                         for s_key, s_val in s_props.items():
-                            if s_val is None or s_val == "": continue
-                            
+                            if not s_val: continue
                             try:
                                 s_label = utils.get_openbis_property_type(self.openbis_session, code=s_key).label
                             except:
-                                s_label = s_key # Fallback to code if label fetch fails
-                                
-                            components_html_content += f"<li><b>{s_label}:</b> {s_val}</li>"
+                                s_label = s_key
+                            components_html_content += f"<li>{s_label}: {s_val}</li>"
                         components_html_content += "</ul>"
                     else:
-                        components_html_content += "<div style='color: #6c757d; font-style: italic;'>No settings values defined.</div>"
+                        components_html_content += "<div style='font-style: italic; margin-left: 20px;'>No settings values defined.</div>"
                 else:
-                    components_html_content += "<div style='color: #6c757d; font-style: italic;'>No settings attached.</div>"
+                    components_html_content += "<div style='font-style: italic; margin-left: 20px;'>No settings attached.</div>"
                 
-                components_html_content += "</div>" # Close component block
+                components_html_content += "</div>" # Properly closes the block
 
+        # Append the final compiled Components HTML string at the bottom
         if not components_html_content:
-            components_html_content = "<div style='color: #6c757d; font-style: italic;'>No components used.</div>"
+            components_html_content = "<div style='font-style: italic;'>No components used.</div>"
             
-        self.components_html.value = components_html_content
+        props_widgets.append(make_row("Components", components_html_content, "components"))
 
+        return props_widgets
 
 class ObservableHistoryWidget(ipw.VBox):
     def __init__(self, openbis_session, openbis_dataset):
@@ -354,26 +339,6 @@ class ObservableHistoryWidget(ipw.VBox):
             children=[self.description_label, self.description_html]
         )
 
-        self.ch_names_label = ipw.Label(value="Channel(s) name(s):")
-        self.ch_names_html = ipw.HTML()
-        self.ch_names_hbox = ipw.HBox(children=[self.ch_names_label, self.ch_names_html])
-        
-        self.ch_units_label = ipw.Label(value="Channel(s) unit(s):")
-        self.ch_units_html = ipw.HTML()
-        self.ch_units_hbox = ipw.HBox(children=[self.ch_units_label, self.ch_units_html])
-        
-        self.timeseries_start_time_label = ipw.Label(value="Timeseries start time:")
-        self.timeseries_start_time_html = ipw.HTML()
-        self.timeseries_start_time_hbox = ipw.HBox(
-            children=[self.timeseries_start_time_label, self.timeseries_start_time_html]
-        )
-        
-        self.timeseries_end_time_label = ipw.Label(value="Timeseries end time:")
-        self.timeseries_end_time_html = ipw.HTML()
-        self.timeseries_end_time_hbox = ipw.HBox(
-            children=[self.timeseries_end_time_label, self.timeseries_end_time_html]
-        )
-
         self.components_label = ipw.Label(value="Components:")
         self.components_html = ipw.HTML()
         self.components_hbox = ipw.HBox(
@@ -385,10 +350,6 @@ class ObservableHistoryWidget(ipw.VBox):
         self.children = [
             self.name_hbox,
             self.description_hbox,
-            self.ch_names_hbox,
-            self.ch_units_hbox,
-            self.timeseries_start_time_hbox,
-            self.timeseries_end_time_hbox,
             self.components_hbox,
         ]
 
@@ -400,19 +361,7 @@ class ObservableHistoryWidget(ipw.VBox):
         if openbis_dataset_props["description"]:
             self.description_html.value = openbis_dataset_props["description"]
 
-        if openbis_dataset_props["channels_names"]:
-            self.ch_names_html.value = ", ".join(openbis_dataset_props["channels_names"])
-
-        if openbis_dataset_props["channels_units"]:
-            self.ch_units_html.value = ", ".join(openbis_dataset_props["channels_units"])
-
-        if openbis_dataset_props["timeseries_start_time"]:
-            self.timeseries_start_time_html.value = openbis_dataset_props["timeseries_start_time"]
-
-        if openbis_dataset_props["timeseries_end_time"]:
-            self.timeseries_end_time_html.value = openbis_dataset_props["timeseries_end_time"]
-
-        components_ids = openbis_dataset_props["component"]
+        components_ids = openbis_dataset_props["components"]
 
         if components_ids:
             for component_id in components_ids:
@@ -1905,34 +1854,75 @@ class RegisterActionWidget(ipw.VBox):
 
     def load_substance_mol_image(self, change):
         substance_id = change["new"]
+        
+        # 1. Clear previous images from the container
+        self.substance_images_container.children = []
+        
         if substance_id == "-1":
-            self.substance_mol_image.value = b""
             return
         
         substance_obj = utils.get_openbis_object(self.openbis_session, sample_ident=substance_id)
         mols_ids = substance_obj.get_parents(type="MOLECULE").df.permId.values
+        
         if len(mols_ids) == 0:
-            self.substance_mol_image.value = b""
             return
             
-        molecule_obj = utils.get_openbis_object(self.openbis_session, sample_ident=mols_ids[0])
-        datasets = molecule_obj.get_datasets(type="ELN_PREVIEW")
+        # 2. Prepare a list to hold our new image widgets
+        image_widgets = []
         
-        if not datasets or not datasets[0].file_list:
-            self.substance_mol_image.value = b"" 
-            return
+        # 3. Loop through EVERY molecule ID associated with the substance
+        for mol_id in mols_ids:
+            molecule_obj = utils.get_openbis_object(self.openbis_session, sample_ident=mol_id)
+            datasets = molecule_obj.get_datasets(type="ELN_PREVIEW")
             
-        preview_ds = datasets[0]
-        preview_ds.download(destination="images")
-        
-        dataset_folder = os.path.join("images", preview_ds.permId)
-        img_path = os.path.join(dataset_folder, preview_ds.file_list[0])
-        
-        try:
-            self.substance_mol_image.value = utils.read_file(img_path)
-        finally:
-            if os.path.exists(dataset_folder):
-                shutil.rmtree(dataset_folder, ignore_errors=True)
+            # Skip if this specific molecule doesn't have an image
+            if not datasets or not datasets[0].file_list:
+                continue 
+                
+            preview_ds = datasets[0]
+            preview_ds.download(destination="images")
+            
+            dataset_folder = os.path.join("images", preview_ds.permId)
+            img_path = os.path.join(dataset_folder, preview_ds.file_list[0])
+            
+            try:
+                img_bytes = utils.read_file(img_path)
+                
+                # Create the raw image widget
+                img_widget = ipw.Image(
+                    value=img_bytes,
+                    layout=ipw.Layout(width="100px", height="100px")
+                )
+                
+                # Create a tiny, centered label for the bottom of the card (uses the molecule name if it exists)
+                mol_name = molecule_obj.props["name"]
+                label_widget = ipw.HTML(
+                    value=f"<div style='text-align: center; font-size: 11px; color: #666; width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'>{mol_name}</div>"
+                )
+                
+                # Wrap the image and label in a "Card" container with CSS styling
+                card_widget = ipw.VBox(
+                    children=[img_widget, label_widget],
+                    layout=ipw.Layout(
+                        border='1px solid #d3d3d3',       # Subtle gray border
+                        border_radius='6px',              # Rounded corners
+                        padding='8px',                    # Breathing room inside the box
+                        margin='0 12px 12px 0',           # Space between different cards
+                        background_color='#ffffff',       # Forces a white background 
+                        align_items='center',             # Centers the image and text horizontally
+                        justify_content='center'          # Centers vertically
+                    )
+                )
+                
+                image_widgets.append(card_widget)
+                
+            finally:
+                # Clean up this specific dataset folder immediately
+                if os.path.exists(dataset_folder):
+                    shutil.rmtree(dataset_folder, ignore_errors=True)
+                    
+        # 4. Inject all the generated image widgets into the UI container at once
+        self.substance_images_container.children = image_widgets
 
     def load_action(self, settings):
         action_permid = settings["action"]
@@ -2149,7 +2139,8 @@ class RegisterActionWidget(ipw.VBox):
                         logging.info(f"Substance {obj.permId} is missing EMPA number or batch.")
                 
                 self.substance_dropdown = ipw.Dropdown(options=substance_options, value="-1")
-                self.substance_mol_image = ipw.Image(layout=ipw.Layout(width="100px", height="100px"))
+                
+                self.substance_images_container = ipw.HBox(layout=ipw.Layout(flex_wrap="wrap"))
                 
                 self.substance_dropdown.observe(self.load_substance_mol_image, names="value")
 
@@ -2157,7 +2148,7 @@ class RegisterActionWidget(ipw.VBox):
                     children=[
                         ipw.Label(value="Substance"), 
                         self.substance_dropdown, 
-                        self.substance_mol_image
+                        self.substance_images_container  # Added container here
                     ],
                     metadata={"property_name": prop}
                 )
