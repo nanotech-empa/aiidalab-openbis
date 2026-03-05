@@ -30,6 +30,7 @@
     "Rinse": "RINSE",
     "Sputtering": "SPUTTERING",
     "Substance": "SUBSTANCE",
+    "Instrument": "INSTRUMENT",
     "Instrument STM": "INSTRUMENT.STM",
     "6-Fold Evaporator": "6_FOLD_EVAPORATOR",
     "6-Fold Evaporator Settings": "6_FOLD_EVAPORATOR_SETTINGS",
@@ -60,5 +61,6 @@
     "Observable": "OBSERVABLE",
     "AiiDA Node": "AIIDA_NODE",
     "Draft": "DRAFT",
-    "STM Simulation": "STM_SIMULATION"
+    "STM Simulation": "STM_SIMULATION",
+    "Gas Bottle": "GAS_BOTTLE"
 }
