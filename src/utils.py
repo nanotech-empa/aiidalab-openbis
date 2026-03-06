@@ -82,13 +82,17 @@ def find_openbis_simulations(ob_session, root_obj, simulation_types):
     return simulation_objects
 
 
-def upload_datasets(ob_session, ob_object, files_widget, dataset_type):
+def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
     with contextlib.redirect_stdout(string_io):
         for filename in files_widget.value:
             file_info = files_widget.value[filename]
             write_file(file_info["content"], filename)
             create_openbis_dataset(
-                ob_session, type=dataset_type, sample=ob_object, files=[filename]
+                ob_session, 
+                type=dataset_type, 
+                sample=ob_object, 
+                files=[filename],
+                props = props
             )
             os.remove(filename)
 
