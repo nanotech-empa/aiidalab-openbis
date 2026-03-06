@@ -23,11 +23,12 @@ class CreateSampleWidget(ipw.VBox):
     def __init__(self, openbis_session):
         super().__init__()
         self.openbis_session = openbis_session
+        
+        header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
 
-        self.select_material_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select material</span>"
-        )
-
+        self.select_material_title = ipw.HTML(f"<div style='{header_style}'>Select material</div>")
+        self.sample_name_title = ipw.HTML(f"<div style='{header_style}'>Sample name</div>")
+        
         material_type_options = [(key, value) for key, value in MATERIALS_TYPES.items()]
         material_type_options.insert(0, ("Select material type...", "-1"))
 
@@ -36,12 +37,34 @@ class CreateSampleWidget(ipw.VBox):
         )
 
         self.material_details_vbox = ipw.VBox()
-
-        self.sample_name_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Sample name</span>"
-        )
-
         self.sample_name_textbox = ipw.Text(placeholder="Write sample name...")
+        
+        self.create_sample_notes = ipw.HTML(
+            value="""
+            <details style="background-color: #f4f6f9; border-left: 5px solid #2980b9; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-family: sans-serif; cursor: pointer;">
+                <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
+                    💡 Getting Started: Creating a New Sample
+                </summary>
+                
+                <div style="margin-top: 12px; cursor: default;">
+                    <div style="color: #34495e; font-size: 14px; margin-bottom: 12px;">
+                        Before you can record any preparation steps, you must physically "register" your starting sample in the system here.
+                    </div>
+                    
+                    <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
+                        <li style="margin-bottom: 6px;"><b>Select material:</b> Choose the base material type you are starting with.</li>
+                        <li style="margin-bottom: 6px;"><b>Sample name:</b> Provide a descriptive name for your sample (this can be edited later if needed).</li>
+                        <li><b>Save (💾):</b> Registers the new sample in openBIS, making it available in the <i>Register preparation</i> tab.</li>
+                    </ul>
+                    
+                    <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; border-radius: 3px; font-size: 14px; color: #856404;">
+                        ⚠️ <b>Important Rule regarding Materials:</b><br>
+                        If you start a new sample using a material that already has an active sample in openBIS, the older sample will automatically become <b>Inactive</b>. This reflects reality: if you are starting fresh with a specific material piece, its previous tracked state no longer exists!
+                    </div>
+                </div>
+            </details>
+            """
+        )
 
         self.save_button = ipw.Button(
             description="",
@@ -53,6 +76,7 @@ class CreateSampleWidget(ipw.VBox):
         )
 
         self.children = [
+            self.create_sample_notes,
             self.select_material_title,
             self.material_type_dropdown,
             self.material_details_vbox,

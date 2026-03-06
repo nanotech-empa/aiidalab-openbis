@@ -396,20 +396,45 @@ class RegisterPreparationWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.sample_preparation_object = None
 
-        self.select_experiment_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select experiment</span>"
-        )
+        header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
 
-        self.select_sample_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select sample</span>"
-        )
-
-        self.sample_history_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Sample history</span>"
-        )
-
-        self.new_processes_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Register new steps</span>"
+        self.select_experiment_title = ipw.HTML(f"<div style='{header_style}'>Select experiment</div>")
+        self.select_sample_title = ipw.HTML(f"<div style='{header_style}'>Select sample</div>")
+        self.sample_history_title = ipw.HTML(f"<div style='{header_style}'>Sample history</div>")
+        self.new_processes_title = ipw.HTML(f"<div style='{header_style}'>Register new steps</div>")
+        
+        self.notes = ipw.HTML(
+            value="""
+            <details style="background-color: #f4f6f9; border-left: 5px solid #2980b9; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-family: sans-serif; cursor: pointer;">
+                <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
+                    💡 Understanding the Workflow & UI
+                </summary>
+                
+                <div style="margin-top: 12px; cursor: default;">
+                    <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
+                        <li><span style="color: #2980b9; font-weight: bold;">Process steps</span> happen <b>sequentially</b> (one after the other).</li>
+                        <li><span style="color: #d35400; font-weight: bold;">Actions</span> within a step happen <b>simultaneously</b> (all at the exact same time).</li>
+                        <li><span style="color: #27ae60; font-weight: bold;">Observables</span> are <b>datasets</b> attached to a specific process step.</li>
+                    </ul>
+                    
+                    <div style="font-weight: bold; font-size: 14px; color: #2c3e50; margin-bottom: 8px;">
+                        Getting Started:
+                    </div>
+                    
+                    <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5;">
+                        <li style="margin-bottom: 6px;">
+                            <b>Select experiment:</b> Determines where the preparation is going to be saved in openBIS. 
+                            <i>(Note: This auto-fills when you select a sample, but if the experiment does not exist, you can create one by clicking the <b>+</b> button).</i>
+                        </li>
+                        <li style="margin-bottom: 6px;"><b>Select sample:</b> Choose a sample created in the <i>Create sample</i> tab.</li>
+                        <li style="margin-bottom: 6px;"><b>Sample history:</b> Displays what was already done on the sample.</li>
+                        <li style="margin-bottom: 6px;"><b>Load process:</b> Use a template process step (or set of steps) that was previously defined using the <i>Register process</i> tab.</li>
+                        <li style="margin-bottom: 6px;"><b>Add process step:</b> Construct the different processes performed on the sample from scratch.</li>
+                        <li><b>Save (💾):</b> Saves the newly registered history and resets the interface for the next task.</li>
+                    </ul>
+                </div>
+            </details>
+            """
         )
 
         self.process_short_name = ""
@@ -422,19 +447,14 @@ class RegisterPreparationWidget(ipw.VBox):
         self.new_processes_accordion = ipw.Accordion()
 
         self.load_process_button = ipw.Button(
-            description="Load process",
-            disabled=False,
-            button_style="success",
-            tooltip="Load process",
-            layout=ipw.Layout(width="150px", height="25px"),
+            description="Load process", 
+            button_style="info", 
+            icon="folder-open"
         )
-
         self.add_process_step_button = ipw.Button(
-            description="Add process step",
-            disabled=False,
-            button_style="success",
-            tooltip="Add process step",
-            layout=ipw.Layout(width="150px", height="25px"),
+            description="Add process step", 
+            button_style="success", 
+            icon="plus"
         )
 
         self.process_buttons_hbox = ipw.HBox(
@@ -454,6 +474,7 @@ class RegisterPreparationWidget(ipw.VBox):
         self.load_processes_hbox = ipw.HBox()
         self.processes_dropdown = ipw.Dropdown()
 
+        # Save button (make it wide enough to match, and give it a clear style)
         self.save_button = ipw.Button(
             description="",
             disabled=False,
@@ -463,7 +484,12 @@ class RegisterPreparationWidget(ipw.VBox):
             layout=ipw.Layout(width="100px", height="50px"),
         )
 
+        # Put the form actions in one row, and separate the save button with a little margin
+        button_row = ipw.HBox([self.load_process_button, self.add_process_step_button], layout=ipw.Layout(margin='10px 0px'))
+        save_row = ipw.HBox([self.save_button], layout=ipw.Layout(margin='20px 0px 0px 0px'))
+
         self.children = [
+            self.notes,
             self.select_experiment_title,
             self.select_experiment_dropdown,
             self.select_sample_title,
@@ -473,8 +499,8 @@ class RegisterPreparationWidget(ipw.VBox):
             self.new_processes_title,
             self.load_processes_hbox,
             self.new_processes_accordion,
-            self.process_buttons_hbox,
-            self.save_button,
+            button_row,
+            save_row
         ]
 
         self.select_sample_dropdown.sample_dropdown.observe(
@@ -864,6 +890,7 @@ class RegisterPreparationWidget(ipw.VBox):
                 new_process_object.add_parents(new_process_object_parents)
                 utils.update_openbis_object(new_process_object)
                 
+                # Get observable info and add them as datasets to the process step object
                 if observables_widgets:
                     for observable_widget in observables_widgets:
                         observable_type = "OBSERVABLE"
@@ -940,13 +967,11 @@ class RegisterProcessWidget(ipw.VBox):
         super().__init__()
         self.openbis_session = openbis_session
 
-        self.select_collection_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select collection</span>"
-        )
-
-        self.new_processes_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Register new steps</span>"
-        )
+        header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
+        
+        self.select_collection_title = ipw.HTML(f"<div style='{header_style}'>Select collection</div>")
+        self.process_properties_title = ipw.HTML(f"<div style='{header_style}'>Process properties</div>")
+        self.new_processes_title = ipw.HTML(f"<div style='{header_style}'>Register new steps</div>")
 
         self.select_collection_label = ipw.Label(value="Collection")
         self.select_collection_dropdown = ipw.Dropdown()
@@ -954,10 +979,6 @@ class RegisterProcessWidget(ipw.VBox):
             [self.select_collection_label, self.select_collection_dropdown]
         )
         self.load_collections()
-
-        self.process_properties_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Process properties</span>"
-        )
 
         self.process_name_label = ipw.Label(value="Name")
         self.process_name_text = ipw.Text()
@@ -980,11 +1001,9 @@ class RegisterProcessWidget(ipw.VBox):
         self.new_processes_accordion = ipw.Accordion()
 
         self.add_process_step_button = ipw.Button(
-            description="Add process step",
-            disabled=False,
-            button_style="success",
-            tooltip="Add process step",
-            layout=ipw.Layout(width="150px", height="25px"),
+            description="Add process step", 
+            button_style="success", 
+            icon="plus"
         )
 
         self.save_button = ipw.Button(
@@ -995,8 +1014,47 @@ class RegisterProcessWidget(ipw.VBox):
             icon="save",
             layout=ipw.Layout(width="100px", height="50px"),
         )
+        
+        # Put the form actions in one row, and separate the save button with a little margin
+        button_row = ipw.HBox([self.add_process_step_button], layout=ipw.Layout(margin='10px 0px'))
+        save_row = ipw.HBox([self.save_button], layout=ipw.Layout(margin='20px 0px 0px 0px'))
+        
+        self.register_process_notes = ipw.HTML(
+            value="""
+            <details style="background-color: #f4f6f9; border-left: 5px solid #2980b9; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-family: sans-serif; cursor: pointer;">
+                <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
+                    💡 Register Process Templates
+                </summary>
+                
+                <div style="margin-top: 12px; cursor: default;">
+                    <div style="color: #34495e; font-size: 14px; margin-bottom: 12px;">
+                        Use this tab to build <b>Templates</b> (recipes) for processes that you perform frequently. Instead of building the same sequence from scratch every time, you can save it here and easily load it later in the <i>Register preparation</i> tab.
+                    </div>
+                    
+                    <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
+                        <li style="margin-bottom: 6px;"><b>Select collection:</b> Choose the openBIS collection where this template will be stored.</li>
+                        <li style="margin-bottom: 6px;"><b>Process properties:</b> Define the overall template.
+                            <ul style="margin-top: 4px; padding-left: 20px;">
+                                <li><i>Name:</i> The full descriptive name of the process.</li>
+                                <li><i>Short name:</i> A quick abbreviation (e.g., "SPAN" for Sputtering-Annealing).</li>
+                                <li><i>Description:</i> Notes on what this specific recipe does.</li>
+                            </ul>
+                        </li>
+                        <li style="margin-bottom: 6px;"><b>Register new steps:</b> Click <b>Add process step</b> to build the sequence. Just like in the preparation tab, you can add multiple sequential steps and attach simultaneous actions to them.</li>
+                        <li><b>Save (💾):</b> Saves this template to openBIS so it can be quickly imported later.</li>
+                    </ul>
+                    
+                    <div style="background-color: #e8f4f8; border-left: 4px solid #17a2b8; padding: 10px; border-radius: 3px; font-size: 14px; color: #0c5460;">
+                        ℹ️ <b>Note:</b><br>
+                        You are <b>not</b> applying these steps to a physical sample right now. You are simply saving a reusable blueprint!
+                    </div>
+                </div>
+            </details>
+            """
+        )
 
         self.children = [
+            self.register_process_notes,
             self.select_collection_title,
             self.select_collection_hbox,
             self.process_properties_title,
@@ -1005,8 +1063,8 @@ class RegisterProcessWidget(ipw.VBox):
             self.process_description_hbox,
             self.new_processes_title,
             self.new_processes_accordion,
-            self.add_process_step_button,
-            self.save_button,
+            button_row,
+            save_row
         ]
 
         self.add_process_step_button.on_click(self.add_process_step)
@@ -1598,7 +1656,7 @@ class RegisterActionWidget(ipw.VBox):
         if action_type == "-1":
             self.action_properties_widgets.children = []
             return
-
+        
         icon_mapping = {
             OPENBIS_OBJECT_TYPES.get("Annealing"): "🔥",
             OPENBIS_OBJECT_TYPES.get("Cooldown"): "❄️",
@@ -1707,6 +1765,8 @@ class RegisterActionWidget(ipw.VBox):
                 prop_value_widget = widget_type_map[prop_dataType]()
                 if prop == "NAME":
                     prop_value_widget.observe(self.change_action_title, names="value")
+                    default_action_name = action_type.replace("_", " ").title()
+                    prop_value_widget.value = f"{default_action_name} {self.action_index + 1}"
                 
                 action_properties_widgets.append(cw.HBox(children=[ipw.Label(value=prop_label), prop_value_widget], metadata={"property_name": prop}))
 
@@ -1918,7 +1978,8 @@ class RegisterObservableWidget(ipw.VBox):
             
             if prop == "NAME":
                 widget.observe(self.change_observable_title, names="value")
-                
+                widget.value = "Logs"
+
             observable_properties_widgets.append(cw.HBox(children=[ipw.Label(value=prop_label), widget], metadata={"property_name": prop}))
 
         self.observable_properties_widgets = ipw.VBox(children = observable_properties_widgets)

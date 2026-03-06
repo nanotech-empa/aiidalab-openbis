@@ -87,14 +87,16 @@ def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
         for filename in files_widget.value:
             file_info = files_widget.value[filename]
             write_file(file_info["content"], filename)
-            create_openbis_dataset(
-                ob_session, 
-                type=dataset_type, 
-                sample=ob_object, 
-                files=[filename],
-                props = props
-            )
-            os.remove(filename)
+            try:
+                create_openbis_dataset(
+                    ob_session, 
+                    type=dataset_type, 
+                    sample=ob_object, 
+                    files=[filename],
+                    props = props
+                )
+            finally:
+                os.remove(filename)
 
 
 def connect_openbis_aiida(eln_url=None):
