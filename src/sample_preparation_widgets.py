@@ -179,7 +179,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 )
                 act_widget = ActionHistoryWidget(self.openbis_session, act_object)
                 actions_accordion_children.append(act_widget)
-                act_title = act_widget.action_icon + " " + act_widget.name
+                act_title = act_widget.name
                 self.actions_accordion.set_title(i, act_title)
 
             self.actions_accordion.children = actions_accordion_children
@@ -194,7 +194,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 )
                 obs_widget = ObservableHistoryWidget(self.openbis_session, obs_dataset)
                 observables_accordion_children.append(obs_widget)
-                obs_title = "📈 " + obs_widget.name_html.value
+                obs_title = obs_widget.name_html.value
                 self.observables_accordion.set_title(i, obs_title)
 
             self.observables_accordion.children = observables_accordion_children
@@ -780,8 +780,8 @@ class RegisterPreparationWidget(ipw.VBox):
                 observables_widgets = process_widget.observables_accordion.children
                 actions = []
                 actions_codes = []
-                observables = []
-
+                process_step_icons = []
+                
                 if actions_widgets:
                     for action_widget in actions_widgets:
                         action_properties_values = {}
@@ -841,7 +841,7 @@ class RegisterPreparationWidget(ipw.VBox):
                                                 component_settings_name = f"{component_name} with "
                                                 for setting_widget in component_widget.children[2].children:
                                                     setting_prop_type = setting_widget.metadata.get("property_name")
-                                                    setting_prop_label = setting_widget.children[0].value
+                                                    setting_prop_label = setting_widget.children[0].value.removeprefix("<b>").removesuffix("</b>").removesuffix(":")
                                                     setting_prop_value = setting_widget.children[1].value
                                                     setting_prop_type_lower = setting_prop_type.lower()
                                                     component_settings_properties_values[setting_prop_type_lower] = setting_prop_value
@@ -854,7 +854,8 @@ class RegisterPreparationWidget(ipw.VBox):
                                                     self.openbis_session,
                                                     type=component_settings_type,
                                                     experiment = settings_collection.permId,
-                                                    props = component_settings_properties_values
+                                                    props = component_settings_properties_values,
+                                                    parents = [component_permid]
                                                 )
                                                 
                                                 component_settings_permid = new_component_settings.permId
@@ -902,6 +903,11 @@ class RegisterPreparationWidget(ipw.VBox):
                                 project=experiment_project_code,
                                 props={"name": "Actions"},
                             )
+                        
+                        process_step_icons.append(action_widget.action_icon)
+                        
+                        if action_widget.action_icon not in action_properties_values["name"]:
+                            action_properties_values["name"] = action_widget.action_icon + " " + action_properties_values["name"]
 
                         new_action_object = utils.create_openbis_object(
                             self.openbis_session,
@@ -949,7 +955,8 @@ class RegisterPreparationWidget(ipw.VBox):
                 
                 if instrument_permid != "-1":
                     new_process_object_parents.append(instrument_permid)
-                    
+                
+                new_process_object.props["name"] = f"[{''.join(process_step_icons)}] {new_process_object.props['name']}"
                 new_process_object.add_parents(new_process_object_parents)
                 utils.update_openbis_object(new_process_object)
                 
@@ -979,6 +986,9 @@ class RegisterPreparationWidget(ipw.VBox):
                                             observable_properties_values[prop_lower] = widget_value
                                         break
                         
+                        if "📈" not in observable_properties_values["name"]:
+                            observable_properties_values["name"] = "📈 " + observable_properties_values["name"]
+                            
                         utils.upload_datasets(
                             self.openbis_session,
                             new_process_object,
@@ -1086,7 +1096,7 @@ class RegisterProcessWidget(ipw.VBox):
             value="""
             <details style="background-color: #f4f6f9; border-left: 5px solid #2980b9; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-family: sans-serif; cursor: pointer;">
                 <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
-                    💡 Register Process Templates
+                    💡 Save Process Templates
                 </summary>
                 
                 <div style="margin-top: 12px; cursor: default;">
@@ -1547,7 +1557,7 @@ class RegisterActionWidget(ipw.VBox):
             INSTRUMENT_COMPONENTS = {k: list(v) for k, v in self.instrument_components.items()}
         else:
             self.instrument_components = {k: list(v) for k, v in INSTRUMENT_COMPONENTS.items()}
-
+        
         action_type_options = [("Select an action type...", "-1")] + list(ACTIONS_TYPES.items())
         
         self.action_type_dropdown = ipw.Dropdown(options=action_type_options, value="-1")
@@ -1854,28 +1864,59 @@ class RegisterActionWidget(ipw.VBox):
                 for obj in c_objs:
                     available_components_dict[obj.permId] = (obj.props["name"], c_type)
             
-            # Populate the initial "Component" dropdown
-            comp_dropdown_widget.options = [("Select a component to add...", "-1")] + [
+            # 1. Generate the list of components
+            component_options = [
                 (name, permId) for permId, (name, c_type) in available_components_dict.items()
             ]
+            
+            # 2. Sort the list alphabetically by the 'name' (which is the first item: x[0])
+            # Adding .lower() ensures "apple" and "Zebra" sort correctly ignoring capitalization
+            component_options.sort(key=lambda x: x[0].lower())
+            
+            # 3. Add the default 'Select' option to the very beginning and assign it
+            comp_dropdown_widget.options = [("Select a component to add...", "-1")] + component_options
             comp_dropdown_widget.value = "-1"
             
             def add_component_ui(change):
                 permid = change["new"]
                 if permid == "-1": return
                 
+                c_object = utils.get_openbis_object(self.openbis_session, sample_ident=permid)
                 c_name, c_type = available_components_dict[permid]
                 
                 # 1. Build the UI wrapper for this specific component
-                remove_btn = ipw.Button(description="X", button_style="danger", layout=ipw.Layout(width="40px"))
+                remove_btn = ipw.Button(
+                    icon = "close",
+                    button_style="danger", 
+                    layout=ipw.Layout(width="25px", height="25px", padding="0px"), 
+                    tooltip="Remove component"
+                )
                 header = cw.HBox(children=[ipw.HTML(value=f"<b>⚙️ {c_name}</b>"), remove_btn], metadata={"object_id": permid})
                 
                 # 2. Build Settings Dropdown
                 settings_type = f"{c_type}_SETTINGS"
-                settings_objs = utils.get_openbis_objects(self.openbis_session, type=settings_type)
-                settings_options = [("Select settings...", "-1")] + [(obj.props["name"], obj.permId) for obj in settings_objs]
+                settings_objs = utils.get_openbis_objects(self.openbis_session, type=settings_type, attrs=["parents"])
+
+                # Filter out any settings that don't have the current component as a parent
+                filtered_settings = [
+                    obj for obj in settings_objs 
+                    if obj.parents and (c_object.identifier in obj.parents or permid in obj.parents)
+                ]
+
+                # Build the options using the filtered list
+                dynamic_options = [(obj.props["name"], obj.permId) for obj in filtered_settings]
+                dynamic_options.sort(key=lambda x: x[1])
+
+                settings_options = [("Select settings...", "-1")] + dynamic_options
                 settings_dropdown = ipw.Dropdown(options=settings_options, value="-1")
                 settings_dropdown_hbox = cw.HBox(children=[ipw.HTML(value="<b>Settings:</b>"), settings_dropdown])
+                
+                is_updating_settings = False
+                def reset_settings_dropdown(change):
+                    nonlocal is_updating_settings
+                    # Only reset if we are NOT currently running the load_settings_values loop
+                    if settings_dropdown.value != "-1" and not is_updating_settings:
+                        settings_dropdown.value = "-1"
                 
                 # 3. Build Input Fields
                 prop_types = utils.get_openbis_object_type(self.openbis_session, type=settings_type).get_property_assignments().df.code.values
@@ -1886,27 +1927,37 @@ class RegisterActionWidget(ipw.VBox):
                     s_dataType = str(s_prop_type.dataType)
                     if s_dataType in widget_type_map:
                         w = widget_type_map[s_dataType]()
+                        s_prop_lower = s_prop.lower()
+                        s_value = c_object.props[s_prop_lower]
+                        if s_value is not None:
+                            w.value = s_value
+                        
+                        w.observe(reset_settings_dropdown, names="value")
                         settings_props_widgets.append(cw.HBox(children=[ipw.HTML(value=f"<b>{str(s_prop_type.label)}:</b>"), w], metadata={"property_name": s_prop}))
                 
                 settings_fields_vbox = ipw.VBox(children=settings_props_widgets)
                 
                 # 4. Settings Value Callback
                 def load_settings_values(s_change):
+                    nonlocal is_updating_settings
+                    
                     s_permid = s_change["new"]
                     if s_permid != "-1":
                         s_obj = utils.get_openbis_object(self.openbis_session, sample_ident=s_permid)
                         props = {k.upper(): v for k, v in s_obj.props().items()}
-                        for widget in settings_fields_vbox.children:
-                            prop_name = widget.metadata["property_name"]
-                            if prop_name in props:
-                                if props[prop_name] is not None:
+                        
+                        # 1. Block the reset callback
+                        is_updating_settings = True 
+                        
+                        try:
+                            # 2. Update all the widgets
+                            for widget in settings_fields_vbox.children:
+                                prop_name = widget.metadata["property_name"]
+                                if prop_name in props and props[prop_name] is not None:
                                     widget.children[1].value = props[prop_name]
-                    else:
-                        for widget in settings_fields_vbox.children:
-                            target = widget.children[1]
-                            if isinstance(target, (ipw.Text, ipw.Textarea)): target.value = ""
-                            elif isinstance(target, ipw.Checkbox): target.value = False
-                            elif isinstance(target, (ipw.FloatText, ipw.IntText)): target.value = 0
+                        finally:
+                            # 3. Unblock the reset callback after ALL widgets are done updating
+                            is_updating_settings = False
                             
                 settings_dropdown.observe(load_settings_values, names="value")
                 
@@ -1926,9 +1977,20 @@ class RegisterActionWidget(ipw.VBox):
                     ]
                     
                     comp_dropdown_widget.unobserve(add_component_ui, names="value")
+                    
                     current_options = list(comp_dropdown_widget.options)
                     current_options.extend(components_to_restore)
-                    comp_dropdown_widget.options = current_options
+                    
+                    # 1. Separate the default option from the actual components
+                    default_option = [opt for opt in current_options if opt[1] == "-1"]
+                    actual_components = [opt for opt in current_options if opt[1] != "-1"]
+                    
+                    # 2. Sort the actual components alphabetically by name (case-insensitive)
+                    actual_components.sort(key=lambda x: x[0].lower())
+                    
+                    # 3. Recombine them with the default option at the top
+                    comp_dropdown_widget.options = default_option + actual_components
+                    
                     comp_dropdown_widget.value = "-1"
                     comp_dropdown_widget.observe(add_component_ui, names="value")
 
@@ -2017,6 +2079,8 @@ class RegisterObservableWidget(ipw.VBox):
                     for obj_type, obj_list in self.instrument_components.items():
                         for obj in obj_list:
                             sample_options.append((obj.props["name"], obj.permId))
+                    
+                    sample_options.sort(key=lambda x: x[0].lower())
                     widget = ipw.SelectMultiple(
                         options=sample_options, 
                         value=[],

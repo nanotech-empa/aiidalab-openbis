@@ -928,7 +928,7 @@ class SelectExperimentWidget(ipw.VBox):
         for exp in experiments:
             name = exp.props['name'] if "name" in exp.props.all() else exp.code
             display_name = f"{name} from Project {exp.project.code} and Space {exp.project.space}"
-            registrator = getattr(exp.project.registrator, 'userId', exp.project.registrator)
+            registrator = getattr(exp.registrator, 'userId', exp.registrator)
             
             data.append({
                 "display_name": display_name,
