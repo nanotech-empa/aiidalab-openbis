@@ -1,6 +1,7 @@
 import ipywidgets as ipw
 from . import utils, widgets
 import os
+import pandas as pd
 import logging
 from IPython.display import display, Javascript
 
