@@ -702,12 +702,12 @@ class SelectInstrumentWidget(ipw.VBox):
         super().__init__()
         self.openbis_session = openbis_session
 
-        self.instrument_label = ipw.Label(value="Instrument")
+        self.instrument_label = ipw.HTML(value="<b>Instrument:</b>")
 
         self.instrument_dropdown = ipw.Dropdown()
         self.load_instruments()
 
-        self.sort_instrument_label = ipw.Label(value="Sort by:")
+        self.sort_instrument_label = ipw.HTML(value="<b>Sort by:</b>")
 
         self.sort_name_label = ipw.Label(
             value="Name",
@@ -798,170 +798,149 @@ class SelectExperimentWidget(ipw.VBox):
     def __init__(self, openbis_session):
         super().__init__()
         self.openbis_session = openbis_session
+        self.current_user = self.openbis_session._get_username()
 
-        self.create_experiment_button = ipw.Button(
-            tooltip="Add", icon="plus", layout=ipw.Layout(width="50px", height="25px")
-        )
+        # 1. State DataFrames
+        self.raw_experiments_df = None
+        self.raw_projects_df = None
 
-        self.experiment_label = ipw.Label(value="Experiment")
+        # 2. Build the UI components (but keep the creation panel hidden at first)
+        self._setup_main_ui()
+        self._setup_create_ui()
 
-        self.experiment_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+        # 3. Assemble and load initial data
+        self.children = [self.main_ui_container, self.create_new_experiment_widgets]
         self.load_experiments()
 
-        self.sort_experiment_label = ipw.Label(value="Sort by:")
-
-        self.sort_name_label = ipw.Label(
-            value="Name",
-            layout=ipw.Layout(margin="2px", width="50px"),
-            style={"description_width": "initial"},
+    # ==========================================
+    # 1. UI SETUP METHODS
+    # ==========================================
+    def _setup_main_ui(self):
+        """Sets up the main Experiment selection dropdown and filters."""
+        self.experiment_label = ipw.HTML(
+            value="<b>Experiment:</b>", layout=ipw.Layout(width="80px")
         )
-
-        self.sort_name_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
+        self.experiment_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+        self.create_experiment_button = ipw.Button(
+            tooltip="Add new experiment",
+            icon="plus",
+            layout=ipw.Layout(width="50px", height="28px"),
         )
+        self.create_experiment_button.on_click(self.show_create_panel)
 
-        self.sort_registration_date_label = ipw.Label(
-            value="Registration date",
-            layout=ipw.Layout(margin="2px", width="110px"),
-            style={"description_width": "initial"},
-        )
-
-        self.sort_registration_date_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
-        )
-
-        self.sort_experiment_widgets = ipw.HBox(
-            children=[
-                self.sort_experiment_label,
-                self.sort_name_checkbox,
-                self.sort_name_label,
-                self.sort_registration_date_checkbox,
-                self.sort_registration_date_label,
-            ]
-        )
-
-        self.experiment_dropdown_boxes = ipw.HBox(
-            children=[
+        self.exp_hbox = ipw.HBox(
+            [
                 self.experiment_label,
                 self.experiment_dropdown,
                 self.create_experiment_button,
             ]
         )
 
-        self.create_new_experiment_widgets = ipw.VBox()
+        # Sorting and Filtering
+        self.sort_label = ipw.HTML(
+            value="<b>Sort by:</b>", layout=ipw.Layout(width="80px")
+        )
+        self.sort_name_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
+        )
+        self.sort_name_label = ipw.Label("Name", layout=ipw.Layout(width="60px"))
+        self.sort_date_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
+        )
+        self.sort_date_label = ipw.Label("Registration Date")
 
-        self.children = [
-            self.experiment_dropdown_boxes,
-            self.sort_experiment_widgets,
-            self.create_new_experiment_widgets,
-        ]
+        self.filter_label = ipw.HTML(
+            value="<b>Filter:</b>", layout=ipw.Layout(width="80px")
+        )
+        self.filter_my_exp_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
+        )
+        self.filter_my_exp_label = ipw.Label("My Experiments Only")
 
-        self.create_experiment_button.on_click(self.create_new_experiment)
-        self.sort_name_checkbox.observe(self.sort_experiment_dropdown, names="value")
-        self.sort_registration_date_checkbox.observe(
-            self.sort_experiment_dropdown, names="value"
+        self.sort_hbox = ipw.HBox(
+            [
+                self.sort_label,
+                self.sort_name_cb,
+                self.sort_name_label,
+                self.sort_date_cb,
+                self.sort_date_label,
+            ]
+        )
+        self.filter_hbox = ipw.HBox(
+            [self.filter_label, self.filter_my_exp_cb, self.filter_my_exp_label]
         )
 
-    def load_experiments(self):
-        experiments = utils.get_openbis_collections(
-            self.openbis_session, type="EXPERIMENT"
-        )
-        experiment_options = []
-        for exp in experiments:
-            if "name" in exp.props.all():
-                exp_option = (
-                    f"{exp.props['name']} from Project {exp.project.code} and Space {exp.project.space}",
-                    exp.permId,
-                )
-            else:
-                exp_option = (
-                    f"{exp.code} from Project {exp.project.code} and Space {exp.project.space}",
-                    exp.permId,
-                )
-            experiment_options.append(exp_option)
-        experiment_options.insert(0, ("Select experiment...", "-1"))
-        self.experiment_dropdown.options = experiment_options
-        self.experiment_dropdown.value = "-1"
+        # Observers
+        self.sort_name_cb.observe(self.update_experiment_dropdown, names="value")
+        self.sort_date_cb.observe(self.update_experiment_dropdown, names="value")
+        self.filter_my_exp_cb.observe(self.update_experiment_dropdown, names="value")
 
-    def sort_experiment_dropdown(self, change):
-        options = self.experiment_dropdown.options[1:]
-
-        df = pd.DataFrame(options, columns=["name", "registration_date"])
-        if (
-            self.sort_name_checkbox.value
-            and not self.sort_registration_date_checkbox.value
-        ):
-            df = df.sort_values(by="name", ascending=True)
-        elif (
-            not self.sort_name_checkbox.value
-            and self.sort_registration_date_checkbox.value
-        ):
-            df = df.sort_values(by="registration_date", ascending=False)
-        elif (
-            self.sort_name_checkbox.value and self.sort_registration_date_checkbox.value
-        ):
-            df = df.sort_values(
-                by=["name", "registration_date"], ascending=[True, False]
-            )
-
-        options = list(df.itertuples(index=False, name=None))
-        options.insert(0, self.experiment_dropdown.options[0])
-        self.experiment_dropdown.options = options
-
-    def create_new_experiment(self, b):
-        new_experiment_name_label = ipw.Label(value="Name")
-
-        new_experiment_name_textbox = ipw.Text(placeholder="Write experiment name...")
-
-        new_experiment_name_hbox = ipw.HBox(
-            children=[new_experiment_name_label, new_experiment_name_textbox]
+        self.main_ui_container = ipw.VBox(
+            [self.exp_hbox, self.sort_hbox, self.filter_hbox]
         )
 
-        project_label = ipw.Label(value="Project")
+    def _setup_create_ui(self):
+        """Sets up the 'Create New Experiment' form (initially empty/hidden)."""
+        self.create_new_experiment_widgets = (
+            ipw.VBox()
+        )  # We populate this when the '+' is clicked
 
-        projects = utils.get_openbis_projects(self.openbis_session)
-        project_dropdown_options = [
-            (f"{proj.code} from Space {proj.space}", proj.permId) for proj in projects
-        ]
-        project_dropdown_options.insert(0, ("Select project...", "-1"))
-
-        project_dropdown = ipw.Dropdown(options=project_dropdown_options, value="-1")
-
-        project_hbox = ipw.HBox(children=[project_label, project_dropdown])
-
-        sort_project_label = ipw.Label(value="Sort by:")
-
-        sort_project_name_label = ipw.Label(
-            value="Name",
-            layout=ipw.Layout(margin="2px", width="50px"),
-            style={"description_width": "initial"},
+        # Project UI
+        self.project_label = ipw.HTML(
+            value="<b>Project:</b>", layout=ipw.Layout(width="80px")
         )
+        self.project_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+        self.project_hbox = ipw.HBox([self.project_label, self.project_dropdown])
 
-        sort_project_name_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
+        # Sort Row
+        self.sort_proj_label = ipw.HTML(
+            value="<b>Sort by:</b>", layout=ipw.Layout(width="80px")
         )
-
-        sort_project_registration_date_label = ipw.Label(
-            value="Registration date",
-            layout=ipw.Layout(margin="2px", width="110px"),
-            style={"description_width": "initial"},
+        self.sort_proj_name_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
         )
-
-        sort_project_registration_date_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
+        self.sort_proj_name_label = ipw.Label("Name", layout=ipw.Layout(width="60px"))
+        self.sort_proj_date_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
         )
+        self.sort_proj_date_label = ipw.Label("Registration Date")
 
-        sort_project_hbox = ipw.HBox(
-            children=[
-                sort_project_label,
-                sort_project_name_checkbox,
-                sort_project_name_label,
-                sort_project_registration_date_checkbox,
-                sort_project_registration_date_label,
+        self.sort_proj_hbox = ipw.HBox(
+            [
+                self.sort_proj_label,
+                self.sort_proj_name_cb,
+                self.sort_proj_name_label,
+                self.sort_proj_date_cb,
+                self.sort_proj_date_label,
             ]
         )
 
-        save_button = ipw.Button(
+        # Filter Row (Now on its own line)
+        self.filter_proj_label = ipw.HTML(
+            value="<b>Filter:</b>", layout=ipw.Layout(width="80px")
+        )
+        self.filter_my_proj_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
+        )
+        self.filter_my_proj_label = ipw.Label("My Projects Only")
+
+        self.filter_proj_hbox = ipw.HBox(
+            [self.filter_proj_label, self.filter_my_proj_cb, self.filter_my_proj_label]
+        )
+
+        # Name Input
+        self.new_exp_name_label = ipw.HTML(
+            value="<b>Name:</b>", layout=ipw.Layout(width="80px")
+        )
+        self.new_exp_name_textbox = ipw.Text(
+            placeholder="Write experiment name...", layout=ipw.Layout(width="500px")
+        )
+        self.new_exp_name_hbox = ipw.HBox(
+            [self.new_exp_name_label, self.new_exp_name_textbox]
+        )
+
+        # Buttons (Reverted back to your original uncolored, 50px height styling)
+        self.save_btn = ipw.Button(
             description="",
             disabled=False,
             button_style="",
@@ -969,8 +948,7 @@ class SelectExperimentWidget(ipw.VBox):
             icon="save",
             layout=ipw.Layout(width="100px", height="50px"),
         )
-
-        cancel_button = ipw.Button(
+        self.cancel_btn = ipw.Button(
             description="",
             disabled=False,
             button_style="",
@@ -978,81 +956,175 @@ class SelectExperimentWidget(ipw.VBox):
             icon="times",
             layout=ipw.Layout(width="100px", height="50px"),
         )
+        self.buttons_hbox = ipw.HBox([self.save_btn, self.cancel_btn])
 
-        buttons_hbox = ipw.HBox(children=[save_button, cancel_button])
+        # Observers for Projects
+        self.sort_proj_name_cb.observe(self.update_project_dropdown, names="value")
+        self.sort_proj_date_cb.observe(self.update_project_dropdown, names="value")
+        self.filter_my_proj_cb.observe(self.update_project_dropdown, names="value")
+        self.save_btn.on_click(self.save_new_experiment)
+        self.cancel_btn.on_click(self.hide_create_panel)
 
-        def save_new_experiment(b):
-            experiment_props = {
-                "name": new_experiment_name_textbox.value,
-                "default_collection_view": "IMAGING_GALLERY_VIEW",
-            }
+        # Assembling the layout with the new filter row included
+        header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
 
-            project_id = project_dropdown.value
-
-            if project_id == "-1":
-                display(Javascript(data="alert('Select a project.')"))
-                return
-            else:
-                try:
-                    new_experiment = utils.create_openbis_collection(
-                        self.openbis_session,
-                        type="EXPERIMENT",
-                        project=project_dropdown.value,
-                        props=experiment_props,
-                    )
-                    self.create_new_experiment_widgets.children = []
-                    self.load_experiments()
-                    self.experiment_dropdown.value = new_experiment.permId
-                    display(
-                        Javascript(data="alert('Experiment successfully created!')")
-                    )
-                except ValueError:
-                    display(
-                        Javascript(
-                            data="alert('Error! Check if experiment already exists (either in ELN or Trash).')"
-                        )
-                    )
-
-        def cancel_new_experiment(b):
-            self.create_new_experiment_widgets.children = []
-
-        def sort_project_dropdown(change):
-            options = project_dropdown_options[1:]
-
-            df = pd.DataFrame(options, columns=["name", "registration_date"])
-            if (
-                sort_project_name_checkbox.value
-                and not sort_project_registration_date_checkbox.value
-            ):
-                df = df.sort_values(by="name", ascending=True)
-            elif (
-                not sort_project_name_checkbox.value
-                and sort_project_registration_date_checkbox.value
-            ):
-                df = df.sort_values(by="registration_date", ascending=False)
-            elif (
-                sort_project_name_checkbox.value
-                and sort_project_registration_date_checkbox.value
-            ):
-                df = df.sort_values(
-                    by=["name", "registration_date"], ascending=[True, False]
-                )
-
-            options = list(df.itertuples(index=False, name=None))
-            options.insert(0, project_dropdown_options[0])
-            project_dropdown.options = options
-
-        save_button.on_click(save_new_experiment)
-        cancel_button.on_click(cancel_new_experiment)
-        sort_project_name_checkbox.observe(sort_project_dropdown)
-        sort_project_registration_date_checkbox.observe(sort_project_dropdown)
-
-        self.create_new_experiment_widgets.children = [
-            project_hbox,
-            sort_project_hbox,
-            new_experiment_name_hbox,
-            buttons_hbox,
+        self.create_panel_content = [
+            ipw.HTML(f"<div style='{header_style}'>Create new experiment</div>"),
+            self.project_hbox,
+            self.sort_proj_hbox,
+            self.filter_proj_hbox,  # <-- New filter row added here
+            self.new_exp_name_hbox,
+            self.buttons_hbox,
+            ipw.HTML("<hr>"),
         ]
+
+    # ==========================================
+    # 2. DATA LOADING METHODS
+    # ==========================================
+    def load_experiments(self):
+        """Fetches experiments from openBIS ONCE and stores them."""
+        experiments = utils.get_openbis_collections(
+            self.openbis_session, type="EXPERIMENT"
+        )
+
+        data = []
+        for exp in experiments:
+            name = exp.props["name"] if "name" in exp.props.all() else exp.code
+            display_name = (
+                f"{name} from Project {exp.project.code} and Space {exp.project.space}"
+            )
+            registrator = getattr(exp.registrator, "userId", exp.registrator)
+
+            data.append(
+                {
+                    "display_name": display_name,
+                    "permId": exp.permId,
+                    "is_mine": registrator == self.current_user,
+                }
+            )
+
+        self.raw_experiments_df = pd.DataFrame(data)
+        self.update_experiment_dropdown(None)
+
+    def load_projects(self):
+        """Fetches projects from openBIS ONCE and stores them."""
+        if self.raw_projects_df is not None:
+            return  # Skip if already loaded
+
+        projects = utils.get_openbis_projects(self.openbis_session)
+
+        data = []
+        for proj in projects:
+            display_name = f"{proj.code} from Space {proj.space}"
+            registrator = getattr(proj.registrator, "userId", proj.registrator)
+
+            data.append(
+                {
+                    "display_name": display_name,
+                    "permId": proj.permId,
+                    "is_mine": registrator == self.current_user,
+                }
+            )
+
+        self.raw_projects_df = pd.DataFrame(data)
+        self.update_project_dropdown(None)
+
+    # ==========================================
+    # 3. DROPDOWN UPDATE ENGINES
+    # ==========================================
+    def update_experiment_dropdown(self, change):
+        if self.raw_experiments_df is None or self.raw_experiments_df.empty:
+            return
+
+        df = self.raw_experiments_df.copy()
+
+        if self.filter_my_exp_cb.value:
+            df = df[df["is_mine"]]
+
+        sort_cols, sort_asc = ["is_mine"], [False]
+        if self.sort_name_cb.value:
+            sort_cols.append("display_name")
+            sort_asc.append(True)
+        if self.sort_date_cb.value or (
+            not self.sort_name_cb.value and not self.sort_date_cb.value
+        ):
+            sort_cols.append("permId")
+            sort_asc.append(False)
+
+        df = df.sort_values(by=sort_cols, ascending=sort_asc)
+        options = list(
+            df[["display_name", "permId"]].itertuples(index=False, name=None)
+        )
+        options.insert(0, ("Select experiment...", "-1"))
+        self.experiment_dropdown.options = options
+
+    def update_project_dropdown(self, change):
+        if self.raw_projects_df is None or self.raw_projects_df.empty:
+            return
+
+        df = self.raw_projects_df.copy()
+
+        if self.filter_my_proj_cb.value:
+            df = df[df["is_mine"]]
+
+        sort_cols, sort_asc = ["is_mine"], [False]
+        if self.sort_proj_name_cb.value:
+            sort_cols.append("display_name")
+            sort_asc.append(True)
+        if self.sort_proj_date_cb.value or (
+            not self.sort_proj_name_cb.value and not self.sort_proj_date_cb.value
+        ):
+            sort_cols.append("permId")
+            sort_asc.append(False)
+
+        df = df.sort_values(by=sort_cols, ascending=sort_asc)
+        options = list(
+            df[["display_name", "permId"]].itertuples(index=False, name=None)
+        )
+        options.insert(0, ("Select project...", "-1"))
+        self.project_dropdown.options = options
+
+    # ==========================================
+    # 4. ACTION HANDLERS
+    # ==========================================
+    def show_create_panel(self, b):
+        self.load_projects()  # Load data only when button is clicked
+        self.create_new_experiment_widgets.children = self.create_panel_content
+
+    def hide_create_panel(self, b=None):
+        self.create_new_experiment_widgets.children = []
+        self.new_exp_name_textbox.value = ""  # Clear the input
+
+    def save_new_experiment(self, b):
+        project_id = self.project_dropdown.value
+        exp_name = self.new_exp_name_textbox.value.strip()
+
+        if project_id == "-1":
+            display(Javascript(data="alert('Select a project.')"))
+            return
+        if not exp_name:
+            display(Javascript(data="alert('Experiment name cannot be empty.')"))
+            return
+
+        try:
+            new_experiment = utils.create_openbis_collection(
+                self.openbis_session,
+                type="EXPERIMENT",
+                project=project_id,
+                props={
+                    "name": exp_name,
+                    "default_collection_view": "IMAGING_GALLERY_VIEW",
+                },
+            )
+            self.hide_create_panel()
+            self.load_experiments()  # Reload the main DataFrame
+            self.experiment_dropdown.value = new_experiment.permId
+            display(Javascript(data="alert('Experiment successfully created!')"))
+
+        except ValueError:
+            display(
+                Javascript(data="alert('Error! Check if experiment already exists.')")
+            )
 
 
 class SelectSampleWidget(ipw.VBox):
@@ -1060,92 +1132,149 @@ class SelectSampleWidget(ipw.VBox):
         super().__init__()
         self.openbis_session = openbis_session
 
-        self.sample_label = ipw.Label(value="Sample")
+        # 1. State variables to hold our raw data
+        self.current_user = self.openbis_session._get_username()
+        self.raw_data_df = (
+            None  # We will store the unfiltered, unsorted openBIS data here
+        )
 
-        self.sample_dropdown = ipw.Dropdown()
+        # 2. Build the UI
+        self._setup_ui()
+
+        # 3. Load the data exactly once
         self.load_samples()
 
-        self.sort_sample_label = ipw.Label(value="Sort by:")
+    def _setup_ui(self):
+        """Sets up all the UI widgets and their observers."""
+        # --- Dropdown ---
+        self.sample_label = ipw.HTML(
+            value="<b>Sample:</b>", layout=ipw.Layout(width="70px")
+        )
+        self.sample_dropdown = ipw.Dropdown(layout=ipw.Layout(width="300px"))
 
-        self.sort_name_label = ipw.Label(
-            value="Name",
-            layout=ipw.Layout(margin="2px", width="50px"),
-            style={"description_width": "initial"},
+        # --- Sorting Checkboxes ---
+        self.sort_label = ipw.HTML(
+            value="<b>Sort by:</b>", layout=ipw.Layout(width="70px")
         )
 
-        self.sort_name_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
+        self.sort_name_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
         )
+        self.sort_name_label = ipw.Label("Name", layout=ipw.Layout(width="60px"))
 
-        self.sort_registration_date_label = ipw.Label(
-            value="Registration date",
-            layout=ipw.Layout(margin="2px", width="110px"),
-            style={"description_width": "initial"},
+        self.sort_date_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
         )
+        self.sort_date_label = ipw.Label("Registration Date")
 
-        self.sort_registration_date_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
+        # --- New Filtering Checkbox ---
+        self.filter_label = ipw.HTML(
+            value="<b>Filter:</b>", layout=ipw.Layout(width="70px")
         )
+        self.filter_my_samples_cb = ipw.Checkbox(
+            indent=False, layout=ipw.Layout(width="20px", margin="0px")
+        )
+        self.filter_my_samples_label = ipw.Label("My Samples Only")
 
-        self.sort_sample_hbox = ipw.HBox(
-            children=[
-                self.sort_sample_label,
-                self.sort_name_checkbox,
+        # --- Observers (Connect UI to the update function) ---
+        # Instead of multiple functions, any UI change triggers the single update_dropdown function
+        self.sort_name_cb.observe(self.update_dropdown, names="value")
+        self.sort_date_cb.observe(self.update_dropdown, names="value")
+        self.filter_my_samples_cb.observe(self.update_dropdown, names="value")
+
+        # --- Layout Assembly ---
+        self.sample_hbox = ipw.HBox([self.sample_label, self.sample_dropdown])
+
+        self.sort_hbox = ipw.HBox(
+            [
+                self.sort_label,
+                self.sort_name_cb,
                 self.sort_name_label,
-                self.sort_registration_date_checkbox,
-                self.sort_registration_date_label,
+                self.sort_date_cb,
+                self.sort_date_label,
             ]
         )
 
-        self.sample_dropdown_hbox = ipw.HBox(
-            children=[
-                self.sample_label,
-                self.sample_dropdown,
-            ]
+        self.filter_hbox = ipw.HBox(
+            [self.filter_label, self.filter_my_samples_cb, self.filter_my_samples_label]
         )
 
-        self.sort_name_checkbox.observe(self.sort_sample_dropdown, names="value")
-        self.sort_registration_date_checkbox.observe(
-            self.sort_sample_dropdown, names="value"
-        )
-
-        self.children = [self.sample_dropdown_hbox, self.sort_sample_hbox]
+        self.children = [self.sample_hbox, self.sort_hbox, self.filter_hbox]
 
     def load_samples(self):
-        sample_type = OPENBIS_OBJECT_TYPES["Sample"]
+        """Fetches data from openBIS ONCE and stores it in a master DataFrame."""
+        sample_type = OPENBIS_OBJECT_TYPES["Sample"]  # Ensure this is defined globally
         samples = utils.get_openbis_objects(
             self.openbis_session, type=sample_type, where={"object_status": "ACTIVE"}
         )
-        sample_options = [(f"{obj.props['name']}", obj.permId) for obj in samples]
-        sample_options = sorted(sample_options, key=lambda x: x[1], reverse=True)
-        sample_options.insert(0, ("Select sample...", "-1"))
-        self.sample_dropdown.options = sample_options
-        self.sample_dropdown.value = "-1"
 
-    def sort_sample_dropdown(self, change):
-        options = self.sample_dropdown.options[1:]
+        # Build a structured list of dictionaries for Pandas
+        data = []
+        for obj in samples:
+            name = obj.props["name"] if "name" in obj.props.all() else obj.code
+            registrator = getattr(obj.registrator, "userId", obj.registrator)
 
-        df = pd.DataFrame(options, columns=["name", "registration_date"])
-        if (
-            self.sort_name_checkbox.value
-            and not self.sort_registration_date_checkbox.value
-        ):
-            df = df.sort_values(by="name", ascending=True)
-        elif (
-            not self.sort_name_checkbox.value
-            and self.sort_registration_date_checkbox.value
-        ):
-            df = df.sort_values(by="registration_date", ascending=False)
-        elif (
-            self.sort_name_checkbox.value and self.sort_registration_date_checkbox.value
-        ):
-            df = df.sort_values(
-                by=["name", "registration_date"], ascending=[True, False]
+            data.append(
+                {
+                    "display_name": name,
+                    "permId": obj.permId,  # Using permId as a proxy for registration date
+                    "registrator": registrator,
+                    "is_mine": registrator == self.current_user,
+                }
             )
 
-        options = list(df.itertuples(index=False, name=None))
-        options.insert(0, self.sample_dropdown.options[0])
+        # Store as a master DataFrame
+        self.raw_data_df = pd.DataFrame(data)
+
+        # Trigger the initial population of the dropdown
+        self.update_dropdown(None)
+
+    def update_dropdown(self, change):
+        """Filters and sorts the master DataFrame based on the current UI state."""
+        if self.raw_data_df is None or self.raw_data_df.empty:
+            return
+
+        # 1. Start with a fresh copy of the raw data
+        df = self.raw_data_df.copy()
+
+        # 2. Apply Filters first
+        if self.filter_my_samples_cb.value:
+            df = df[df["is_mine"]]
+
+        # 3. Apply Sorting
+        sort_columns = []
+        sort_ascending = []
+
+        # Define how "user first" sorting works: True values (is_mine) come before False
+        sort_columns.append("is_mine")
+        sort_ascending.append(False)
+
+        if self.sort_name_cb.value:
+            sort_columns.append("display_name")
+            sort_ascending.append(True)  # A-Z
+
+        if self.sort_date_cb.value:
+            sort_columns.append("permId")
+            sort_ascending.append(False)  # Newest first (descending)
+        elif not self.sort_name_cb.value and not self.sort_date_cb.value:
+            # Default fallback sort if nothing is checked: just sort by newest
+            sort_columns.append("permId")
+            sort_ascending.append(False)
+
+        # Execute the sort
+        df = df.sort_values(by=sort_columns, ascending=sort_ascending)
+
+        # 4. Format for the ipywidgets Dropdown
+        # The dropdown requires a list of tuples: [("Display Text", "Value"), ...]
+        options = list(
+            df[["display_name", "permId"]].itertuples(index=False, name=None)
+        )
+
+        options.insert(0, ("Select sample...", "-1"))
+
+        # 5. Update the widget
         self.sample_dropdown.options = options
+        self.sample_dropdown.value = "-1"
 
 
 class SelectProjectWidget(ipw.VBox):

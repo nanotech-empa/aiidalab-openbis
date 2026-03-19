@@ -1,4 +1,5 @@
 {
+    "ACTION": "ACTN",
     "ANNEALING": "HEAT",
     "COOLDOWN": "COOL",
     "SPUTTERING": "IONB",

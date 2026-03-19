@@ -13,28 +13,44 @@ string_io = io.StringIO()
 # OpenBIS-AiiDAlab functions
 
 
-def get_openbis_collections(openbis_session, **kwargs):
-    return openbis_session.get_collections(**kwargs)
+def get_openbis_collections(openbis_session, *args, **kwargs):
+    return openbis_session.get_collections(*args, **kwargs)
 
 
-def get_openbis_projects(openbis_session, **kwargs):
-    return openbis_session.get_projects(**kwargs)
+def get_openbis_projects(openbis_session, *args, **kwargs):
+    return openbis_session.get_projects(*args, **kwargs)
 
 
-def get_openbis_objects(openbis_session, **kwargs):
-    return openbis_session.get_objects(**kwargs)
+def get_openbis_datasets(openbis_session, *args, **kwargs):
+    return openbis_session.get_datasets(*args, **kwargs)
 
 
-def get_openbis_object(openbis_session, **kwargs):
-    return openbis_session.get_object(**kwargs)
+def get_openbis_dataset(openbis_session, *args, **kwargs):
+    return openbis_session.get_dataset(*args, **kwargs)
 
 
-def get_openbis_collection(openbis_session, **kwargs):
-    return openbis_session.get_collection(**kwargs)
+def get_openbis_objects(openbis_session, *args, **kwargs):
+    return openbis_session.get_objects(*args, **kwargs)
 
 
-def get_openbis_property_type(openbis_session, **kwargs):
-    return openbis_session.get_property_type(**kwargs)
+def get_openbis_object(openbis_session, *args, **kwargs):
+    return openbis_session.get_object(*args, **kwargs)
+
+
+def get_openbis_collection(openbis_session, *args, **kwargs):
+    return openbis_session.get_collection(*args, **kwargs)
+
+
+def get_openbis_object_type(openbis_session, *args, **kwargs):
+    return openbis_session.get_object_type(*args, **kwargs)
+
+
+def get_openbis_dataset_type(openbis_session, *args, **kwargs):
+    return openbis_session.get_dataset_type(*args, **kwargs)
+
+
+def get_openbis_property_type(openbis_session, *args, **kwargs):
+    return openbis_session.get_property_type(*args, **kwargs)
 
 
 def find_first_atomistic_model(openbis_session, openbis_object, openbis_type):
@@ -72,15 +88,21 @@ def find_openbis_simulations(ob_session, root_obj, simulation_types):
     return simulation_objects
 
 
-def upload_datasets(ob_session, ob_object, files_widget, dataset_type):
+def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
     with contextlib.redirect_stdout(string_io):
         for filename in files_widget.value:
             file_info = files_widget.value[filename]
             write_file(file_info["content"], filename)
-            create_openbis_dataset(
-                ob_session, type=dataset_type, sample=ob_object, files=[filename]
-            )
-            os.remove(filename)
+            try:
+                create_openbis_dataset(
+                    ob_session,
+                    type=dataset_type,
+                    sample=ob_object,
+                    files=[filename],
+                    props=props,
+                )
+            finally:
+                os.remove(filename)
 
 
 def connect_openbis_aiida(eln_url=None):

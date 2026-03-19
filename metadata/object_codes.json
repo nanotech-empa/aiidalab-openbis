@@ -1,4 +1,6 @@
 {
     "Process Step": "PRST",
-    "Sample": "SAMP"
+    "Sample": "SAMP",
+    "Instrument": "INST",
+    "Instrument STM": "ISTM"
 }
