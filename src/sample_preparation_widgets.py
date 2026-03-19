@@ -1523,6 +1523,7 @@ class RegisterProcessWidget(ipw.VBox):
                                                     type=component_settings_type,
                                                     experiment=collection_id,
                                                     props=component_settings_properties_values,
+                                                    parents=[component_permid]
                                                 )
 
                                                 action_properties_values[
