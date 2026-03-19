@@ -20,11 +20,14 @@ def get_openbis_collections(openbis_session, *args, **kwargs):
 def get_openbis_projects(openbis_session, *args, **kwargs):
     return openbis_session.get_projects(*args, **kwargs)
 
+
 def get_openbis_datasets(openbis_session, *args, **kwargs):
     return openbis_session.get_datasets(*args, **kwargs)
 
+
 def get_openbis_dataset(openbis_session, *args, **kwargs):
     return openbis_session.get_dataset(*args, **kwargs)
+
 
 def get_openbis_objects(openbis_session, *args, **kwargs):
     return openbis_session.get_objects(*args, **kwargs)
@@ -37,11 +40,14 @@ def get_openbis_object(openbis_session, *args, **kwargs):
 def get_openbis_collection(openbis_session, *args, **kwargs):
     return openbis_session.get_collection(*args, **kwargs)
 
+
 def get_openbis_object_type(openbis_session, *args, **kwargs):
     return openbis_session.get_object_type(*args, **kwargs)
 
+
 def get_openbis_dataset_type(openbis_session, *args, **kwargs):
     return openbis_session.get_dataset_type(*args, **kwargs)
+
 
 def get_openbis_property_type(openbis_session, *args, **kwargs):
     return openbis_session.get_property_type(*args, **kwargs)
@@ -89,11 +95,11 @@ def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
             write_file(file_info["content"], filename)
             try:
                 create_openbis_dataset(
-                    ob_session, 
-                    type=dataset_type, 
-                    sample=ob_object, 
+                    ob_session,
+                    type=dataset_type,
+                    sample=ob_object,
                     files=[filename],
-                    props = props
+                    props=props,
                 )
             finally:
                 os.remove(filename)

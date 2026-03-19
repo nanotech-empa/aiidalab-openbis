@@ -11,6 +11,7 @@ from datetime import datetime
 
 # Enums
 
+
 class ComponentMainCategoryEnum(str, Enum):
     Auxiliary = "Auxiliary"
     Microscope_Core_Components = "Microscope Core Components"
@@ -296,19 +297,6 @@ class ActionSettings(BaseModel):
 
 class ObservableSettings(BaseModel):
     observable_type: str = Field(default="")
-    observable: Union[
-        "CurrentObservable",
-        "ElementalCompositionObservable",
-        "FluxObservable",
-        "ForceObservable",
-        "InductanceObservable",
-        "PHValueObservable",
-        "PressureObservable",
-        "ResistanceObservable",
-        "SpeedObservable",
-        "TemperatureObservable",
-        "VoltageObservable",
-    ] = Field(default=None)
 
 
 class ProcessStepSettings(BaseModel):
@@ -363,7 +351,8 @@ class OpenBISObject(BaseModel):
         description="Additional comments about the object",
         metadata={"type": "MULTILINE_VARCHAR"},
     )
-    
+
+
 class OpenBISDataset(BaseModel):
     permId: str = Field(
         default="",
@@ -1841,11 +1830,11 @@ class EvaporatorSlot(Component):
         description="EP percentage",
         metadata={"type": "REAL"},
     )
-    evaporator: Evaporator = Field(
+    evaporator: "Evaporator" = Field(
         default=None,
         title="Evaporator",
         description="Evaporator to which the slot belongs.",
-        metadata={"type": "PARENT"}
+        metadata={"type": "PARENT"},
     )
 
     @classmethod
@@ -2298,6 +2287,7 @@ class Script(OpenBISObject):
     @classmethod
     def get_label(cls) -> str:
         return "Script"
+
 
 class Software(OpenBISObject):
     version: str = Field(
@@ -3180,7 +3170,13 @@ class Result(OpenBISObject):
         metadata={"type": "PARENT"},
     )
     simulations: List[
-        Union[BandStructure, GeometryOptimisation, PDOS, VibrationalSpectroscopy, STMSimulation]
+        Union[
+            BandStructure,
+            GeometryOptimisation,
+            PDOS,
+            VibrationalSpectroscopy,
+            "STMSimulation",
+        ]
     ] = Field(
         default_factory=list,
         title="Simulation(s)",
@@ -3397,7 +3393,7 @@ class MeasurementSession(OpenBISObject):
         description="Path to the measurement folder",
         metadata={"type": "VARCHAR"},
     )
-    preparation: Preparation = Field(
+    preparation: "Preparation" = Field(
         default=None,
         title="Preparation",
         description="Preparation associated with the measurement session",
@@ -3605,7 +3601,6 @@ class ProcessStep(OpenBISObject):
 
 
 class Preparation(OpenBISObject):
-
     @classmethod
     def get_code(cls) -> str:
         return "PREP"

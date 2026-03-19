@@ -1,6 +1,7 @@
 import ipywidgets as ipw
-from . import utils, widgets
+from . import utils
 import os
+import json
 import pandas as pd
 import logging
 from IPython.display import display, Javascript
@@ -20,16 +21,21 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 
+
 class CreateSampleWidget(ipw.VBox):
     def __init__(self, openbis_session):
         super().__init__()
         self.openbis_session = openbis_session
-        
+
         header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
 
-        self.select_material_title = ipw.HTML(f"<div style='{header_style}'>Select material</div>")
-        self.sample_name_title = ipw.HTML(f"<div style='{header_style}'>Sample name</div>")
-        
+        self.select_material_title = ipw.HTML(
+            f"<div style='{header_style}'>Select material</div>"
+        )
+        self.sample_name_title = ipw.HTML(
+            f"<div style='{header_style}'>Sample name</div>"
+        )
+
         material_type_options = [(key, value) for key, value in MATERIALS_TYPES.items()]
         material_type_options.insert(0, ("Select material type...", "-1"))
 
@@ -39,25 +45,25 @@ class CreateSampleWidget(ipw.VBox):
 
         self.material_details_vbox = ipw.VBox()
         self.sample_name_textbox = ipw.Text(placeholder="Write sample name...")
-        
+
         self.create_sample_notes = ipw.HTML(
             value="""
             <details style="background-color: #f4f6f9; border-left: 5px solid #2980b9; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-family: sans-serif; cursor: pointer;">
                 <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
                     💡 Getting Started: Creating a New Sample
                 </summary>
-                
+
                 <div style="margin-top: 12px; cursor: default;">
                     <div style="color: #34495e; font-size: 14px; margin-bottom: 12px;">
                         Before you can record any preparation steps, you must physically "register" your starting sample in the system here.
                     </div>
-                    
+
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
                         <li style="margin-bottom: 6px;"><b>Select material:</b> Choose the base material type you are starting with.</li>
                         <li style="margin-bottom: 6px;"><b>Sample name:</b> Provide a descriptive name for your sample (this can be edited later if needed).</li>
                         <li><b>Save (💾):</b> Registers the new sample in openBIS, making it available in the <i>Register preparation</i> tab.</li>
                     </ul>
-                    
+
                     <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; border-radius: 3px; font-size: 14px; color: #856404;">
                         ⚠️ <b>Important Rule regarding Materials:</b><br>
                         If you start a new sample using a material that already has an active sample in openBIS, the older sample will automatically become <b>Inactive</b>. This reflects reality: if you are starting fresh with a specific material piece, its previous tracked state no longer exists!
@@ -184,7 +190,7 @@ class CreateSampleWidget(ipw.VBox):
                     obj = utils.get_openbis_object(
                         self.openbis_session, sample_ident=obj_permid
                     )
-                    
+
                     obj_props = obj.props.all()
                     obj_name = obj_props.get("name", "") or ""
                     obj_details_string = "<div style='border: 1px solid grey; padding: 10px; margin: 10px;'>"
@@ -195,14 +201,17 @@ class CreateSampleWidget(ipw.VBox):
                             )
                             prop_label = prop_type.label
                             prop_datatype = prop_type.dataType
-                            
+
                             if prop_datatype == "CONTROLLEDVOCABULARY":
                                 if isinstance(value, list):
-                                    value = [v.lower().replace("_", " ").title() for v in value]
+                                    value = [
+                                        v.lower().replace("_", " ").title()
+                                        for v in value
+                                    ]
                                     value = ", ".join(value)
                                 else:
                                     value = value.lower().replace("_", " ").title()
-                            
+
                             elif prop_datatype == "SAMPLE":
                                 if isinstance(value, list):
                                     prop_obj_names = []
@@ -211,7 +220,9 @@ class CreateSampleWidget(ipw.VBox):
                                             self.openbis_session, sample_ident=id
                                         )
                                         prop_obj_props = prop_obj.props.all()
-                                        prop_obj_name = prop_obj_props.get("name", "") or ""
+                                        prop_obj_name = (
+                                            prop_obj_props.get("name", "") or ""
+                                        )
                                         prop_obj_names.append(prop_obj_name)
                                     value = ", ".join(prop_obj_names)
                                 else:
@@ -267,7 +278,7 @@ class CreateSampleWidget(ipw.VBox):
                             obj_details_string += f"<p><b>{prop_label}:</b> {value}</p>"
                         else:
                             logger.info(f"{key} has no value.")
-                    
+
                     for parent_id in obj.parents:
                         parent = utils.get_openbis_object(
                             self.openbis_session, sample_ident=parent_id
@@ -275,7 +286,9 @@ class CreateSampleWidget(ipw.VBox):
                         parent_type = parent.type.code.lower().replace("_", " ").title()
                         parent_props = parent.props.all()
                         parent_name = parent_props.get("name", "") or ""
-                        obj_details_string += f"<p><b>Parent {parent_type}:</b> {parent_name}</p>"
+                        obj_details_string += (
+                            f"<p><b>Parent {parent_type}:</b> {parent_name}</p>"
+                        )
 
                     obj_details_string += "</div>"
 

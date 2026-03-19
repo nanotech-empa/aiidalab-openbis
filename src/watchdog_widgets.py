@@ -27,19 +27,19 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         super().__init__()
         self.openbis_session = openbis_session
         self.session_data = session_data
-        
+
         self.notes = ipw.HTML(
             value="""
             <details style="background-color: #f4f6f9; border-left: 5px solid #2980b9; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-family: sans-serif; cursor: pointer;">
                 <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
                     💡 Monitoring the Measurement Uploader
                 </summary>
-                
+
                 <div style="margin-top: 12px; cursor: default;">
                     <div style="font-weight: bold; font-size: 14px; color: #2c3e50; margin-bottom: 8px;">
                         Directories being monitored (Management):
                     </div>
-                    
+
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5;">
                         <li style="margin-bottom: 6px;"><b>Running watchdogs:</b> Displays a list of all folder directories currently being actively monitored.</li>
                         <li><b>Stop monitoring (🚫):</b> To turn off a watchdog, select the target directory from the list and click this button.</li>
@@ -48,7 +48,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             </details>
             """
         )
-        
+
         header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
 
         self.running_watchdogs_title = ipw.HTML(
@@ -101,13 +101,13 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.session_data = session_data
         self.running_watchdogs_widget = running_watchdogs_widget
         self.watchdog_processes = []
-        
+
         # Ensure process is killed on notebook shutdown / kernel restart
         atexit.register(self.cleanup_watchdog)
-        
+
         # Keep __init__ clean by delegating UI creation
         self._setup_ui()
-    
+
     def _setup_ui(self):
         """Handles the creation and layout of all UI elements."""
         self.notes = ipw.HTML(
@@ -116,20 +116,20 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
                     💡 Understanding the Measurement Uploader
                 </summary>
-                
+
                 <div style="margin-top: 12px; cursor: default;">
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
                         <li><span style="color: #2980b9; font-weight: bold;">Watchdogs</span> run in the background to automatically detect and upload new measurement files.</li>
                         <li><span style="color: #27ae60; font-weight: bold;">Measurements</span> are securely linked to the specific experiment, sample, and instrument you configure.</li>
                     </ul>
-                    
+
                     <div style="font-weight: bold; font-size: 14px; color: #2c3e50; margin-bottom: 8px;">
                         Start directory monitoring (Setup):
                     </div>
-                    
+
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
                         <li style="margin-bottom: 6px;">
-                            <b>Select experiment:</b> Determines where the measurement data will be saved in openBIS. 
+                            <b>Select experiment:</b> Determines where the measurement data will be saved in openBIS.
                             <i>(Note: If the experiment does not exist, you can create one by clicking the <b>+</b> button, selecting a project, and giving it a name).</i>
                         </li>
                         <li style="margin-bottom: 6px;"><b>Select sample:</b> Choose the specific sample that is being measured.</li>
@@ -141,57 +141,89 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             </details>
             """
         )
-        
+
         header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
-        
-        self.measurement_session_title = ipw.HTML(value=f"<div style='{header_style}'>Measurement session details</div>")
+
+        self.measurement_session_title = ipw.HTML(
+            value=f"<div style='{header_style}'>Measurement session details</div>"
+        )
         self.measurement_session_name_label = ipw.HTML(value="<b>Name:</b>")
         self.measurement_session_name_text = ipw.Text(layout=ipw.Layout(width="100%"))
         self.measurement_session_name_hbox = ipw.HBox(
             [self.measurement_session_name_label, self.measurement_session_name_text]
         )
-        
+
         # Dropdowns
-        self.select_experiment_title = ipw.HTML(value=f"<div style='{header_style}'>Select experiment</div>")
-        self.select_experiment_widget = widgets.SelectExperimentWidget(self.openbis_session)
+        self.select_experiment_title = ipw.HTML(
+            value=f"<div style='{header_style}'>Select experiment</div>"
+        )
+        self.select_experiment_widget = widgets.SelectExperimentWidget(
+            self.openbis_session
+        )
 
-        self.select_sample_title = ipw.HTML(value=f"<div style='{header_style}'>Select sample</div>")
+        self.select_sample_title = ipw.HTML(
+            value=f"<div style='{header_style}'>Select sample</div>"
+        )
         self.select_sample_widget = widgets.SelectSampleWidget(self.openbis_session)
-        self.select_sample_widget.sample_dropdown.observe(self._on_sample_changed, names="value")
+        self.select_sample_widget.sample_dropdown.observe(
+            self._on_sample_changed, names="value"
+        )
 
-        self.select_instrument_title = ipw.HTML(value=f"<div style='{header_style}'>Select instrument</div>")
-        self.select_instrument_widget = widgets.SelectInstrumentWidget(self.openbis_session)
+        self.select_instrument_title = ipw.HTML(
+            value=f"<div style='{header_style}'>Select instrument</div>"
+        )
+        self.select_instrument_widget = widgets.SelectInstrumentWidget(
+            self.openbis_session
+        )
 
         # Folder Chooser
-        self.select_measurements_folder_title = ipw.HTML(value=f"<div style='{header_style}'>Select measurements directory</div>")
+        self.select_measurements_folder_title = ipw.HTML(
+            value=f"<div style='{header_style}'>Select measurements directory</div>"
+        )
         self.select_measurements_folder_widget = ipyfilechooser.FileChooser(
-            path="/home/jovyan/", select_default=True, use_dir_icons=True, show_only_dirs=True
+            path="/home/jovyan/",
+            select_default=True,
+            use_dir_icons=True,
+            show_only_dirs=True,
         )
 
         # Save Button
         self.generate_watchdog_button = ipw.Button(
-            description="", disabled=False, button_style="",
-            tooltip="Save", icon="save", layout=ipw.Layout(width="100px", height="50px")
+            description="",
+            disabled=False,
+            button_style="",
+            tooltip="Save",
+            icon="save",
+            layout=ipw.Layout(width="100px", height="50px"),
         )
         self.generate_watchdog_button.on_click(self.generate_watchdog)
 
         self.children = [
             self.notes,
-            self.select_experiment_title, self.select_experiment_widget,
-            self.select_sample_title, self.select_sample_widget,
-            self.select_instrument_title, self.select_instrument_widget,
-            self.measurement_session_title, self.measurement_session_name_hbox,
-            self.select_measurements_folder_title, self.select_measurements_folder_widget,
+            self.select_experiment_title,
+            self.select_experiment_widget,
+            self.select_sample_title,
+            self.select_sample_widget,
+            self.select_instrument_title,
+            self.select_instrument_widget,
+            self.measurement_session_title,
+            self.measurement_session_name_hbox,
+            self.select_measurements_folder_title,
+            self.select_measurements_folder_widget,
             self.generate_watchdog_button,
         ]
-    
+
     def _get_most_recent_process_step(self, sample_object):
         """Helper to extract the most recent 'Process Step' parent from a sample."""
         most_recent_parent = None
         for parent_id in sample_object.parents:
-            parent_object = utils.get_openbis_object(self.openbis_session, sample_ident=parent_id)
+            parent_object = utils.get_openbis_object(
+                self.openbis_session, sample_ident=parent_id
+            )
             if parent_object.type == OPENBIS_OBJECT_TYPES["Process Step"]:
-                if not most_recent_parent or (parent_object.registrationDate > most_recent_parent.registrationDate):
+                if not most_recent_parent or (
+                    parent_object.registrationDate > most_recent_parent.registrationDate
+                ):
                     most_recent_parent = parent_object
         return most_recent_parent
 
@@ -201,17 +233,27 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         if sample_id == "-1":
             return
 
-        sample_object = utils.get_openbis_object(self.openbis_session, sample_ident=sample_id)
+        sample_object = utils.get_openbis_object(
+            self.openbis_session, sample_ident=sample_id
+        )
         most_recent_parent = self._get_most_recent_process_step(sample_object)
 
         if most_recent_parent:
             experiment_id = self.select_experiment_widget.experiment_dropdown.value
             if most_recent_parent.experiment.permId != experiment_id:
-                self.select_experiment_widget.experiment_dropdown.value = most_recent_parent.experiment.permId
-                self.measurement_session_name_text.value = f"Measurement Session on Sample {sample_object.props['name']}"
-                display(Javascript(data="alert('Experiment was auto-updated based on the sample!');"))
+                self.select_experiment_widget.experiment_dropdown.value = (
+                    most_recent_parent.experiment.permId
+                )
+                self.measurement_session_name_text.value = (
+                    f"Measurement Session on Sample {sample_object.props['name']}"
+                )
+                display(
+                    Javascript(
+                        data="alert('Experiment was auto-updated based on the sample!');"
+                    )
+                )
                 logging.info("Experiment was changed.")
-    
+
     def _validate_inputs(self):
         """Checks all UI components before allowing a save. Returns True if valid."""
         if self.select_experiment_widget.experiment_dropdown.value == "-1":
@@ -225,33 +267,47 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             return False
 
         try:
-            is_selecting = self.select_measurements_folder_widget._cancel.layout.display is None
+            is_selecting = (
+                self.select_measurements_folder_widget._cancel.layout.display is None
+            )
         except AttributeError:
-            is_selecting = False # Fallback if ipyfilechooser updates its internal variables later
+            is_selecting = (
+                False  # Fallback if ipyfilechooser updates its internal variables later
+            )
 
         if is_selecting:
-            display(Javascript(data="alert('You are still editing the directory! Please confirm it by clicking \"Change\" in the folder chooser.');"))
+            display(
+                Javascript(
+                    data="alert('You are still editing the directory! Please confirm it by clicking \"Change\" in the folder chooser.');"
+                )
+            )
             return False
 
         if not self.select_measurements_folder_widget.selected_path:
-             display(Javascript(data="alert('Please select a valid directory.');"))
-             return False
+            display(Javascript(data="alert('Please select a valid directory.');"))
+            return False
 
         return True
 
-    def _get_or_create_measurement_session(self, sample_id, sample_name, instrument_id, experiment_id, data_folder):
+    def _get_or_create_measurement_session(
+        self, sample_id, sample_name, instrument_id, experiment_id, data_folder
+    ):
         """Creates an openBIS session object or retrieves an existing one from logging.json."""
         logging_filepath = os.path.join(data_folder, "logging.json")
-        
+
         if os.path.exists(logging_filepath):
             logging_data = utils.read_json(logging_filepath)
             session_id = logging_data.get("measurement_session_id", "")
-            measurement_session = utils.get_openbis_object(self.openbis_session, sample_ident=session_id)
-            logging.info(f"Uploading data into existing Measurement Session {measurement_session.permId}.")
+            measurement_session = utils.get_openbis_object(
+                self.openbis_session, sample_ident=session_id
+            )
+            logging.info(
+                f"Uploading data into existing Measurement Session {measurement_session.permId}."
+            )
             return measurement_session
 
         measurement_session_name = self.measurement_session_name_text.value
-        
+
         measurement_session = utils.create_openbis_object(
             self.openbis_session,
             type=OPENBIS_OBJECT_TYPES["Measurement Session"],
@@ -270,36 +326,53 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         # 1. Block saving if inputs (or the folder chooser) aren't ready
         if not self._validate_inputs():
             return
-        
+
         # 2. Gather verified data
         sample_id = self.select_sample_widget.sample_dropdown.value
-        sample_object = utils.get_openbis_object(self.openbis_session, sample_ident=sample_id)
+        sample_object = utils.get_openbis_object(
+            self.openbis_session, sample_ident=sample_id
+        )
         experiment_id = self.select_experiment_widget.experiment_dropdown.value
         instrument_id = self.select_instrument_widget.instrument_dropdown.value
         data_folder = self.select_measurements_folder_widget.selected_path
 
         # 3. Handle openBIS connection
         measurement_session = self._get_or_create_measurement_session(
-            sample_id, sample_object.props["name"], instrument_id, experiment_id, data_folder
+            sample_id,
+            sample_object.props["name"],
+            instrument_id,
+            experiment_id,
+            data_folder,
         )
 
         # 4. Start Subprocess
-        watchdog_process = subprocess.Popen([
-            "python", "src/measurements_uploader.py",
-            "--openbis_url", self.session_data["url"],
-            "--openbis_token", self.session_data["token"],
-            "--measurement_session_id", measurement_session.permId,
-            "--data_folder", data_folder,
-        ])
+        watchdog_process = subprocess.Popen(
+            [
+                "python",
+                "src/measurements_uploader.py",
+                "--openbis_url",
+                self.session_data["url"],
+                "--openbis_token",
+                self.session_data["token"],
+                "--measurement_session_id",
+                measurement_session.permId,
+                "--data_folder",
+                data_folder,
+            ]
+        )
 
         display(Javascript(data="alert('Watchdog process started!');"))
         logging.info(f"Watchdog process started with PID: {watchdog_process.pid}")
 
         # 5. Update UI Watchdog List
         self.watchdog_processes.append(watchdog_process)
-        running_list = list(self.running_watchdogs_widget.running_watchdogs_widget.options)
+        running_list = list(
+            self.running_watchdogs_widget.running_watchdogs_widget.options
+        )
         running_list.append((data_folder, watchdog_process.pid))
-        self.running_watchdogs_widget.running_watchdogs_widget.options = tuple(running_list)
+        self.running_watchdogs_widget.running_watchdogs_widget.options = tuple(
+            running_list
+        )
 
     def cleanup_watchdog(self):
         if self.watchdog_processes:
@@ -308,33 +381,34 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 process.terminate()
             self.watchdog_processes = []
 
+
 # class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 #     def __init__(self, openbis_session, session_data, running_watchdogs_widget):
 #         super().__init__()
 #         self.openbis_session = openbis_session
 #         self.session_data = session_data
 #         self.running_watchdogs_widget = running_watchdogs_widget
-        
+
 #         self.notes = ipw.HTML(
 #             value="""
 #             <details style="background-color: #f4f6f9; border-left: 5px solid #2980b9; padding: 12px; margin-bottom: 15px; border-radius: 4px; font-family: sans-serif; cursor: pointer;">
 #                 <summary style="font-weight: bold; font-size: 16px; color: #2c3e50; outline: none;">
 #                     💡 Understanding the Measurement Uploader
 #                 </summary>
-                
+
 #                 <div style="margin-top: 12px; cursor: default;">
 #                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
 #                         <li><span style="color: #2980b9; font-weight: bold;">Watchdogs</span> run in the background to automatically detect and upload new measurement files.</li>
 #                         <li><span style="color: #27ae60; font-weight: bold;">Measurements</span> are securely linked to the specific experiment, sample, and instrument you configure.</li>
 #                     </ul>
-                    
+
 #                     <div style="font-weight: bold; font-size: 14px; color: #2c3e50; margin-bottom: 8px;">
 #                         Start directory monitoring (Setup):
 #                     </div>
-                    
+
 #                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
 #                         <li style="margin-bottom: 6px;">
-#                             <b>Select experiment:</b> Determines where the measurement data will be saved in openBIS. 
+#                             <b>Select experiment:</b> Determines where the measurement data will be saved in openBIS.
 #                             <i>(Note: If the experiment does not exist, you can create one by clicking the <b>+</b> button, selecting a project, and giving it a name).</i>
 #                         </li>
 #                         <li style="margin-bottom: 6px;"><b>Select sample:</b> Choose the specific sample that is being measured.</li>
@@ -346,9 +420,9 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 #             </details>
 #             """
 #         )
-        
+
 #         header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
-        
+
 #         self.select_experiment_title = ipw.HTML(
 #             value=f"<div style='{header_style}'>Select experiment</div>"
 #         )
