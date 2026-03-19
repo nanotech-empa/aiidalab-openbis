@@ -1264,7 +1264,7 @@ class RegisterProcessWidget(ipw.VBox):
                                                 component_settings_name = f"{component_name} with "
                                                 for setting_widget in component_widget.children[2].children:
                                                     setting_prop_type = setting_widget.metadata.get("property_name")
-                                                    setting_prop_label = setting_widget.children[0].value
+                                                    setting_prop_label = setting_widget.children[0].value.removeprefix("<b>").removesuffix("</b>").removesuffix(":")
                                                     setting_prop_value = setting_widget.children[1].value
                                                     setting_prop_type_lower = setting_prop_type.lower()
                                                     component_settings_properties_values[setting_prop_type_lower] = setting_prop_value
@@ -1284,6 +1284,9 @@ class RegisterProcessWidget(ipw.VBox):
                                             
                                         components_found = True
                                         break
+                        
+                        if action_widget.action_icon not in action_properties_values["name"]:
+                            action_properties_values["name"] = action_widget.action_icon + " " + action_properties_values["name"]
                         
                         new_action_object = utils.create_openbis_object(
                             self.openbis_session,
