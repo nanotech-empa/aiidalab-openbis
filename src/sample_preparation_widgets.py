@@ -1046,16 +1046,6 @@ class RegisterPreparationWidget(ipw.VBox):
 
                         process_step_icons.append(action_widget.action_icon)
 
-                        if (
-                            action_widget.action_icon
-                            not in action_properties_values["name"]
-                        ):
-                            action_properties_values["name"] = (
-                                action_widget.action_icon
-                                + " "
-                                + action_properties_values["name"]
-                            )
-
                         new_action_object = utils.create_openbis_object(
                             self.openbis_session,
                             type=action_type,
@@ -1069,9 +1059,9 @@ class RegisterPreparationWidget(ipw.VBox):
 
                 process_properties["actions"] = actions
 
-                if actions_codes:
+                if process_step_icons:
                     # Compute process code based on the selected actions
-                    counts = Counter(actions_codes)
+                    counts = Counter(process_step_icons)
                     unique_codes = list(counts.keys())
                     num_repeats = (
                         counts[unique_codes[0]]
@@ -1082,14 +1072,14 @@ class RegisterPreparationWidget(ipw.VBox):
                         else 1
                     )
 
-                    if len(actions_codes) == 1:
-                        process_code = actions_codes[0]
+                    if len(process_step_icons) == 1:
+                        process_code = process_step_icons[0]
                     elif num_repeats > 1 and all(
                         v == num_repeats for v in counts.values()
                     ):
                         process_code = f"({':'.join(unique_codes)}){num_repeats}"
                     else:
-                        process_code = f"[{':'.join(actions_codes)}]"
+                        process_code = f"[{':'.join(process_step_icons)}]"
 
                 new_sample_name = f"{current_sample_name}:{process_code}"
                 self.sample_preparation_object.props["name"] = (
@@ -1108,9 +1098,6 @@ class RegisterPreparationWidget(ipw.VBox):
                 if instrument_permid != "-1":
                     new_process_object_parents.append(instrument_permid)
 
-                new_process_object.props["name"] = (
-                    f"[{''.join(process_step_icons)}] {new_process_object.props['name']}"
-                )
                 new_process_object.add_parents(new_process_object_parents)
                 utils.update_openbis_object(new_process_object)
 
@@ -1149,11 +1136,6 @@ class RegisterPreparationWidget(ipw.VBox):
                                                 widget_value
                                             )
                                         break
-
-                        if "📈" not in observable_properties_values["name"]:
-                            observable_properties_values["name"] = (
-                                "📈 " + observable_properties_values["name"]
-                            )
 
                         utils.upload_datasets(
                             self.openbis_session,
@@ -1427,6 +1409,12 @@ class RegisterProcessWidget(ipw.VBox):
                                             action_properties_values[prop_lower] = (
                                                 duration
                                             )
+                                        elif prop_dataType in ["SAMPLE", "OBJECT"]:
+                                            selected_value = widget.children[1].value
+                                            if selected_value != "-1":
+                                                action_properties_values[prop_lower] = (
+                                                    selected_value
+                                                )
                                         else:
                                             action_properties_values[prop_lower] = (
                                                 widget.children[1].value
@@ -1523,7 +1511,7 @@ class RegisterProcessWidget(ipw.VBox):
                                                     type=component_settings_type,
                                                     experiment=collection_id,
                                                     props=component_settings_properties_values,
-                                                    parents=[component_permid]
+                                                    parents=[component_permid],
                                                 )
 
                                                 action_properties_values[
@@ -1532,16 +1520,6 @@ class RegisterProcessWidget(ipw.VBox):
 
                                         components_found = True
                                         break
-
-                        if (
-                            action_widget.action_icon
-                            not in action_properties_values["name"]
-                        ):
-                            action_properties_values["name"] = (
-                                action_widget.action_icon
-                                + " "
-                                + action_properties_values["name"]
-                            )
 
                         new_action_object = utils.create_openbis_object(
                             self.openbis_session,
@@ -1748,6 +1726,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 action_index,
                 self.instrument_dropdown.value,
                 action_object,
+                process_step_widget=self,
             )
             actions_accordion_children.append(new_action_widget)
             self.actions_accordion.children = actions_accordion_children
@@ -1781,6 +1760,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.actions_accordion,
                 action_index,
                 instrument_permid,
+                process_step_widget=self,
             )
             actions_accordion_children.append(new_action_widget)
             self.actions_accordion.children = actions_accordion_children
@@ -1795,6 +1775,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.observables_accordion,
                 observable_index,
                 instrument_permid,
+                process_step_widget=self,
             )
             observables_accordion_children.append(new_observable_widget)
             self.observables_accordion.children = observables_accordion_children
@@ -1808,12 +1789,14 @@ class RegisterActionWidget(ipw.VBox):
         action_index,
         instrument_permid,
         action_settings=None,
+        process_step_widget=None,
     ):
         super().__init__()
         self.openbis_session = openbis_session
         self.actions_accordion = actions_accordion
         self.action_index = action_index
         self.instrument_permid = instrument_permid
+        self.process_step_widget = process_step_widget
 
         global INSTRUMENT_COMPONENTS
 
@@ -2079,7 +2062,39 @@ class RegisterActionWidget(ipw.VBox):
             OPENBIS_OBJECT_TYPES.get("Mechanical Pressing"): "🔩",
             OPENBIS_OBJECT_TYPES.get("Rinse"): "🚿",
         }
+
         self.action_icon = icon_mapping.get(action_type, "⚙️")
+        current_text = self.process_step_widget.name_textbox.value
+
+        if current_text.startswith("[") and "]" in current_text:
+            close_idx = current_text.find("]")
+            current_icons_str = current_text[1:close_idx]
+
+            # 1. Safely break the string into a list of complete emojis
+            icons_list = []
+            for char in current_icons_str:
+                # If the character is a modifier (like \ufe0f or ZWJ), attach it to the previous emoji
+                if char in ("\ufe0f", "\u200d") and icons_list:
+                    icons_list[-1] += char
+                else:
+                    icons_list.append(char)
+
+            # 2. Safely replace or append the new icon based on the index
+            if self.action_index < len(icons_list):
+                icons_list[self.action_index] = self.action_icon
+            else:
+                # If adding a brand new action
+                icons_list.append(self.action_icon)
+
+            # 3. Join them back together and rebuild the text
+            new_icons_str = "".join(icons_list)
+            new_text = f"[{new_icons_str}]" + current_text[close_idx + 1 :]
+
+        else:
+            # Create the brackets if they don't exist yet
+            new_text = f"[{self.action_icon}] {current_text}"
+
+        self.process_step_widget.name_textbox.value = new_text
         self.actions_accordion.set_title(self.action_index, self.action_icon)
 
         action_properties = (
@@ -2220,9 +2235,7 @@ class RegisterActionWidget(ipw.VBox):
                 if prop == "NAME":
                     prop_value_widget.observe(self.change_action_title, names="value")
                     default_action_name = action_type.replace("_", " ").title()
-                    prop_value_widget.value = (
-                        f"{default_action_name} {self.action_index + 1}"
-                    )
+                    prop_value_widget.value = f"{self.action_icon} {default_action_name} {self.action_index + 1}"
 
                 action_properties_widgets.append(
                     cw.HBox(
@@ -2447,11 +2460,30 @@ class RegisterActionWidget(ipw.VBox):
         self.action_properties_widgets.children = action_properties_widgets
 
     def change_action_title(self, change):
-        self.actions_accordion.set_title(
-            self.action_index, f"{self.action_icon} {change['new']}"
-        )
+        self.actions_accordion.set_title(self.action_index, f"{change['new']}")
 
     def remove_action(self, b):
+        current_text = self.process_step_widget.name_textbox.value
+        icon = self.action_icon
+
+        if current_text.startswith("[") and "]" in current_text:
+            close_idx = current_text.find("]")
+            prefix = current_text[: close_idx + 1]
+            rest_of_text = current_text[close_idx + 1 :]
+
+            # If the icon is inside the brackets, remove it
+            if icon in prefix:
+                # Replace only one occurrence of the icon
+                new_prefix = prefix.replace(icon, "", 1)
+
+                # If removing the icon leaves the brackets completely empty, remove them entirely
+                if new_prefix == "[]":
+                    self.process_step_widget.name_textbox.value = rest_of_text.lstrip()
+                else:
+                    self.process_step_widget.name_textbox.value = (
+                        new_prefix + rest_of_text
+                    )
+
         children = list(self.actions_accordion.children)
         children.pop(self.action_index)
 
@@ -2461,7 +2493,7 @@ class RegisterActionWidget(ipw.VBox):
         self.actions_accordion.children = children
 
         for i, action in enumerate(children):
-            action_name = f"{action.action_icon} "
+            action_name = ""
             if self.action_properties_widgets.children:
                 for widget in action.action_properties_widgets.children:
                     if widget.metadata.get("property_name", "") == "NAME":
@@ -2469,6 +2501,7 @@ class RegisterActionWidget(ipw.VBox):
                         break
             self.actions_accordion.set_title(i, action_name)
 
+        # Handle the accordion title edge case for the popped index
         self.actions_accordion.set_title(len(children), "")
 
 
@@ -2585,7 +2618,7 @@ class RegisterObservableWidget(ipw.VBox):
 
             if prop == "NAME":
                 widget.observe(self.change_observable_title, names="value")
-                widget.value = "Logs"
+                widget.value = "📈 Logs"
 
             observable_properties_widgets.append(
                 cw.HBox(
@@ -2668,21 +2701,24 @@ class RegisterObservableWidget(ipw.VBox):
         return dict(all_components)
 
     def change_observable_title(self, change):
-        self.observables_accordion.set_title(
-            self.observable_index, f"📈 {change['new']}"
-        )
+        self.observables_accordion.set_title(self.observable_index, f"{change['new']}")
 
     def remove_observable(self, b):
-        observables_accordion_children = list(self.observables_accordion.children)
-        num_observables = len(observables_accordion_children)
-        observables_accordion_children.pop(self.observable_index)
+        children = list(self.observables_accordion.children)
+        children.pop(self.observable_index)
 
-        for index, observable in enumerate(observables_accordion_children):
-            if index >= self.observable_index:
-                observable.observable_index -= 1
-                self.observables_accordion.set_title(
-                    observable.observable_index, observable.name_textbox.value
-                )
+        for i in range(self.observable_index, len(children)):
+            children[i].observable_index = i
 
-        self.observables_accordion.set_title(num_observables - 1, "")
-        self.observables_accordion.children = observables_accordion_children
+        self.observables_accordion.children = children
+
+        for index, observable in enumerate(children):
+            observable_name = ""
+            if self.observable_properties_widgets.children:
+                for widget in observable.observable_properties_widgets.children:
+                    if widget.metadata.get("property_name", "") == "NAME":
+                        observable_name += widget.children[1].value
+                        break
+            self.observables_accordion.set_title(index, observable_name)
+
+        self.observables_accordion.set_title(len(children), "")
