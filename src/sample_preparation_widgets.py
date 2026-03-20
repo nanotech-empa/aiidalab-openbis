@@ -2530,12 +2530,14 @@ class RegisterObservableWidget(ipw.VBox):
         observable_index,
         instrument_permid,
         observable_settings=None,
+        process_step_widget=None,
     ):
         super().__init__()
         self.openbis_session = openbis_session
         self.observables_accordion = observables_accordion
         self.observable_index = observable_index
         self.instrument_permid = instrument_permid
+        self.process_step_widget = process_step_widget
 
         global INSTRUMENT_COMPONENTS
 
