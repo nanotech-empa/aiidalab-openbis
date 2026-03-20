@@ -178,6 +178,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 actions_accordion_children.append(act_widget)
                 act_title = act_widget.name
                 self.actions_accordion.set_title(i, act_title)
+                logging.info(f"Action {act_id} loaded successfully.")
 
             self.actions_accordion.children = actions_accordion_children
 
@@ -193,6 +194,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 observables_accordion_children.append(obs_widget)
                 obs_title = obs_widget.name_html.value
                 self.observables_accordion.set_title(i, obs_title)
+                logging.info(f"Observable {obs_id} loaded successfully.")
 
             self.observables_accordion.children = observables_accordion_children
 
@@ -242,6 +244,7 @@ class ActionHistoryWidget(ipw.VBox):
                 prop_type = utils.get_openbis_property_type(
                     self.openbis_session, code=prop_key
                 )
+                logging.info(f"Property type {prop_key} loaded successfully.")
                 prop_label = prop_type.label
                 prop_dataType = prop_type.dataType
                 prop_sampleType = prop_type.sampleType
@@ -263,6 +266,7 @@ class ActionHistoryWidget(ipw.VBox):
                 gas_obj = utils.get_openbis_object(
                     self.openbis_session, sample_ident=prop_val
                 )
+                logging.info(f"Object {prop_val} loaded successfully.")
                 gas_name = gas_obj.props.get("name", "") if gas_obj else ""
                 props_widgets.append(make_row(prop_label, gas_name, prop_key))
 
@@ -271,6 +275,7 @@ class ActionHistoryWidget(ipw.VBox):
                 sub_obj = utils.get_openbis_object(
                     self.openbis_session, sample_ident=prop_val
                 )
+                logging.info(f"Object {prop_val} loaded successfully.")
                 empa = sub_obj.props["empa_number"]
                 batch = sub_obj.props["batch"]
                 vial = sub_obj.props["vial"]
@@ -283,6 +288,7 @@ class ActionHistoryWidget(ipw.VBox):
                     parent_obj = utils.get_openbis_object(
                         self.openbis_session, sample_ident=parent_id
                     )
+                    logging.info(f"Object {parent_id} loaded successfully.")
 
                     if parent_obj.type.code == "MOLECULE":
                         datasets = parent_obj.get_datasets(type="ELN_PREVIEW")
@@ -290,6 +296,9 @@ class ActionHistoryWidget(ipw.VBox):
                         if datasets and datasets[0].file_list:
                             preview_ds = datasets[0]
                             preview_ds.download(destination="images")
+                            logging.info(
+                                f"Preview dataset {preview_ds.permId} downloaded successfully."
+                            )
                             dataset_folder = os.path.join("images", preview_ds.permId)
                             img_path = os.path.join(
                                 dataset_folder, preview_ds.file_list[0]
@@ -305,6 +314,7 @@ class ActionHistoryWidget(ipw.VBox):
                                 <img src="data:image/png;base64,{image_encoded}" width="100"
                                      style="margin-right: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; padding: 2px; background-color: white;">
                                 """
+                                logging.info(f"Image {img_path} loaded successfully.")
                             finally:
                                 if os.path.exists(dataset_folder):
                                     shutil.rmtree(dataset_folder, ignore_errors=True)
@@ -328,6 +338,7 @@ class ActionHistoryWidget(ipw.VBox):
                 comp_obj = utils.get_openbis_object(
                     self.openbis_session, sample_ident=prop_val
                 )
+                logging.info(f"Object {prop_val} loaded successfully.")
                 comp_name = comp_obj.props["name"]
 
                 # Fixed missing opening <div> here
@@ -340,6 +351,7 @@ class ActionHistoryWidget(ipw.VBox):
                     s_obj = utils.get_openbis_object(
                         self.openbis_session, sample_ident=settings_id
                     )
+                    logging.info(f"Object {settings_id} loaded successfully.")
                     s_props = s_obj.props()
                     s_props.pop("name", None)
 
@@ -354,6 +366,9 @@ class ActionHistoryWidget(ipw.VBox):
                                 s_label = utils.get_openbis_property_type(
                                     self.openbis_session, code=s_key
                                 ).label
+                                logging.info(
+                                    f"Property type {s_key} loaded successfully."
+                                )
                             except ValueError:
                                 s_label = s_key
                             components_html_content += f"<li>{s_label}: {s_val}</li>"
@@ -432,6 +447,7 @@ class ObservableHistoryWidget(ipw.VBox):
                 component_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=component_id
                 )
+                logging.info(f"Object {component_id} loaded successfully.")
                 self.components_html.value += f"<p>{component_object.props['name']}</p>"
 
     def delayed_cleanup(self, folder_path, zip_filepath, delay_seconds=60):
@@ -457,6 +473,9 @@ class ObservableHistoryWidget(ipw.VBox):
 
             # 2. Download from openBIS
             self.openbis_dataset.download(destination=temp_dir)
+            logging.info(
+                f"Dataset {self.openbis_dataset.permId} downloaded successfully."
+            )
 
             # 3. Zip it up
             zip_name = f"dataset_{self.openbis_dataset.permId}"
@@ -626,6 +645,7 @@ class RegisterPreparationWidget(ipw.VBox):
         sample_object = utils.get_openbis_object(
             self.openbis_session, sample_ident=sample_identifier
         )
+        logging.info(f"Object loaded successfully: {sample_object.permId}")
 
         sample_object_parents = sample_object.parents
         most_recent_parent = None
@@ -634,6 +654,7 @@ class RegisterPreparationWidget(ipw.VBox):
             parent_object = utils.get_openbis_object(
                 self.openbis_session, sample_ident=parent_id
             )
+            logging.info(f"Object loaded successfully: {parent_object.permId}")
 
             parent_type = parent_object.type
             if parent_type == OPENBIS_OBJECT_TYPES["Process Step"]:
@@ -661,6 +682,7 @@ class RegisterPreparationWidget(ipw.VBox):
                 parent_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=parent
                 )
+                logging.info(f"Object loaded successfully: {parent_object.permId}")
 
                 if parent_object.type == OPENBIS_OBJECT_TYPES["Preparation"]:
                     self.sample_preparation_object = parent_object
@@ -682,6 +704,8 @@ class RegisterPreparationWidget(ipw.VBox):
         openbis_processes = utils.get_openbis_objects(
             self.openbis_session, type=OPENBIS_OBJECT_TYPES["Process"]
         )
+        logging.info(f"Objects loaded successfully: {len(openbis_processes)}")
+
         processes_options = [
             (obj.props["name"], obj.permId) for obj in openbis_processes
         ]
@@ -707,11 +731,13 @@ class RegisterPreparationWidget(ipw.VBox):
     def load_process_settings(self, change):
         process_id = self.processes_dropdown.value
         if process_id == "-1":
+            logging.info("No object selected.")
             return
         else:
             process_object = utils.get_openbis_object(
                 self.openbis_session, sample_ident=process_id
             )
+            logging.info(f"Object loaded successfully: {process_object.permId}")
             process_step_list = process_object.props["process_steps"]
             self.process_short_name = process_object.props["short_name"] or ""
             if process_step_list:
@@ -719,6 +745,7 @@ class RegisterPreparationWidget(ipw.VBox):
                     process_step = utils.get_openbis_object(
                         self.openbis_session, sample_ident=process_step_id
                     )
+                    logging.info(f"Object loaded successfully: {process_step.permId}")
                     processes_accordion_children = list(
                         self.new_processes_accordion.children
                     )
@@ -752,15 +779,20 @@ class RegisterPreparationWidget(ipw.VBox):
         experiment_id = self.select_experiment_dropdown.experiment_dropdown.value
         if experiment_id == "-1":
             display(Javascript(data="alert('Select an experiment.')"))
+            logging.info("No experiment selected.")
             return
 
         current_sample_id = self.select_sample_dropdown.sample_dropdown.value
         if current_sample_id == "-1":
             display(Javascript(data="alert('Select a sample.')"))
+            logging.info("No sample selected.")
             return
 
         settings_collection = utils.get_openbis_collection(
             self.openbis_session, OPENBIS_COLLECTIONS_PATHS["Settings"]
+        )
+        logging.info(
+            f"Settings collection loaded successfully: {settings_collection.permId}"
         )
 
         process_steps_widgets = self.new_processes_accordion.children
@@ -769,11 +801,15 @@ class RegisterPreparationWidget(ipw.VBox):
             experiment_object = utils.get_openbis_collection(
                 self.openbis_session, code=experiment_id
             )
+            logging.info(
+                f"Experiment object loaded successfully: {experiment_object.permId}"
+            )
             experiment_project_code = experiment_object.project.identifier
 
             current_sample = utils.get_openbis_object(
                 self.openbis_session, sample_ident=current_sample_id
             )
+            logging.info(f"Sample object loaded successfully: {current_sample.permId}")
 
             # If sample was used in a measurement session, a new preparation should start
             sample_object_children = current_sample.children
@@ -781,6 +817,7 @@ class RegisterPreparationWidget(ipw.VBox):
                 child_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=child_id
                 )
+                logging.info(f"Object loaded successfully: {child_object.permId}")
                 if child_object.type == OPENBIS_OBJECT_TYPES["Measurement Session"]:
                     self.sample_preparation_object = None
                     break
@@ -793,6 +830,9 @@ class RegisterPreparationWidget(ipw.VBox):
                     experiment=experiment_object.identifier,
                     props={"name": current_sample.props["name"]},
                 )
+                logging.info(
+                    f"Preparation object created successfully: {self.sample_preparation_object.permId}"
+                )
 
             sample_preparation_id = self.sample_preparation_object.permId
             for process_widget in process_steps_widgets:
@@ -800,18 +840,27 @@ class RegisterPreparationWidget(ipw.VBox):
                 self.sample_preparation_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=sample_preparation_id
                 )
+                logging.info(
+                    f"Sample preparation object reloaded successfully: {self.sample_preparation_object.permId}"
+                )
                 sample_type = OPENBIS_OBJECT_TYPES["Sample"]
 
                 process_code = ""
                 current_sample.props["object_status"] = "INACTIVE"
                 current_sample_name = current_sample.props["name"]
                 utils.update_openbis_object(current_sample)
+                logging.info(
+                    f"Sample object updated successfully: {current_sample.permId}"
+                )
 
                 process_step_type = OPENBIS_OBJECT_TYPES["Process Step"]
                 new_process_object = utils.create_openbis_object(
                     self.openbis_session,
                     type=process_step_type,
                     experiment=experiment_object.identifier,
+                )
+                logging.info(
+                    f"Process step object created successfully: {new_process_object.permId}"
                 )
 
                 process_properties = {
@@ -823,7 +872,6 @@ class RegisterPreparationWidget(ipw.VBox):
                 actions_widgets = process_widget.actions_accordion.children
                 observables_widgets = process_widget.observables_accordion.children
                 actions = []
-                actions_codes = []
                 process_step_icons = []
 
                 if actions_widgets:
@@ -844,12 +892,14 @@ class RegisterPreparationWidget(ipw.VBox):
                             .get_property_assignments()
                             .df.code.values
                         )
+                        logging.info("Action properties loaded successfully.")
 
                         components_found = False
                         for prop in action_properties:
                             prop_type = utils.get_openbis_property_type(
                                 self.openbis_session, code=prop
                             )
+                            logging.info("Property type loaded successfully.")
                             prop_dataType = str(prop_type.dataType)
                             prop_lower = prop.lower()
 
@@ -972,6 +1022,9 @@ class RegisterPreparationWidget(ipw.VBox):
                                                     props=component_settings_properties_values,
                                                     parents=[component_permid],
                                                 )
+                                                logging.info(
+                                                    f"Component settings object created successfully: {new_component_settings.permId}"
+                                                )
 
                                                 component_settings_permid = (
                                                     new_component_settings.permId
@@ -985,10 +1038,16 @@ class RegisterPreparationWidget(ipw.VBox):
                                                 self.openbis_session,
                                                 sample_ident=component_permid,
                                             )
+                                            logging.info(
+                                                f"Component object loaded successfully: {component_object.permId}"
+                                            )
 
                                             component_settings_object = utils.get_openbis_object(
                                                 self.openbis_session,
                                                 sample_ident=component_settings_permid,
+                                            )
+                                            logging.info(
+                                                f"Component settings object loaded successfully: {component_settings_object.permId}"
                                             )
                                             component_settings_props = (
                                                 component_settings_object.props()
@@ -1011,6 +1070,9 @@ class RegisterPreparationWidget(ipw.VBox):
                                                             code=prop_key,
                                                         )
                                                     )
+                                                    logging.info(
+                                                        f"Property type loaded successfully: {prop_type.code}"
+                                                    )
                                                     prop_dataType = str(
                                                         prop_type.dataType
                                                     )
@@ -1025,6 +1087,9 @@ class RegisterPreparationWidget(ipw.VBox):
                                             utils.update_openbis_object(
                                                 component_object
                                             )
+                                            logging.info(
+                                                f"Component object updated successfully: {component_object.permId}"
+                                            )
 
                                         components_found = True
                                         break
@@ -1035,6 +1100,9 @@ class RegisterPreparationWidget(ipw.VBox):
                             code=action_collection_code,
                             project=experiment_project_code,
                         )
+                        logging.info(
+                            f"Collections loaded successfully: {len(openbis_experiments.df)}"
+                        )
 
                         if openbis_experiments.df.empty:
                             utils.create_openbis_collection(
@@ -1043,6 +1111,9 @@ class RegisterPreparationWidget(ipw.VBox):
                                 code=action_collection_code,
                                 project=experiment_project_code,
                                 props={"name": "Actions"},
+                            )
+                            logging.info(
+                                f"Collection created successfully: {action_collection_code}"
                             )
 
                         process_step_icons.append(action_widget.action_icon)
@@ -1053,9 +1124,10 @@ class RegisterPreparationWidget(ipw.VBox):
                             experiment=f"{experiment_project_code}/{action_collection_code}",
                             props=action_properties_values,
                         )
+                        logging.info(
+                            f"Action object created successfully: {new_action_object.permId}"
+                        )
 
-                        new_action_code = str(new_action_object.code)
-                        actions_codes.append(new_action_code[0:4])
                         actions.append(new_action_object.permId)
 
                 process_properties["actions"] = actions
@@ -1086,7 +1158,9 @@ class RegisterPreparationWidget(ipw.VBox):
                 self.sample_preparation_object.props["name"] = f"Prep_{new_sample_name}"
                 self.sample_preparation_object.add_children(new_process_object.permId)
                 utils.update_openbis_object(self.sample_preparation_object)
-
+                logging.info(
+                    f"Sample preparation object updated successfully: {self.sample_preparation_object.permId}"
+                )
                 new_process_object_parents = [
                     self.sample_preparation_object,
                     current_sample,
@@ -1099,6 +1173,9 @@ class RegisterPreparationWidget(ipw.VBox):
 
                 new_process_object.add_parents(new_process_object_parents)
                 utils.update_openbis_object(new_process_object)
+                logging.info(
+                    f"Process step object updated successfully: {new_process_object.permId}"
+                )
 
                 # Get observable info and add them as datasets to the process step object
                 if observables_widgets:
@@ -1115,12 +1192,18 @@ class RegisterPreparationWidget(ipw.VBox):
                             .get_property_assignments()
                             .df.code.values
                         )
+                        logging.info(
+                            "Observable dataset type properties loaded successfully."
+                        )
 
                         observable_properties_values = {}
                         for prop in observable_properties:
                             prop_lower = prop.lower()
                             prop_type = utils.get_openbis_property_type(
                                 self.openbis_session, code=prop
+                            )
+                            logging.info(
+                                f"Property type loaded successfully: {prop_type.code}"
                             )
                             prop_dataType = str(prop_type.dataType)
 
@@ -1143,6 +1226,7 @@ class RegisterPreparationWidget(ipw.VBox):
                             props=observable_properties_values,
                             dataset_type="OBSERVABLE",
                         )
+                        logging.info("Observable datasets uploaded successfully.")
 
                 new_sample = utils.create_openbis_object(
                     self.openbis_session,
@@ -1150,6 +1234,9 @@ class RegisterPreparationWidget(ipw.VBox):
                     experiment=OPENBIS_COLLECTIONS_PATHS["Sample"],
                     parents=[new_process_object],
                     props={"name": new_sample_name, "object_status": "ACTIVE"},
+                )
+                logging.info(
+                    f"New sample object created successfully: {new_sample.permId}"
                 )
 
                 # After a process step, the current sample is now the new one
@@ -1159,7 +1246,11 @@ class RegisterPreparationWidget(ipw.VBox):
             self.select_sample_dropdown.load_samples()
             self.select_sample_dropdown.sample_dropdown.value = new_sample.permId
 
+            logging.info("Process steps saved successfully.")
+
             # Reset new processes accordion
+            logging.info("Resetting new processes accordion.")
+
             processes_accordion_children = list(self.new_processes_accordion.children)
             for index, process_step in enumerate(processes_accordion_children):
                 self.new_processes_accordion.set_title(index, "")
@@ -1302,6 +1393,8 @@ class RegisterProcessWidget(ipw.VBox):
         collections = utils.get_openbis_collections(
             self.openbis_session, type="COLLECTION", project=processes_project
         )
+        logging.info(f"Collections loaded successfully: {len(collections.df)}")
+
         collection_options = []
         for col in collections:
             if "name" in col.props.all():
@@ -1386,11 +1479,15 @@ class RegisterProcessWidget(ipw.VBox):
                             .get_property_assignments()
                             .df.code.values
                         )
+                        logging.info("Action properties loaded successfully.")
 
                         components_found = False
                         for prop in action_properties:
                             prop_type = utils.get_openbis_property_type(
                                 self.openbis_session, code=prop
+                            )
+                            logging.info(
+                                f"Property type loaded successfully: {prop_type.code}"
                             )
                             prop_dataType = str(prop_type.dataType)
                             prop_lower = prop.lower()
@@ -1512,6 +1609,9 @@ class RegisterProcessWidget(ipw.VBox):
                                                     props=component_settings_properties_values,
                                                     parents=[component_permid],
                                                 )
+                                                logging.info(
+                                                    f"Component settings object created successfully: {new_component_settings.permId}"
+                                                )
 
                                                 action_properties_values[
                                                     component_settings_type_lower
@@ -1525,6 +1625,9 @@ class RegisterProcessWidget(ipw.VBox):
                             type=action_type,
                             experiment=collection_id,
                             props=action_properties_values,
+                        )
+                        logging.info(
+                            f"Action object created successfully: {new_action_object.permId}"
                         )
 
                         actions.append(new_action_object.permId)
@@ -1546,6 +1649,9 @@ class RegisterProcessWidget(ipw.VBox):
                     experiment=collection_id,
                     props=process_step_settings,
                     parents=new_process_step_parents,
+                )
+                logging.info(
+                    f"Process step object created successfully: {new_process_step_object.permId}"
                 )
 
                 process_properties["process_steps"].append(
@@ -1604,6 +1710,9 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.instrument_label = ipw.HTML(value="<b>Instrument:</b>")
         instrument_objects = utils.get_openbis_objects(
             self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Instrument"]
+        )
+        logging.info(
+            f"Instrument objects loaded successfully: {len(instrument_objects)}"
         )
         instrument_options = [
             (obj.props["name"], obj.permId) for obj in instrument_objects
@@ -1710,6 +1819,9 @@ class RegisterProcessStepWidget(ipw.VBox):
             raw_components = utils.find_instrument_components(
                 self.openbis_session, instrument_permid
             )
+            logging.info(
+                f"Components loaded successfully for instrument {instrument_permid}."
+            )
             INSTRUMENTS_COMPONENTS[instrument_permid] = {
                 k: list(v) for k, v in raw_components.items()
             }
@@ -1728,11 +1840,15 @@ class RegisterProcessStepWidget(ipw.VBox):
                     .get_property_assignments()
                     .df.code.values
                 )
+                logging.info(
+                    f"Action properties loaded successfully for type {action_type}."
+                )
 
                 for prop in obj_type_props:
                     prop_type = utils.get_openbis_property_type(
                         self.openbis_session, code=prop
                     )
+                    logging.info(f"Property type loaded successfully: {prop_type.code}")
 
                     # Combine the type check and component match into one statement
                     if (
@@ -1755,6 +1871,8 @@ class RegisterProcessStepWidget(ipw.VBox):
 
         for parent_id in process_step.parents:
             parent_obj = utils.get_openbis_object(self.openbis_session, parent_id)
+            logging.info(f"Object loaded successfully: {parent_obj.permId}")
+
             if parent_obj.type.code in [
                 OPENBIS_OBJECT_TYPES["Instrument"],
                 OPENBIS_OBJECT_TYPES["Instrument STM"],
@@ -1767,6 +1885,7 @@ class RegisterProcessStepWidget(ipw.VBox):
             action_object = utils.get_openbis_object(
                 self.openbis_session, sample_ident=action_id
             )
+            logging.info(f"Action object loaded successfully: {action_object.permId}")
             actions_accordion_children = list(self.actions_accordion.children)
             action_index = len(actions_accordion_children)
             new_action_widget = RegisterActionWidget(
@@ -1854,6 +1973,9 @@ class RegisterActionWidget(ipw.VBox):
             self.instrument_components = utils.find_instrument_components(
                 self.openbis_session, instrument_permid
             )
+            logging.info(
+                f"Components loaded successfully for instrument {instrument_permid}."
+            )
             INSTRUMENTS_COMPONENTS[instrument_permid] = {
                 k: list(v) for k, v in self.instrument_components.items()
             }
@@ -1878,6 +2000,9 @@ class RegisterActionWidget(ipw.VBox):
                 utils.get_openbis_object_type(openbis_session, type=action_type)
                 .get_property_assignments()
                 .df.code.values
+            )
+            logging.info(
+                f"Action properties loaded successfully for type {action_type}."
             )
             self.all_actions_properties.update(dict.fromkeys(props, None))
 
@@ -1913,6 +2038,7 @@ class RegisterActionWidget(ipw.VBox):
         substance_obj = utils.get_openbis_object(
             self.openbis_session, sample_ident=substance_id
         )
+        logging.info(f"Substance object loaded successfully: {substance_obj.permId}")
         mols_ids = substance_obj.get_parents(type="MOLECULE").df.permId.values
 
         if len(mols_ids) == 0:
@@ -1926,7 +2052,11 @@ class RegisterActionWidget(ipw.VBox):
             molecule_obj = utils.get_openbis_object(
                 self.openbis_session, sample_ident=mol_id
             )
+            logging.info(f"Molecule object loaded successfully: {molecule_obj.permId}")
             datasets = molecule_obj.get_datasets(type="ELN_PREVIEW")
+            logging.info(
+                f"Datasets loaded successfully for molecule {molecule_obj.permId}."
+            )
 
             # Skip if this specific molecule doesn't have an image
             if not datasets or not datasets[0].file_list:
@@ -1934,6 +2064,9 @@ class RegisterActionWidget(ipw.VBox):
 
             preview_ds = datasets[0]
             preview_ds.download(destination="images")
+            logging.info(
+                f"Preview dataset downloaded successfully: {preview_ds.permId}"
+            )
 
             dataset_folder = os.path.join("images", preview_ds.permId)
             img_path = os.path.join(dataset_folder, preview_ds.file_list[0])
@@ -1986,10 +2119,12 @@ class RegisterActionWidget(ipw.VBox):
             .get_property_assignments()
             .df.code.values
         )
+        logging.info(f"Action properties loaded successfully for type {action_type}.")
 
         for prop in action_properties:
             prop_lower = prop.lower()
             prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
+            logging.info(f"Property type loaded successfully: {prop_type.code}")
             prop_dataType = str(prop_type.dataType)
             prop_value = action_properties_values[prop_lower]
             for widget_idx, widget in enumerate(
@@ -2025,6 +2160,9 @@ class RegisterActionWidget(ipw.VBox):
                     ):
                         component_object = utils.get_openbis_object(
                             self.openbis_session, sample_ident=prop_value
+                        )
+                        logging.info(
+                            f"Component object loaded successfully: {component_object.permId}"
                         )
                         component_type = str(component_object.type)
                         widget.children[1].value = prop_value
@@ -2107,6 +2245,7 @@ class RegisterActionWidget(ipw.VBox):
             .get_property_assignments()
             .df.code.values
         )
+        logging.info(f"Action properties loaded successfully for type {action_type}.")
 
         action_component_types = []
         action_properties_widgets = []
@@ -2124,6 +2263,7 @@ class RegisterActionWidget(ipw.VBox):
 
         for prop in action_properties:
             prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
+            logging.info(f"Property type loaded successfully: {prop_type.code}")
             prop_label = str(prop_type.label)
             prop_dataType = str(prop_type.dataType)
             prop_sampleType = str(prop_type.sampleType)
@@ -2182,6 +2322,7 @@ class RegisterActionWidget(ipw.VBox):
                     collection=OPENBIS_COLLECTIONS_PATHS["Precursor Substance"],
                     type=OPENBIS_OBJECT_TYPES["Substance"],
                 )
+                logging.info(f"Substances loaded successfully: {len(substances_list)}")
                 substance_options = [("Select a substance...", "-1")]
                 for obj in substances_list:
                     props = obj.props.all()
@@ -2219,6 +2360,7 @@ class RegisterActionWidget(ipw.VBox):
                 gas_list = utils.get_openbis_objects(
                     self.openbis_session, type=OPENBIS_OBJECT_TYPES["Gas Bottle"]
                 )
+                logging.info(f"Gas objects loaded successfully: {len(gas_list)}")
                 gas_options = [("Select a dosing gas...", "-1")] + [
                     (obj.props["name"], obj.permId) for obj in gas_list
                 ]
@@ -2286,6 +2428,7 @@ class RegisterActionWidget(ipw.VBox):
                 c_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=permid
                 )
+                logging.info(f"Component object loaded successfully: {c_object.permId}")
                 c_name, c_type = available_components_dict[permid]
 
                 # 1. Build the UI wrapper for this specific component
@@ -2304,6 +2447,9 @@ class RegisterActionWidget(ipw.VBox):
                 settings_type = f"{c_type}_SETTINGS"
                 settings_objs = utils.get_openbis_objects(
                     self.openbis_session, type=settings_type, attrs=["parents"]
+                )
+                logging.info(
+                    f"Settings objects loaded successfully for type {settings_type}: {len(settings_objs)}"
                 )
 
                 # Filter out any settings that don't have the current component as a parent
@@ -2342,12 +2488,18 @@ class RegisterActionWidget(ipw.VBox):
                     .get_property_assignments()
                     .df.code.values
                 )
+                logging.info(
+                    f"Property types loaded successfully for type {settings_type}: {len(prop_types)}"
+                )
                 settings_props_widgets = []
                 for s_prop in prop_types:
                     if s_prop == "NAME":
                         continue
                     s_prop_type = utils.get_openbis_property_type(
                         self.openbis_session, code=s_prop
+                    )
+                    logging.info(
+                        f"Property type loaded successfully: {s_prop_type.code}"
                     )
                     s_dataType = str(s_prop_type.dataType)
                     if s_dataType in widget_type_map:
@@ -2378,6 +2530,9 @@ class RegisterActionWidget(ipw.VBox):
                     if s_permid != "-1":
                         s_obj = utils.get_openbis_object(
                             self.openbis_session, sample_ident=s_permid
+                        )
+                        logging.info(
+                            f"Settings object loaded successfully: {s_obj.permId}"
                         )
                         props = {k.upper(): v for k, v in s_obj.props().items()}
 
@@ -2533,6 +2688,9 @@ class RegisterObservableWidget(ipw.VBox):
             self.instrument_components = utils.find_instrument_components(
                 self.openbis_session, instrument_permid
             )
+            logging.info(
+                f"Instrument components loaded successfully for ID {instrument_permid}."
+            )
             INSTRUMENTS_COMPONENTS[instrument_permid] = {
                 k: list(v) for k, v in self.instrument_components.items()
             }
@@ -2544,10 +2702,14 @@ class RegisterObservableWidget(ipw.VBox):
             .get_property_assignments()
             .df.code.values
         )
+        logging.info(
+            f"Observable property types loaded successfully: {len(observable_prop_types)}"
+        )
 
         observable_properties_widgets = []
         for prop in observable_prop_types:
             prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
+            logging.info(f"Property type loaded successfully: {prop_type.code}")
             prop_label = str(prop_type.label)
             prop_dataType = str(prop_type.dataType)
             prop_multiValue = prop_type.multiValue

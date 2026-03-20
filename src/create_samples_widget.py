@@ -181,6 +181,16 @@ class CreateSampleWidget(ipw.VBox):
                 options.insert(0, material_options[0])
                 material_dropdown.options = options
 
+                logging_text = "Sorted material dropdown by "
+                if name_checkbox.value:
+                    logging_text += "name "
+                if name_checkbox.value and registration_date_checkbox.value:
+                    logging_text += "and "
+                if registration_date_checkbox.value:
+                    logging_text += "registration date"
+
+                logging.info(f"{logging_text}.")
+
             def load_material_details(change):
                 obj_permid = material_dropdown.value
                 if obj_permid == "-1":
@@ -301,6 +311,8 @@ class CreateSampleWidget(ipw.VBox):
                     self.sample_name_textbox.value = (
                         f"{current_datetime_str}_{obj_name}"
                     )
+
+                    logging.info(f"Material {obj_permid} details loaded successfully.")
 
             name_checkbox.observe(sort_material_dropdown, names="value")
             registration_date_checkbox.observe(sort_material_dropdown, names="value")
