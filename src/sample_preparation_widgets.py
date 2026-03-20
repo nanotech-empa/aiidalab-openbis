@@ -1077,14 +1077,12 @@ class RegisterPreparationWidget(ipw.VBox):
                     elif num_repeats > 1 and all(
                         v == num_repeats for v in counts.values()
                     ):
-                        process_code = f"({':'.join(unique_codes)}){num_repeats}"
+                        process_code = f"({''.join(unique_codes)}){num_repeats}"
                     else:
-                        process_code = f"[{':'.join(process_step_icons)}]"
+                        process_code = f"[{''.join(process_step_icons)}]"
 
                 new_sample_name = f"{current_sample_name}:{process_code}"
-                self.sample_preparation_object.props["name"] = (
-                    f"Preparation of {new_sample_name}"
-                )
+                self.sample_preparation_object.props["name"] = f"Prep_{new_sample_name}"
                 self.sample_preparation_object.add_children(new_process_object.permId)
                 utils.update_openbis_object(self.sample_preparation_object)
 

@@ -245,7 +245,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                     most_recent_parent.experiment.permId
                 )
                 self.measurement_session_name_text.value = (
-                    f"Measurement Session on Sample {sample_object.props['name']}"
+                    f"Meas_{sample_object.props['name']}"
                 )
                 display(
                     Javascript(
