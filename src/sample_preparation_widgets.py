@@ -1694,6 +1694,25 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.remove_process_step_button,
             ]
 
+    def load_instrument_actions(self, change):
+        instrument_permid = change["new"]
+        if instrument_permid == "-1":
+            return
+        else:
+            global INSTRUMENT_COMPONENTS
+
+            if INSTRUMENT_COMPONENTS is None:
+                self.instrument_components = self.find_instrument_components(
+                    instrument_permid
+                )
+                INSTRUMENT_COMPONENTS = {
+                    k: list(v) for k, v in self.instrument_components.items()
+                }
+            else:
+                self.instrument_components = {
+                    k: list(v) for k, v in INSTRUMENT_COMPONENTS.items()
+                }
+
     def load_process_step(self, process_step):
         """
         Load process step settings from process template and populate the widgets accordingly.
