@@ -1,3 +1,4 @@
+from collections import defaultdict
 import json
 from pathlib import Path
 from pybis import Openbis
@@ -7,6 +8,7 @@ import os
 import ipywidgets as ipw
 import io
 import contextlib
+from IPython.display import display, Javascript
 
 string_io = io.StringIO()
 
@@ -174,6 +176,48 @@ def create_openbis_collection(openbis_session, **kwargs):
         collection = openbis_session.new_collection(**kwargs)
         collection.save()
         return collection
+
+
+def find_instrument_components(openbis_session, instrument_permid):
+    display(Javascript(data="alert('Loading instrument components...')"))
+
+    obj = openbis_session.get_object(instrument_permid)
+    obj_type = str(obj.type)
+
+    assignments_df = (
+        get_openbis_object_type(openbis_session, type=obj_type)
+        .get_property_assignments()
+        .df
+    )
+    component_ids_to_fetch = []
+
+    for _, row in assignments_df.iterrows():
+        prop_code = row["code"]
+        prop_type = row.get("dataType")
+        if not prop_type:
+            prop_type = get_openbis_property_type(openbis_session, prop_code).dataType
+
+        if prop_type == "SAMPLE":
+            prop_value = obj.props[prop_code.lower()]
+            if prop_value:
+                if not isinstance(prop_value, list):
+                    prop_value = [prop_value]
+
+                component_ids_to_fetch.extend(prop_value)
+    all_components = defaultdict(list)
+    if component_ids_to_fetch:
+        for comp_id in component_ids_to_fetch:
+            comp_obj = get_openbis_object(openbis_session, sample_ident=comp_id)
+            comp_obj_type = str(comp_obj.type)
+            if comp_obj_type not in [
+                "PERSON",
+                "ORGANISATION",
+                "TEAM",
+                "GROUP",
+                "ROOM",
+            ]:
+                all_components[comp_obj_type].append(comp_obj)
+    return dict(all_components)
 
 
 # General functions
