@@ -1795,6 +1795,7 @@ class RegisterActionWidget(ipw.VBox):
         self.action_index = action_index
         self.instrument_permid = instrument_permid
         self.process_step_widget = process_step_widget
+        self.action_icon = ""
 
         global INSTRUMENT_COMPONENTS
 
