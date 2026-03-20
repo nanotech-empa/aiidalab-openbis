@@ -1150,7 +1150,7 @@ class SelectSampleWidget(ipw.VBox):
         self.sample_label = ipw.HTML(
             value="<b>Sample:</b>", layout=ipw.Layout(width="70px")
         )
-        self.sample_dropdown = ipw.Dropdown(layout=ipw.Layout(width="300px"))
+        self.sample_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
 
         # --- Sorting Checkboxes ---
         self.sort_label = ipw.HTML(
