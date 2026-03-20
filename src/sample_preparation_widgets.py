@@ -19,6 +19,7 @@ MATERIALS_TYPES = utils.read_json("metadata/materials_types.json")
 OPENBIS_OBJECT_CODES = utils.read_json("metadata/object_codes.json")
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
 INSTRUMENTS_COMPONENTS = {}
+INSTRUMENTS_ACTIONS = {}
 
 processes_project = "/LAB205_METHODS/PROCESSES"
 
@@ -1652,6 +1653,7 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.remove_process_step_button.on_click(self.remove_process_step)
         self.name_textbox.observe(self.change_process_step_title, names="value")
         self.add_action_button.on_click(self.add_action)
+        self.instrument_dropdown.observe(self.load_instrument_actions, names="value")
 
         # Load process step settings if provided
         if process_step:
@@ -1696,20 +1698,52 @@ class RegisterProcessStepWidget(ipw.VBox):
 
     def load_instrument_actions(self, change):
         instrument_permid = change["new"]
+
         if instrument_permid == "-1":
             return
-        else:
-            global INSTRUMENTS_COMPONENTS
 
-            if instrument_permid not in INSTRUMENTS_COMPONENTS:
-                self.instrument_components = utils.find_instrument_components(
-                    self.openbis_session, instrument_permid
+        global INSTRUMENTS_COMPONENTS
+        global INSTRUMENTS_ACTIONS
+
+        # 2. Simplify Component Caching
+        if instrument_permid not in INSTRUMENTS_COMPONENTS:
+            raw_components = utils.find_instrument_components(
+                self.openbis_session, instrument_permid
+            )
+            INSTRUMENTS_COMPONENTS[instrument_permid] = {
+                k: list(v) for k, v in raw_components.items()
+            }
+
+        instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
+
+        # 3. Simplify Action Lookup
+        if instrument_permid not in INSTRUMENTS_ACTIONS:
+            instrument_actions = []
+
+            for action_label, action_type in ACTIONS_TYPES.items():
+                obj_type_props = (
+                    utils.get_openbis_object_type(
+                        self.openbis_session, type=action_type
+                    )
+                    .get_property_assignments()
+                    .df.code.values
                 )
-                INSTRUMENTS_COMPONENTS[instrument_permid] = {
-                    k: list(v) for k, v in self.instrument_components.items()
-                }
-            else:
-                self.instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
+
+                for prop in obj_type_props:
+                    prop_type = utils.get_openbis_property_type(
+                        self.openbis_session, code=prop
+                    )
+
+                    # Combine the type check and component match into one statement
+                    if (
+                        prop_type.dataType in ["SAMPLE", "OBJECT"]
+                        and str(prop_type.sampleType) in instrument_components
+                    ):
+                        instrument_actions.append((action_label, action_type))
+                        break
+
+            instrument_actions.insert(0, ("Action", "ACTION"))
+            INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
 
     def load_process_step(self, process_step):
         """
@@ -1826,9 +1860,9 @@ class RegisterActionWidget(ipw.VBox):
         else:
             self.instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
 
-        action_type_options = [("Select an action type...", "-1")] + list(
-            ACTIONS_TYPES.items()
-        )
+        action_type_options = [
+            ("Select an action type...", "-1")
+        ] + INSTRUMENTS_ACTIONS.get(instrument_permid, [])
 
         self.action_type_dropdown = ipw.Dropdown(
             options=action_type_options, value="-1"

@@ -8,6 +8,7 @@ import os
 import ipywidgets as ipw
 import io
 import contextlib
+from IPython.display import display, Javascript
 
 string_io = io.StringIO()
 
@@ -178,6 +179,8 @@ def create_openbis_collection(openbis_session, **kwargs):
 
 
 def find_instrument_components(openbis_session, instrument_permid):
+    display(Javascript(data="alert('Loading instrument components...')"))
+
     obj = openbis_session.get_object(instrument_permid)
     obj_type = str(obj.type)
 
