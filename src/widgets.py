@@ -1205,7 +1205,10 @@ class SelectSampleWidget(ipw.VBox):
         """Fetches data from openBIS ONCE and stores it in a master DataFrame."""
         sample_type = OPENBIS_OBJECT_TYPES["Sample"]  # Ensure this is defined globally
         samples = utils.get_openbis_objects(
-            self.openbis_session, type=sample_type, where={"object_status": "ACTIVE"}
+            self.openbis_session,
+            type=sample_type,
+            attrs=["parents"],
+            where={"object_status": "ACTIVE"},
         )
 
         # Build a structured list of dictionaries for Pandas
@@ -1213,15 +1216,25 @@ class SelectSampleWidget(ipw.VBox):
         for obj in samples:
             name = obj.props["name"] if "name" in obj.props.all() else obj.code
             registrator = getattr(obj.registrator, "userId", obj.registrator)
+            parents = obj.parents
 
-            data.append(
-                {
-                    "display_name": name,
-                    "permId": obj.permId,  # Using permId as a proxy for registration date
-                    "registrator": registrator,
-                    "is_mine": registrator == self.current_user,
-                }
-            )
+            # If the user cannot see the parents, then the user does not have access to the history
+            if parents:
+                for parent in parents:
+                    parent_obj = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=parent
+                    )
+                    if parent_obj.type.code == OPENBIS_OBJECT_TYPES["Process Step"]:
+                        break
+
+                data.append(
+                    {
+                        "display_name": name,
+                        "permId": obj.permId,  # Using permId as a proxy for registration date
+                        "registrator": registrator,
+                        "is_mine": registrator == self.current_user,
+                    }
+                )
 
         # Store as a master DataFrame
         self.raw_data_df = pd.DataFrame(data)
