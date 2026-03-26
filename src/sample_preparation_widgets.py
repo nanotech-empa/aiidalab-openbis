@@ -408,11 +408,32 @@ class ActionHistoryWidget(ipw.VBox):
                 "<div style='font-style: italic;'>No components used.</div>"
             )
 
-        props_widgets.append(
-            make_row(
-                "Components", components_html_content, "components", calculated_width
-            )
+        prop_types = (
+            utils.get_openbis_object_type(self.openbis_session, type=self.object_type)
+            .get_property_assignments()
+            .df.code.values
         )
+        action_contains_component = False
+        for prop in prop_types:
+            prop_type = utils.get_openbis_property_type(self.openbis_session, code=prop)
+            prop_dataType = str(prop_type.dataType)
+
+            if (
+                prop_dataType in ["SAMPLE", "OBJECT"]
+                and f"{prop}_SETTINGS" in prop_types
+            ):
+                action_contains_component = True
+                break
+
+        if action_contains_component:
+            props_widgets.append(
+                make_row(
+                    "Components",
+                    components_html_content,
+                    "components",
+                    calculated_width,
+                )
+            )
 
         return props_widgets
 
