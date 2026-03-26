@@ -62,5 +62,7 @@
     "AiiDA Node": "AIIDA_NODE",
     "Draft": "DRAFT",
     "STM Simulation": "STM_SIMULATION",
-    "Gas Bottle": "GAS_BOTTLE"
+    "Gas Bottle": "GAS_BOTTLE",
+    "Valve": "VALVE",
+    "Valve Settings": "VALVE_SETTINGS"
 }

@@ -91,35 +91,43 @@ class ProcessStepHistoryWidget(ipw.VBox):
         self.process_step_type = OPENBIS_OBJECT_TYPES["Process Step"]
         self.process_step_type_lower = self.process_step_type.lower()
 
-        self.name_label = ipw.HTML(value="<b>Name:</b>")
+        label_layout = ipw.Layout(width="100px")
+
+        self.name_label = ipw.HTML(value="<b>Name:</b>", layout=label_layout)
         self.name_html = ipw.HTML()
         self.name_hbox = ipw.HBox(children=[self.name_label, self.name_html])
 
-        self.description_label = ipw.HTML(value="<b>Description:</b>")
+        self.description_label = ipw.HTML(
+            value="<b>Description:</b>", layout=label_layout
+        )
         self.description_html = ipw.HTML()
         self.description_hbox = ipw.HBox(
             children=[self.description_label, self.description_html]
         )
 
-        self.comments_label = ipw.HTML(value="<b>Comments:</b>")
+        self.comments_label = ipw.HTML(value="<b>Comments:</b>", layout=label_layout)
         self.comments_html = ipw.HTML()
         self.comments_hbox = ipw.HBox(
             children=[self.comments_label, self.comments_html]
         )
 
-        self.instrument_label = ipw.HTML(value="<b>Instrument:</b>")
+        self.instrument_label = ipw.HTML(
+            value="<b>Instrument:</b>", layout=label_layout
+        )
         self.instrument_html = ipw.HTML()
         self.instrument_hbox = ipw.HBox(
             children=[self.instrument_label, self.instrument_html]
         )
 
-        self.actions_label = ipw.HTML(value="<b>Actions:</b>")
+        self.actions_label = ipw.HTML(value="<b>Actions:</b>", layout=label_layout)
         self.actions_accordion = ipw.Accordion()
         self.actions_vbox = ipw.VBox(
             children=[self.actions_label, self.actions_accordion]
         )
 
-        self.observables_label = ipw.HTML(value="<b>Observables:</b>")
+        self.observables_label = ipw.HTML(
+            value="<b>Observables:</b>", layout=label_layout
+        )
         self.observables_accordion = ipw.Accordion()
         self.observables_vbox = ipw.VBox(
             children=[self.observables_label, self.observables_accordion]
@@ -224,12 +232,30 @@ class ActionHistoryWidget(ipw.VBox):
 
     def load_action_data(self):
         props = self.openbis_object.props.all()
+        longest_string = "Components"
+        for k, v in props.items():
+            if v and not str(k).endswith("_settings") and f"{k}_settings" not in props:
+                try:
+                    label = str(
+                        utils.get_openbis_property_type(
+                            self.openbis_session, code=k
+                        ).label
+                    )
+                    longest_string = max(longest_string, label, key=len)
+                except Exception:
+                    pass
+
+        max_char_count = len(longest_string)
+        calculated_width = f"{(max_char_count * 7) + 20}px"
+
         props_widgets = []
         components_html_content = ""
 
         # Helper function to stop repeating widget layout code
-        def make_row(label, val, prop_name):
-            lbl = ipw.HTML(value=f"<b>{label}:</b>", layout=ipw.Layout(width="100px"))
+        def make_row(label, val, prop_name, layout_width="100px"):
+            lbl = ipw.HTML(
+                value=f"<b>{label}:</b>", layout=ipw.Layout(width=layout_width)
+            )
             html = ipw.HTML(value=str(val))
             return cw.HBox(children=[lbl, html], metadata={"property_name": prop_name})
 
@@ -256,15 +282,19 @@ class ActionHistoryWidget(ipw.VBox):
                 "FLOAT",
                 "BOOLEAN",
             ]:
-                props_widgets.append(make_row(prop_label, prop_val, prop_key))
+                props_widgets.append(
+                    make_row(prop_label, prop_val, prop_key, calculated_width)
+                )
 
             # 2. Gas Bottle
             elif prop_sampleType == "GAS_BOTTLE":
                 gas_obj = utils.get_openbis_object(
                     self.openbis_session, sample_ident=prop_val
                 )
-                gas_name = gas_obj.props.get("name", "") if gas_obj else ""
-                props_widgets.append(make_row(prop_label, gas_name, prop_key))
+                gas_name = gas_obj.props["name"]
+                props_widgets.append(
+                    make_row(prop_label, gas_name, prop_key, calculated_width)
+                )
 
             # 3. Substance & Image logic
             elif prop_sampleType == "SUBSTANCE":
@@ -324,7 +354,9 @@ class ActionHistoryWidget(ipw.VBox):
                     </div>
                     """
 
-                props_widgets.append(make_row(prop_label, sub_text, prop_key))
+                props_widgets.append(
+                    make_row(prop_label, sub_text, prop_key, calculated_width)
+                )
 
             # 4. Components & Settings HTML block
             elif (
@@ -348,7 +380,6 @@ class ActionHistoryWidget(ipw.VBox):
                     )
                     s_props = s_obj.props()
                     s_props.pop("name", None)
-
                     if s_props:
                         components_html_content += (
                             "<ul style='margin-top: 0; padding-left: 20px;'>"
@@ -378,7 +409,9 @@ class ActionHistoryWidget(ipw.VBox):
             )
 
         props_widgets.append(
-            make_row("Components", components_html_content, "components")
+            make_row(
+                "Components", components_html_content, "components", calculated_width
+            )
         )
 
         return props_widgets
@@ -390,17 +423,23 @@ class ObservableHistoryWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.openbis_dataset = openbis_dataset
 
-        self.name_label = ipw.HTML(value="<b>Name:</b>")
+        label_layout = ipw.Layout(width="100px")
+
+        self.name_label = ipw.HTML(value="<b>Name:</b>", layout=label_layout)
         self.name_html = ipw.HTML()
         self.name_hbox = ipw.HBox(children=[self.name_label, self.name_html])
 
-        self.description_label = ipw.HTML(value="<b>Description:</b>")
+        self.description_label = ipw.HTML(
+            value="<b>Description:</b>", layout=label_layout
+        )
         self.description_html = ipw.HTML()
         self.description_hbox = ipw.HBox(
             children=[self.description_label, self.description_html]
         )
 
-        self.components_label = ipw.HTML(value="<b>Components:</b>")
+        self.components_label = ipw.HTML(
+            value="<b>Components:</b>", layout=label_layout
+        )
         self.components_html = ipw.HTML()
         self.components_hbox = ipw.HBox(
             children=[self.components_label, self.components_html]
@@ -1209,26 +1248,34 @@ class RegisterProcessWidget(ipw.VBox):
             f"<div style='{header_style}'>Register new steps</div>"
         )
 
-        self.select_collection_label = ipw.HTML(value="<b>Collection:</b>")
+        label_layout = ipw.Layout(width="80px")
+
+        self.select_collection_label = ipw.HTML(
+            value="<b>Collection:</b>", layout=label_layout
+        )
         self.select_collection_dropdown = ipw.Dropdown()
         self.select_collection_hbox = ipw.HBox(
             [self.select_collection_label, self.select_collection_dropdown]
         )
         self.load_collections()
 
-        self.process_name_label = ipw.HTML(value="<b>Name:</b>")
+        self.process_name_label = ipw.HTML(value="<b>Name:</b>", layout=label_layout)
         self.process_name_text = ipw.Text()
         self.process_name_hbox = ipw.HBox(
             [self.process_name_label, self.process_name_text]
         )
 
-        self.process_short_name_label = ipw.HTML(value="<b>Short name:</b>")
+        self.process_short_name_label = ipw.HTML(
+            value="<b>Short name:</b>", layout=label_layout
+        )
         self.process_short_name_text = ipw.Text()
         self.process_short_name_hbox = ipw.HBox(
             [self.process_short_name_label, self.process_short_name_text]
         )
 
-        self.process_description_label = ipw.HTML(value="<b>Description:</b>")
+        self.process_description_label = ipw.HTML(
+            value="<b>Description:</b>", layout=label_layout
+        )
         self.process_description_text = ipw.Textarea()
         self.process_description_hbox = ipw.HBox(
             [self.process_description_label, self.process_description_text]
@@ -1601,17 +1648,23 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.processes_accordion = processes_accordion
         self.process_step_index = process_step_index
 
-        self.name_label = ipw.HTML(value="<b>Name:</b>")
+        label_layout = ipw.Layout(width="100px")
+
+        self.name_label = ipw.HTML(value="<b>Name:</b>", layout=label_layout)
         self.name_textbox = ipw.Text()
         self.name_hbox = ipw.HBox(children=[self.name_label, self.name_textbox])
 
-        self.description_label = ipw.HTML(value="<b>Description:</b>")
+        self.description_label = ipw.HTML(
+            value="<b>Description:</b>", layout=label_layout
+        )
         self.description_textbox = ipw.Text()
         self.description_hbox = ipw.HBox(
             children=[self.description_label, self.description_textbox]
         )
 
-        self.instrument_label = ipw.HTML(value="<b>Instrument:</b>")
+        self.instrument_label = ipw.HTML(
+            value="<b>Instrument:</b>", layout=label_layout
+        )
         instrument_objects = utils.get_openbis_objects(
             self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Instrument"]
         )
@@ -1624,7 +1677,7 @@ class RegisterProcessStepWidget(ipw.VBox):
             children=[self.instrument_label, self.instrument_dropdown]
         )
 
-        self.comments_label = ipw.HTML(value="<b>Comments:</b>")
+        self.comments_label = ipw.HTML(value="<b>Comments:</b>", layout=label_layout)
         self.comments_textarea = ipw.Textarea()
         self.comments_hbox = ipw.HBox(
             children=[self.comments_label, self.comments_textarea]
@@ -1858,6 +1911,8 @@ class RegisterActionWidget(ipw.VBox):
         self.process_step_widget = process_step_widget
         self.action_icon = ""
 
+        label_layout = ipw.Layout(width="86px")
+
         global INSTRUMENTS_COMPONENTS
 
         if instrument_permid not in INSTRUMENTS_COMPONENTS:
@@ -1878,7 +1933,10 @@ class RegisterActionWidget(ipw.VBox):
             options=action_type_options, value="-1"
         )
         self.action_type_hbox = ipw.HBox(
-            children=[ipw.HTML(value="<b>Action type:</b>"), self.action_type_dropdown]
+            children=[
+                ipw.HTML(value="<b>Action type:</b>", layout=label_layout),
+                self.action_type_dropdown,
+            ]
         )
         self.action_properties_widgets = ipw.VBox()
 
@@ -2118,6 +2176,27 @@ class RegisterActionWidget(ipw.VBox):
             .df.code.values
         )
 
+        longest_string = "Component"
+        for prop in action_properties:
+            prop_upper = prop.upper()
+            if (
+                not str(prop_upper).endswith("_SETTINGS")
+                and f"{prop}_SETTINGS" not in action_properties
+            ):
+                try:
+                    label = str(
+                        utils.get_openbis_property_type(
+                            self.openbis_session, code=prop_upper
+                        ).label
+                    )
+                    longest_string = max(longest_string, label, key=len)
+                except Exception:
+                    pass
+
+        max_char_count = len(longest_string)
+        calculated_width = f"{(max_char_count * 6) + 20}px"
+        label_layout = ipw.Layout(width=calculated_width)
+
         action_component_types = []
         action_properties_widgets = []
         component_widgets_appended = False
@@ -2150,7 +2229,7 @@ class RegisterActionWidget(ipw.VBox):
                     )
                     comp_widget_ref = cw.HBox(
                         children=[
-                            ipw.HTML(value="<b>Component:</b>"),
+                            ipw.HTML(value="<b>Component:</b>", layout=label_layout),
                             comp_dropdown_widget,
                         ],
                         metadata={"property_name": "COMPONENT"},
@@ -2165,7 +2244,7 @@ class RegisterActionWidget(ipw.VBox):
             elif prop == "DURATION":
                 duration_widgets = cw.HBox(
                     children=[
-                        ipw.HTML(value="<b>Duration:</b>"),
+                        ipw.HTML(value="<b>Duration:</b>", layout=label_layout),
                         ipw.BoundedIntText(
                             value=0, min=0, layout=ipw.Layout(width="40px")
                         ),
@@ -2234,7 +2313,7 @@ class RegisterActionWidget(ipw.VBox):
 
                 substance_widgets = cw.HBox(
                     children=[
-                        ipw.HTML(value="<b>Substance:</b>"),
+                        ipw.HTML(value="<b>Substance:</b>", layout=label_layout),
                         self.substance_dropdown,
                         self.substance_images_container,  # Added container here
                     ],
@@ -2242,7 +2321,7 @@ class RegisterActionWidget(ipw.VBox):
                 )
                 action_properties_widgets.append(substance_widgets)
 
-            elif prop == "GAS":
+            elif prop == "GAS_BOTTLE":
                 gas_list = utils.get_openbis_objects(
                     self.openbis_session, type=OPENBIS_OBJECT_TYPES["Gas Bottle"]
                 )
@@ -2252,7 +2331,7 @@ class RegisterActionWidget(ipw.VBox):
                 action_properties_widgets.append(
                     cw.HBox(
                         children=[
-                            ipw.HTML(value="<b>Dosing gas:</b>"),
+                            ipw.HTML(value="<b>Dosing gas:</b>", layout=label_layout),
                             ipw.Dropdown(options=gas_options, value="-1"),
                         ],
                         metadata={"property_name": prop},
@@ -2272,7 +2351,9 @@ class RegisterActionWidget(ipw.VBox):
                 action_properties_widgets.append(
                     cw.HBox(
                         children=[
-                            ipw.HTML(value=f"<b>{prop_label}:</b>"),
+                            ipw.HTML(
+                                value=f"<b>{prop_label}:</b>", layout=label_layout
+                            ),
                             prop_value_widget,
                         ],
                         metadata={"property_name": prop},
@@ -2333,6 +2414,30 @@ class RegisterActionWidget(ipw.VBox):
                     self.openbis_session, type=settings_type, attrs=["parents"]
                 )
 
+                settings_type_properties = (
+                    utils.get_openbis_object_type(
+                        self.openbis_session, type=settings_type
+                    )
+                    .get_property_assignments()
+                    .df.code.values
+                )
+
+                longest_string = "Settings"
+                for prop in settings_type_properties:
+                    try:
+                        label = str(
+                            utils.get_openbis_property_type(
+                                self.openbis_session, code=prop
+                            ).label
+                        )
+                        longest_string = max(longest_string, label, key=len)
+                    except Exception:
+                        pass
+
+                max_char_count = len(longest_string)
+                calculated_settings_width = f"{(max_char_count * 6) + 20}px"
+                settings_label_layout = ipw.Layout(width=calculated_settings_width)
+
                 # Filter out any settings that don't have the current component as a parent
                 filtered_settings = [
                     obj
@@ -2350,7 +2455,12 @@ class RegisterActionWidget(ipw.VBox):
                 settings_options = [("Select settings...", "-1")] + dynamic_options
                 settings_dropdown = ipw.Dropdown(options=settings_options, value="-1")
                 settings_dropdown_hbox = cw.HBox(
-                    children=[ipw.HTML(value="<b>Settings:</b>"), settings_dropdown]
+                    children=[
+                        ipw.HTML(
+                            value="<b>Settings:</b>", layout=settings_label_layout
+                        ),
+                        settings_dropdown,
+                    ]
                 )
 
                 is_updating_settings = False
@@ -2388,7 +2498,10 @@ class RegisterActionWidget(ipw.VBox):
                         settings_props_widgets.append(
                             cw.HBox(
                                 children=[
-                                    ipw.HTML(value=f"<b>{str(s_prop_type.label)}:</b>"),
+                                    ipw.HTML(
+                                        value=f"<b>{str(s_prop_type.label)}:</b>",
+                                        layout=settings_label_layout,
+                                    ),
                                     w,
                                 ],
                                 metadata={"property_name": s_prop},
@@ -2554,6 +2667,8 @@ class RegisterObservableWidget(ipw.VBox):
         self.instrument_permid = instrument_permid
         self.process_step_widget = process_step_widget
 
+        label_layout = ipw.Layout(width="100px")
+
         global INSTRUMENTS_COMPONENTS
 
         if instrument_permid not in INSTRUMENTS_COMPONENTS:
@@ -2654,7 +2769,10 @@ class RegisterObservableWidget(ipw.VBox):
 
             observable_properties_widgets.append(
                 cw.HBox(
-                    children=[ipw.HTML(value=f"<b>{prop_label}:</b>"), widget],
+                    children=[
+                        ipw.HTML(value=f"<b>{prop_label}:</b>", layout=label_layout),
+                        widget,
+                    ],
                     metadata={"property_name": prop},
                 )
             )
@@ -2663,7 +2781,9 @@ class RegisterObservableWidget(ipw.VBox):
             children=observable_properties_widgets
         )
 
-        self.upload_readings_label = ipw.HTML(value="<b>Upload readings:</b>")
+        self.upload_readings_label = ipw.HTML(
+            value="<b>Upload readings:</b>", layout=ipw.Layout(width="120px")
+        )
         self.upload_readings_widget = ipw.FileUpload(multiple=False)
         self.upload_readings_hbox = ipw.HBox(
             children=[self.upload_readings_label, self.upload_readings_widget]
