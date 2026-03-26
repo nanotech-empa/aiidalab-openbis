@@ -271,11 +271,17 @@ class ActionHistoryWidget(ipw.VBox):
                 sub_obj = utils.get_openbis_object(
                     self.openbis_session, sample_ident=prop_val
                 )
+                name = sub_obj.props["name"]
                 empa = sub_obj.props["empa_number"]
                 batch = sub_obj.props["batch"]
                 vial = sub_obj.props["vial"]
 
-                sub_text = f"Identifier: {empa}{batch}" + (f"-{vial}" if vial else "")
+                if empa and batch:
+                    sub_text = (
+                        f"{empa}{batch}" + (f"-{vial}" if vial else "") + " (Precursor)"
+                    )
+                else:
+                    sub_text = f"{name}" + " (Chemical)"
 
                 # Iterate parents directly to find ALL molecules
                 molecule_images_html = ""
@@ -312,7 +318,7 @@ class ActionHistoryWidget(ipw.VBox):
                 # If we found any images, append them to the text using a flexbox container
                 if molecule_images_html:
                     sub_text += f"""
-                    <div style="margin-top: 10px;">Molecule sketches:</div>
+                    <div style="margin-top: 10px;">Molecule(s) sketch(es):</div>
                     <div style="display: flex; flex-wrap: wrap; margin-top: 5px;">
                         {molecule_images_html}
                     </div>
@@ -1155,18 +1161,6 @@ class RegisterPreparationWidget(ipw.VBox):
                 # After a process step, the current sample is now the new one
                 current_sample = new_sample
 
-            # Refresh sample dropdown and sample history
-            self.select_sample_dropdown.load_samples()
-            self.select_sample_dropdown.sample_dropdown.value = new_sample.permId
-
-            # Reset new processes accordion
-            processes_accordion_children = list(self.new_processes_accordion.children)
-            for index, process_step in enumerate(processes_accordion_children):
-                self.new_processes_accordion.set_title(index, "")
-
-            self.process_short_name = ""
-            self.new_processes_accordion.children = []
-
             self.children = [
                 self.select_experiment_title,
                 self.select_experiment_dropdown,
@@ -1180,6 +1174,22 @@ class RegisterPreparationWidget(ipw.VBox):
                 self.process_buttons_hbox,
                 self.save_button,
             ]
+
+            # Reset new processes accordion
+            processes_accordion_children = list(self.new_processes_accordion.children)
+            for index, process_step in enumerate(processes_accordion_children):
+                self.new_processes_accordion.set_title(index, "")
+
+            self.process_short_name = ""
+            self.new_processes_accordion.children = []
+
+            # Refresh sample dropdown and sample history
+            self.select_sample_dropdown.load_samples()
+            self.select_sample_dropdown.sample_dropdown.value = new_sample.permId
+
+            display(
+                Javascript(data="alert('New process steps registered successfully.')")
+            )
 
 
 class RegisterProcessWidget(ipw.VBox):
@@ -2179,19 +2189,36 @@ class RegisterActionWidget(ipw.VBox):
             elif prop == "SUBSTANCE":
                 substances_list = utils.get_openbis_objects(
                     self.openbis_session,
-                    collection=OPENBIS_COLLECTIONS_PATHS["Precursor Substance"],
                     type=OPENBIS_OBJECT_TYPES["Substance"],
                 )
-                substance_options = [("Select a substance...", "-1")]
+
+                precursors = []
+                chemicals = []
+
                 for obj in substances_list:
                     props = obj.props.all()
-                    if "empa_number" in props and "batch" in props:
-                        name = f"{props['empa_number']}{props['batch']}"
-                        substance_options.append((name, obj.permId))
+                    name = props.get("name", "Unnamed substance")
+                    empa_number = props.get("empa_number", None)
+                    batch = props.get("batch", None)
+
+                    if empa_number and batch:
+                        display_name = f"{empa_number}{batch} (Precursor)"
+                        precursors.append((display_name, obj.permId))
                     else:
+                        display_name = f"{name} (Chemical)"
+                        chemicals.append((display_name, obj.permId))
                         logging.info(
                             f"Substance {obj.permId} is missing EMPA number or batch."
                         )
+
+                # Sort each list alphabetically by the display name
+                precursors.sort(key=lambda x: x[0], reverse=True)
+                chemicals.sort(key=lambda x: x[0])
+
+                # Combine the default option, sorted precursors, and sorted chemicals
+                substance_options = (
+                    [("Select a substance...", "-1")] + precursors + chemicals
+                )
 
                 self.substance_dropdown = ipw.Dropdown(
                     options=substance_options, value="-1"
