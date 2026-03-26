@@ -206,7 +206,7 @@ class ActionHistoryWidget(ipw.VBox):
         icon_mapping = {
             OPENBIS_OBJECT_TYPES.get("Annealing"): "🔥",
             OPENBIS_OBJECT_TYPES.get("Cooldown"): "❄️",
-            OPENBIS_OBJECT_TYPES.get("Deposition"): "🟫",
+            OPENBIS_OBJECT_TYPES.get("Deposition"): "🧱",
             OPENBIS_OBJECT_TYPES.get("Dosing"): "💧",
             OPENBIS_OBJECT_TYPES.get("Sputtering"): "🔫",
             OPENBIS_OBJECT_TYPES.get("Coating"): "🧥",
@@ -2055,7 +2055,7 @@ class RegisterActionWidget(ipw.VBox):
         icon_mapping = {
             OPENBIS_OBJECT_TYPES.get("Annealing"): "🔥",
             OPENBIS_OBJECT_TYPES.get("Cooldown"): "❄️",
-            OPENBIS_OBJECT_TYPES.get("Deposition"): "🟫",
+            OPENBIS_OBJECT_TYPES.get("Deposition"): "🧱",
             OPENBIS_OBJECT_TYPES.get("Dosing"): "💧",
             OPENBIS_OBJECT_TYPES.get("Sputtering"): "🔫",
             OPENBIS_OBJECT_TYPES.get("Coating"): "🧥",
