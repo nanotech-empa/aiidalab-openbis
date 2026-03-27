@@ -482,6 +482,8 @@ class ObservableHistoryWidget(ipw.VBox):
             self.description_html.value = openbis_dataset_props["description"]
 
         components_ids = openbis_dataset_props["components"]
+        if not isinstance(components_ids, list):
+            components_ids = [components_ids]
 
         if components_ids:
             for component_id in components_ids:
