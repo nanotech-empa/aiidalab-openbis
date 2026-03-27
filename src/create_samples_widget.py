@@ -6,9 +6,13 @@ import pandas as pd
 import logging
 from IPython.display import display, Javascript
 
-OPENBIS_OBJECT_TYPES = utils.read_json("metadata/object_types.json")
+INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
+OPENBIS_OBJECT_TYPES, _ = (
+    INTERFACE_CONFIG_INFO["object_types"],
+    INTERFACE_CONFIG_INFO["object_types_codes"],
+)
+MATERIALS_TYPES = INTERFACE_CONFIG_INFO["slabs_types"]
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
-MATERIALS_TYPES = utils.read_json("metadata/materials_types.json")
 
 if not os.path.exists("logs"):
     os.mkdir("logs")

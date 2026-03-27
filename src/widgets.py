@@ -8,10 +8,15 @@ from rdkit.Chem import AllChem, Draw, rdMolDescriptors
 import shutil
 import io
 
-MATERIALS_CONCEPTS_TYPES = utils.read_json("metadata/materials_concepts_types.json")
+INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
+OPENBIS_OBJECT_TYPES, _ = (
+    INTERFACE_CONFIG_INFO["object_types"],
+    INTERFACE_CONFIG_INFO["object_types_codes"],
+)
+MATERIALS_CONCEPTS_TYPES = INTERFACE_CONFIG_INFO["slabs_concepts_types"]
+INSTRUMENTS_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
+
 SIMULATION_TYPES = utils.read_json("metadata/simulation_types.json")
-INSTRUMENTS_TYPES = utils.read_json("metadata/instruments_types.json")
-OPENBIS_OBJECT_TYPES = utils.read_json("metadata/object_types.json")
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
 
 institutions_project = "/LAB205_ADMINISTRATIVE/ORGANISATIONS"
@@ -755,7 +760,7 @@ class SelectInstrumentWidget(ipw.VBox):
 
     def load_instruments(self):
         instruments = []
-        for instrument_type in INSTRUMENTS_TYPES:
+        for instrument_type in INSTRUMENTS_TYPES.values():
             instruments_objects = utils.get_openbis_objects(
                 self.openbis_session, type=instrument_type
             )

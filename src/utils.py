@@ -9,10 +9,62 @@ import ipywidgets as ipw
 import io
 import contextlib
 from IPython.display import display, Javascript
+from functools import lru_cache
 
 string_io = io.StringIO()
 
 # OpenBIS-AiiDAlab functions
+
+
+@lru_cache(maxsize=5)
+def get_interface_config_info():
+    openbis_session = connect_openbis_aiida()[0]
+
+    info = {
+        "object_types": {},
+        "object_types_codes": {},
+        "actions_types": {},
+        "actions_types_codes": {},
+        "actions_types_icons": {},
+        "slabs_types": {},
+        "slabs_types_codes": {},
+        "slabs_concepts_types": {},
+        "slabs_concepts_codes": {},
+        "instruments_types": {},
+    }
+
+    obj_types = openbis_session.get_object_types()
+
+    for obj in obj_types:
+        desc = obj.description
+        if not desc:
+            continue
+
+        desc_str = str(desc)
+        code_str = str(obj.code)
+        prefix_str = str(obj.generatedCodePrefix)
+
+        info["object_types"][desc_str] = code_str
+        info["object_types_codes"][desc_str] = prefix_str
+
+        meta = obj.metaData
+        if meta:
+            meta_type = meta.get("type")
+            meta_icon = meta.get("icon", "")
+            if meta_type == "slab":
+                info["slabs_types"][desc_str] = code_str
+                info["slabs_types_codes"][desc_str] = prefix_str
+            elif meta_type == "slab_concept":
+                info["slabs_concepts_types"][desc_str] = code_str
+                info["slabs_concepts_codes"][desc_str] = prefix_str
+            elif meta_type == "action":
+                info["actions_types"][desc_str] = code_str
+                info["actions_types_codes"][desc_str] = prefix_str
+                info["actions_types_icons"][code_str] = meta_icon
+            elif meta_type == "instrument":
+                info["instruments_types"][desc_str] = code_str
+
+    return info
 
 
 def get_openbis_collections(openbis_session, *args, **kwargs):
