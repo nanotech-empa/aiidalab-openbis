@@ -11,12 +11,16 @@ import os
 import logging
 import custom_widgets as cw
 
-OBSERVABLES_TYPES = utils.read_json("metadata/observables_types.json")
-ACTIONS_TYPES = utils.read_json("metadata/actions_types.json")
-ACTIONS_CODES = utils.read_json("metadata/actions_codes.json")
-OPENBIS_OBJECT_TYPES = utils.read_json("metadata/object_types.json")
-MATERIALS_TYPES = utils.read_json("metadata/materials_types.json")
-OPENBIS_OBJECT_CODES = utils.read_json("metadata/object_codes.json")
+INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
+ACTIONS_TYPES, ACTIONS_CODES = (
+    INTERFACE_CONFIG_INFO["actions_types"],
+    INTERFACE_CONFIG_INFO["actions_types_codes"],
+)
+OPENBIS_OBJECT_TYPES, OPENBIS_OBJECT_CODES = (
+    INTERFACE_CONFIG_INFO["object_types"],
+    INTERFACE_CONFIG_INFO["object_types_codes"],
+)
+MATERIALS_TYPES = INTERFACE_CONFIG_INFO["slabs_types"]
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
 INSTRUMENTS_COMPONENTS = {}
 INSTRUMENTS_ACTIONS = {}
@@ -211,21 +215,7 @@ class ActionHistoryWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.openbis_object = openbis_object
         self.object_type = str(self.openbis_object.type)
-        icon_mapping = {
-            OPENBIS_OBJECT_TYPES.get("Annealing"): "🔥",
-            OPENBIS_OBJECT_TYPES.get("Cooldown"): "❄️",
-            OPENBIS_OBJECT_TYPES.get("Deposition"): "🧱",
-            OPENBIS_OBJECT_TYPES.get("Dosing"): "💧",
-            OPENBIS_OBJECT_TYPES.get("Sputtering"): "🔫",
-            OPENBIS_OBJECT_TYPES.get("Coating"): "🧥",
-            OPENBIS_OBJECT_TYPES.get("Delamination"): "🧩",
-            OPENBIS_OBJECT_TYPES.get("Etching"): "📌",
-            OPENBIS_OBJECT_TYPES.get("Fishing"): "🎣",
-            OPENBIS_OBJECT_TYPES.get("Field Emission"): "⚡",
-            OPENBIS_OBJECT_TYPES.get("Light Irradiation"): "💡",
-            OPENBIS_OBJECT_TYPES.get("Mechanical Pressing"): "🔩",
-            OPENBIS_OBJECT_TYPES.get("Rinse"): "🚿",
-        }
+        icon_mapping = INTERFACE_CONFIG_INFO["actions_types_icons"]
         self.action_icon = icon_mapping.get(self.object_type, "")
         self.name = self.openbis_object.props["name"] or ""
         self.children = self.load_action_data()
@@ -2141,22 +2131,7 @@ class RegisterActionWidget(ipw.VBox):
             self.action_properties_widgets.children = []
             return
 
-        icon_mapping = {
-            OPENBIS_OBJECT_TYPES.get("Annealing"): "🔥",
-            OPENBIS_OBJECT_TYPES.get("Cooldown"): "❄️",
-            OPENBIS_OBJECT_TYPES.get("Deposition"): "🧱",
-            OPENBIS_OBJECT_TYPES.get("Dosing"): "💧",
-            OPENBIS_OBJECT_TYPES.get("Sputtering"): "🔫",
-            OPENBIS_OBJECT_TYPES.get("Coating"): "🧥",
-            OPENBIS_OBJECT_TYPES.get("Delamination"): "🧩",
-            OPENBIS_OBJECT_TYPES.get("Etching"): "📌",
-            OPENBIS_OBJECT_TYPES.get("Fishing"): "🎣",
-            OPENBIS_OBJECT_TYPES.get("Field Emission"): "⚡",
-            OPENBIS_OBJECT_TYPES.get("Light Irradiation"): "💡",
-            OPENBIS_OBJECT_TYPES.get("Mechanical Pressing"): "🔩",
-            OPENBIS_OBJECT_TYPES.get("Rinse"): "🚿",
-        }
-
+        icon_mapping = INTERFACE_CONFIG_INFO["actions_types_icons"]
         self.action_icon = icon_mapping.get(action_type, "⚙️")
         current_text = self.process_step_widget.name_textbox.value
 

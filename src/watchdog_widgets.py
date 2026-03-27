@@ -8,7 +8,11 @@ import atexit
 import subprocess
 import logging
 
-OPENBIS_OBJECT_TYPES = utils.read_json("metadata/object_types.json")
+INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
+OPENBIS_OBJECT_TYPES, _ = (
+    INTERFACE_CONFIG_INFO["object_types"],
+    INTERFACE_CONFIG_INFO["object_types_codes"],
+)
 
 if not os.path.exists("logs"):
     os.mkdir("logs")
