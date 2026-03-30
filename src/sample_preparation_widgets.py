@@ -2703,7 +2703,7 @@ class RegisterObservableWidget(ipw.VBox):
                     widget = ipw.SelectMultiple(
                         options=sample_options,
                         value=[],
-                        layout=ipw.Layout(height="300px", width="200px"),
+                        layout=ipw.Layout(height="300px", width="300px"),
                     )
 
                 else:
@@ -2780,7 +2780,8 @@ class RegisterObservableWidget(ipw.VBox):
         )
 
         self.upload_readings_label = ipw.HTML(
-            value="<b>Upload readings:</b>", layout=ipw.Layout(width="120px")
+            value="<b>Upload readings (Total: < 10 MB):</b>",
+            layout=ipw.Layout(width="210px"),
         )
         self.upload_readings_widget = ipw.FileUpload(multiple=False)
         self.upload_readings_hbox = ipw.HBox(
