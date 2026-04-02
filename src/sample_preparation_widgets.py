@@ -2394,7 +2394,7 @@ class RegisterActionWidget(ipw.VBox):
                 )
                 c_name, c_type = available_components_dict[permid]
 
-                # 1. Build the UI wrapper for this specific component
+                # Build the UI wrapper for this specific component
                 remove_btn = ipw.Button(
                     icon="close",
                     button_style="danger",
@@ -2406,7 +2406,7 @@ class RegisterActionWidget(ipw.VBox):
                     metadata={"object_id": permid},
                 )
 
-                # 2. Build Settings Dropdown
+                # Build Settings Dropdown
                 settings_type = f"{c_type}_SETTINGS"
                 settings_objs = utils.get_openbis_objects(
                     self.openbis_session, type=settings_type, attrs=["parents"]
@@ -2444,24 +2444,75 @@ class RegisterActionWidget(ipw.VBox):
                     and (c_object.identifier in obj.parents or permid in obj.parents)
                 ]
 
-                # Build the options using the filtered list
-                dynamic_options = [
-                    (obj.props["name"], obj.permId) for obj in filtered_settings
-                ]
-                dynamic_options.sort(key=lambda x: x[1])
+                # Fetch current user
+                current_user = self.openbis_session._get_username()
 
-                settings_options = [("Select settings...", "-1")] + dynamic_options
-                settings_dropdown = ipw.Dropdown(options=settings_options, value="-1")
+                # Build the Filter UI
+                filter_my_settings_cb = ipw.Checkbox(
+                    value=False,
+                    indent=False,
+                    layout=ipw.Layout(
+                        width="20px", margin="0px 0px 0px 15px"
+                    ),  # Added left margin to space it from the dropdown
+                )
+                filter_my_settings_label = ipw.Label("My Settings Only")
+                filter_hbox = cw.HBox(
+                    children=[filter_my_settings_cb, filter_my_settings_label],
+                    layout=ipw.Layout(align_items="center"),
+                )
+
+                # Initialize empty Dropdown and state flag
+                settings_dropdown = ipw.Dropdown(options=[], value=None)
+                is_updating_settings = False
+
+                # Define the dynamic update function
+                def update_settings_options(change=None):
+                    nonlocal is_updating_settings
+                    show_mine_only = filter_my_settings_cb.value
+                    dynamic_options = []
+
+                    for obj in filtered_settings:
+                        # Safely grab the registrator string like in your example
+                        registrator = getattr(
+                            obj.registrator, "userId", obj.registrator
+                        )
+
+                        # Apply the filter condition
+                        if show_mine_only and registrator != current_user:
+                            continue
+
+                        dynamic_options.append((obj.props["name"], obj.permId))
+
+                    dynamic_options.sort(key=lambda x: x[1], reverse=True)
+                    new_options = [("Select settings...", "-1")] + dynamic_options
+
+                    # Block the load_settings_values callback from firing uncontrollably
+                    is_updating_settings = True
+
+                    # Store current value to retain selection if it survives the filter
+                    current_val = settings_dropdown.value
+                    settings_dropdown.options = new_options
+
+                    if current_val in [opt[1] for opt in dynamic_options]:
+                        settings_dropdown.value = current_val
+                    else:
+                        settings_dropdown.value = "-1"
+
+                    is_updating_settings = False
+
+                # Connect the observer and run it once to populate initial options
+                filter_my_settings_cb.observe(update_settings_options, names="value")
+                update_settings_options()
+
                 settings_dropdown_hbox = cw.HBox(
                     children=[
                         ipw.HTML(
                             value="<b>Settings:</b>", layout=settings_label_layout
                         ),
                         settings_dropdown,
+                        filter_hbox,
                     ]
                 )
-
-                is_updating_settings = False
 
                 def reset_settings_dropdown(change):
                     nonlocal is_updating_settings

@@ -863,16 +863,22 @@ class SelectExperimentWidget(ipw.VBox):
         self.filter_my_exp_label = ipw.Label("My Experiments Only")
 
         self.sort_hbox = ipw.HBox(
-            [
+            children=[
                 self.sort_label,
                 self.sort_name_cb,
                 self.sort_name_label,
                 self.sort_date_cb,
                 self.sort_date_label,
-            ]
+            ],
+            layout=ipw.Layout(align_items="center"),
         )
         self.filter_hbox = ipw.HBox(
-            [self.filter_label, self.filter_my_exp_cb, self.filter_my_exp_label]
+            children=[
+                self.filter_label,
+                self.filter_my_exp_cb,
+                self.filter_my_exp_label,
+            ],
+            layout=ipw.Layout(align_items="center"),
         )
 
         # Observers
@@ -911,13 +917,14 @@ class SelectExperimentWidget(ipw.VBox):
         self.sort_proj_date_label = ipw.Label("Registration Date")
 
         self.sort_proj_hbox = ipw.HBox(
-            [
+            children=[
                 self.sort_proj_label,
                 self.sort_proj_name_cb,
                 self.sort_proj_name_label,
                 self.sort_proj_date_cb,
                 self.sort_proj_date_label,
-            ]
+            ],
+            layout=ipw.Layout(align_items="center"),
         )
 
         # Filter Row (Now on its own line)
@@ -930,7 +937,12 @@ class SelectExperimentWidget(ipw.VBox):
         self.filter_my_proj_label = ipw.Label("My Projects Only")
 
         self.filter_proj_hbox = ipw.HBox(
-            [self.filter_proj_label, self.filter_my_proj_cb, self.filter_my_proj_label]
+            children=[
+                self.filter_proj_label,
+                self.filter_my_proj_cb,
+                self.filter_my_proj_label,
+            ],
+            layout=ipw.Layout(align_items="center"),
         )
 
         # Name Input
@@ -1191,17 +1203,23 @@ class SelectSampleWidget(ipw.VBox):
         self.sample_hbox = ipw.HBox([self.sample_label, self.sample_dropdown])
 
         self.sort_hbox = ipw.HBox(
-            [
+            children=[
                 self.sort_label,
                 self.sort_name_cb,
                 self.sort_name_label,
                 self.sort_date_cb,
                 self.sort_date_label,
-            ]
+            ],
+            layout=ipw.Layout(align_items="center"),
         )
 
         self.filter_hbox = ipw.HBox(
-            [self.filter_label, self.filter_my_samples_cb, self.filter_my_samples_label]
+            children=[
+                self.filter_label,
+                self.filter_my_samples_cb,
+                self.filter_my_samples_label,
+            ],
+            layout=ipw.Layout(align_items="center"),
         )
 
         self.children = [self.sample_hbox, self.sort_hbox, self.filter_hbox]
@@ -1334,7 +1352,8 @@ class SelectProjectWidget(ipw.VBox):
                 self.sort_name_label,
                 self.sort_registration_date_checkbox,
                 self.sort_registration_date_label,
-            ]
+            ],
+            layout=ipw.Layout(align_items="center"),
         )
 
         self.project_dropdown_boxes = ipw.HBox(
