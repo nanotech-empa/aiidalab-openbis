@@ -2396,24 +2396,6 @@ class RegisterActionWidget(ipw.VBox):
                 )
                 c_name, c_type = available_components_dict[permid]
 
-                # Add the components names to the action name
-                name_widget = None
-                for widget in self.action_properties_widgets.children:
-                    if widget.metadata.get("property_name", "") == "NAME":
-                        name_widget = widget.children[1]
-                        break
-
-                all_comp_names = [
-                    comp_info[1][0] for comp_info in available_components_dict.items()
-                ]
-
-                name_widget.value = self.modify_process_string(
-                    current_text=name_widget.value,
-                    component_name=c_name,
-                    action="add",
-                    available_components=all_comp_names,
-                )
-
                 # 1. Build the UI wrapper for this specific component
                 remove_btn = ipw.Button(
                     icon="close",
@@ -2552,6 +2534,9 @@ class RegisterActionWidget(ipw.VBox):
                             # 3. Unblock the reset callback after ALL widgets are done updating
                             is_updating_settings = False
 
+                    # ADD THIS LINE HERE:
+                    self.update_action_name()
+
                 settings_dropdown.observe(load_settings_values, names="value")
 
                 component_block = cw.VBox(
@@ -2596,16 +2581,11 @@ class RegisterActionWidget(ipw.VBox):
 
                     # 3. Recombine them with the default option at the top
                     comp_dropdown_widget.options = default_option + actual_components
-
                     comp_dropdown_widget.value = "-1"
                     comp_dropdown_widget.observe(add_component_ui, names="value")
 
-                    name_widget.value = self.modify_process_string(
-                        current_text=name_widget.value,
-                        component_name=c_name,
-                        action="remove",
-                        available_components=all_comp_names,
-                    )
+                    # ADD THIS LINE:
+                    self.update_action_name()
 
                 remove_btn.on_click(remove_this_component)
 
@@ -2613,6 +2593,9 @@ class RegisterActionWidget(ipw.VBox):
                 selected_components_vbox.children = list(
                     selected_components_vbox.children
                 ) + [component_block]
+
+                # ADD THIS LINE:
+                self.update_action_name()
 
                 # Remove ALL components of the newly added type from the main dropdown
                 comp_dropdown_widget.unobserve(add_component_ui, names="value")
@@ -2629,68 +2612,61 @@ class RegisterActionWidget(ipw.VBox):
 
         self.action_properties_widgets.children = action_properties_widgets
 
-    def modify_process_string(
-        self, current_text, component_name, action, available_components
-    ):
+    def update_action_name(self):
         """
-        Parses a process string, adds or removes a component, and reconstructs the grammar.
-        :param current_text: The current string from the widget (e.g., "Mix using Acid.")
-        :param component_name: The name of the component to add or remove
-        :param action: String, either "add" or "remove"
-        :param available_components: List of all possible component names
-        :return: The newly formatted string
+        Dynamically rebuilds the action name based on currently selected components and settings.
         """
-        # 1. Clean the text
-        text = current_text.strip()
-        if text.endswith("."):
-            text = text[:-1]
+        name_widget = None
+        components_vbox = None
 
-        # 2. Sort components by length to prevent partial matches (e.g. 'Acid' vs 'Sulfuric Acid')
-        sorted_comps = sorted(available_components, key=len, reverse=True)
-        extracted_comps = []
+        # 1. Locate the Name widget and the Selected Components container
+        for widget in self.action_properties_widgets.children:
+            if widget.metadata.get("property_name") == "NAME":
+                name_widget = widget.children[1]
+            elif widget.metadata.get("property_name") == "COMPONENTS":
+                components_vbox = widget
 
-        # 3. Parse backwards to separate the base name from existing components
-        while True:
-            previous_text = ""
-            # Strip trailing spaces, commas, and connectors
-            while text != previous_text:
-                previous_text = text
-                text = re.sub(r"(?i)(\s+|\b(and|using|with)\b|,)+$", "", text)
+        if not name_widget or not components_vbox:
+            return
 
-            matched = False
-            for comp in sorted_comps:
-                if text.endswith(comp):
-                    extracted_comps.insert(0, comp)  # Save the component
-                    text = text[: -len(comp)]  # Remove it from the text
-                    matched = True
-                    break
+        current_text = name_widget.value.strip()
 
-            if not matched:
-                break  # No more components found at the end
+        # 2. Isolate the base action name by stripping away the " using ..." part
+        base_name = re.sub(r"(?i)\s+using\s+.*$", "", current_text)
+        if base_name.endswith("."):
+            base_name = base_name[:-1]
 
-        base_name = text.strip()
+        # 3. Read components and their active settings directly from the UI state
+        comp_strings = []
+        for comp_block in components_vbox.children:
+            c_name = comp_block.metadata.get("component_name", "")
 
-        # 4. Apply the Add or Remove action
-        if action == "add" and component_name not in extracted_comps:
-            extracted_comps.append(component_name)
-        elif action == "remove" and component_name in extracted_comps:
-            extracted_comps.remove(component_name)
+            # Navigate to the settings dropdown inside the component block
+            settings_dropdown = comp_block.children[1].children[1]
 
-        # 5. Reconstruct the final string with proper grammar
-        if not extracted_comps:
-            return f"{base_name}." if base_name else ""
+            setting_name = ""
+            if settings_dropdown.value != "-1":
+                # Retrieve the human-readable label of the selected setting
+                for label, val in settings_dropdown.options:
+                    if val == settings_dropdown.value:
+                        setting_name = label
+                        break
 
-        if len(extracted_comps) == 1:
-            comp_string = extracted_comps[0]
+            # Format with settings if one is selected
+            if setting_name and setting_name != "Select settings...":
+                print(setting_name)
+                comp_strings.append(f"{c_name} ({setting_name})")
+            else:
+                comp_strings.append(c_name)
+
+        # 4. Reconstruct the final string
+        if not comp_strings:
+            name_widget.value = base_name
+        elif len(comp_strings) == 1:
+            name_widget.value = f"{base_name} using {comp_strings[0]}."
         else:
-            comp_string = (
-                ", ".join(extracted_comps[:-1]) + f" and {extracted_comps[-1]}"
-            )
-
-        if base_name:
-            return f"{base_name} using {comp_string}."
-        else:
-            return f"{comp_string}."
+            comp_string = ", ".join(comp_strings[:-1]) + f" and {comp_strings[-1]}"
+            name_widget.value = f"{base_name} using {comp_string}."
 
     def change_action_title(self, change):
         self.actions_accordion.set_title(self.action_index, f"{change['new']}")
