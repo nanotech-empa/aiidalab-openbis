@@ -116,7 +116,7 @@ class CreateSampleWidget(ipw.VBox):
 
             sort_material_label = ipw.Label(
                 value="Sort by:",
-                layout=ipw.Layout(margin="0px", width="50px"),
+                layout=ipw.Layout(margin="5px", width="50px"),
                 style={"description_width": "initial"},
             )
 
@@ -148,7 +148,8 @@ class CreateSampleWidget(ipw.VBox):
                     name_label,
                     registration_date_checkbox,
                     registration_date_label,
-                ]
+                ],
+                layout=ipw.Layout(align_items="center"),
             )
 
             material_details_html = ipw.HTML()
