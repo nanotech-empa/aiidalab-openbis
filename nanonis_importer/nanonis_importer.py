@@ -116,7 +116,7 @@ def create_preview(
     filterConfig=[],
     tags=[],
 ):
-    imaging_control = ImagingControl(openbis)
+    imaging_control = ImagingControl(openbis, service_type="DSS")
     preview = imaging.ImagingDataSetPreview(
         preview_format, config=config, filterConfig=filterConfig, tags=tags
     )
@@ -127,7 +127,7 @@ def create_preview(
 def update_image_with_preview(
     openbis, perm_id, image_id, preview: imaging.ImagingDataSetPreview
 ):
-    imaging_control = ImagingControl(openbis)
+    imaging_control = ImagingControl(openbis, service_type="DSS")
     config = imaging_control.get_property_config(perm_id)
     image = config.images[image_id]
     if len(image.previews) > preview.index:
@@ -151,7 +151,7 @@ def export_image(
 ):
     if include is None:
         include = ["IMAGE", "RAW_DATA"]
-    imaging_control = ImagingControl(openbis)
+    imaging_control = ImagingControl(openbis, service_type="DSS")
     export_config = {
         "include": include,
         "image_format": image_format,
@@ -174,7 +174,7 @@ def multi_export_images(
 ):
     if include is None:
         include = ["IMAGE", "RAW_DATA"]
-    imaging_control = ImagingControl(openbis)
+    imaging_control = ImagingControl(openbis, service_type="DSS")
     export_config = {
         "include": include,
         "image_format": image_format,
@@ -290,7 +290,7 @@ def create_sxm_dataset(
     channels = [default_channel] + [x for x in channels if x != default_channel]
 
     # Create openBIS image control object
-    imaging_control = ImagingControl(session)
+    imaging_control = ImagingControl(session, service_type="DSS")
 
     color_scale_visibility = [
         imaging.ImagingDataSetControlVisibility(
@@ -446,7 +446,7 @@ def create_dat_dataset(
     if [] == data:
         raise ValueError(f"No nanonis .DAT files found in {folder_path}")
 
-    imaging_control = ImagingControl(session)
+    imaging_control = ImagingControl(session, service_type="DSS")
 
     for d in data:
         date_time = d.get_param("Saved Date")
