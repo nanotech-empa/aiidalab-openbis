@@ -2282,7 +2282,7 @@ class RegisterActionWidget(ipw.VBox):
                     batch = props.get("batch", None)
 
                     if empa_number and batch:
-                        display_name = f"{empa_number}{batch} (Precursor)"
+                        display_name = f"{empa_number}{batch} - {name} (Precursor)"
                         precursors.append((display_name, obj.permId))
                     else:
                         display_name = f"{name} (Chemical)"
