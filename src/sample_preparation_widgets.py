@@ -743,6 +743,7 @@ class RegisterPreparationWidget(ipw.VBox):
         processes_options = [
             (obj.props["name"], obj.permId) for obj in openbis_processes
         ]
+        processes_options.sort()
         processes_options.insert(0, ("Select a process...", "-1"))
         self.processes_dropdown.options = processes_options
         self.processes_dropdown.value = "-1"
@@ -1385,6 +1386,8 @@ class RegisterProcessWidget(ipw.VBox):
                     col.permId,
                 )
             collection_options.append(col_option)
+
+        collection_options.sort()
         collection_options.insert(0, ("Select collection...", "-1"))
         self.select_collection_dropdown.options = collection_options
         self.select_collection_dropdown.value = "-1"
@@ -2379,6 +2382,7 @@ class RegisterActionWidget(ipw.VBox):
             component_options.sort(key=lambda x: x[0].lower())
 
             # 3. Add the default 'Select' option to the very beginning and assign it
+            component_options.sort()
             comp_dropdown_widget.options = [
                 ("Select a component to add...", "-1")
             ] + component_options

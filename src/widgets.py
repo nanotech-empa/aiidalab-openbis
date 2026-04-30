@@ -99,6 +99,7 @@ class AtomModelWidget(ipw.VBox):
         atom_model_options = [
             (f"{obj.props['name']}", obj.permId) for obj in atom_models
         ]
+        atom_model_options.sort()
         atom_model_options.insert(0, ("Select atomistic model...", "-1"))
         self.atom_model_dropdown.options = atom_model_options
         self.atom_model_dropdown.value = "-1"
@@ -319,6 +320,7 @@ class AtomModelWidget(ipw.VBox):
                 materials_objects_names_permids = [
                     (obj.props["name"], obj.permId) for obj in material_objects
                 ]
+                materials_objects_names_permids.sort()
                 material_options += materials_objects_names_permids
                 material_dropdown.options = material_options
 
@@ -769,6 +771,7 @@ class SelectInstrumentWidget(ipw.VBox):
         instrument_options = [
             (f"{obj.props['name']}", obj.permId) for obj in instruments
         ]
+        instrument_options.sort()
         instrument_options.insert(0, ("Select instrument...", "-1"))
         self.instrument_dropdown.options = instrument_options
         self.instrument_dropdown.value = "-1"
@@ -1072,6 +1075,7 @@ class SelectExperimentWidget(ipw.VBox):
         options = list(
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
+        options.sort()
         options.insert(0, ("Select experiment...", "-1"))
         self.experiment_dropdown.options = options
 
@@ -1098,6 +1102,7 @@ class SelectExperimentWidget(ipw.VBox):
         options = list(
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
+        options.sort()
         options.insert(0, ("Select project...", "-1"))
         self.project_dropdown.options = options
 
@@ -1306,6 +1311,7 @@ class SelectSampleWidget(ipw.VBox):
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
 
+        options.sort()
         options.insert(0, ("Select sample...", "-1"))
 
         # 5. Update the widget
@@ -1374,6 +1380,7 @@ class SelectProjectWidget(ipw.VBox):
             prj_option = (f"{prj.code} from Space {prj.space.code}", prj.permId)
             project_options.append(prj_option)
 
+        project_options.sort()
         project_options.insert(0, ("Select project...", "-1"))
         self.project_dropdown.options = project_options
         self.project_dropdown.value = "-1"

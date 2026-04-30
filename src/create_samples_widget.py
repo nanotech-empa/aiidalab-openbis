@@ -166,6 +166,7 @@ class CreateSampleWidget(ipw.VBox):
             materials_objects_names_permids = [
                 (obj.props["name"], obj.permId) for obj in material_objects
             ]
+            materials_objects_names_permids.sort()
             material_options += materials_objects_names_permids
             material_dropdown.options = material_options
 
