@@ -2277,7 +2277,7 @@ class RegisterActionWidget(ipw.VBox):
 
                 for obj in substances_list:
                     props = obj.props.all()
-                    name = props.get("name", "Unnamed substance")
+                    name = props.get("name", "Unnamed substance") or "Unnamed substance"
                     empa_number = props.get("empa_number", None)
                     batch = props.get("batch", None)
 
