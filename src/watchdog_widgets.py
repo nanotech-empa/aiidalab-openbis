@@ -336,7 +336,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.select_experiment_widget.experiment_dropdown.value = new_exp_id
 
         sample_name = sample_object.props["name"]
-        self.measurement_session_name_text.value = f"Meas_{sample_name}"
+        self.measurement_session_name_text.value = f"MEAS_{sample_name}"
 
         display(
             Javascript(
