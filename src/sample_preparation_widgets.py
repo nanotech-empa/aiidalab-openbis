@@ -1142,7 +1142,7 @@ class RegisterPreparationWidget(ipw.VBox):
                         process_code = f"[{''.join(process_step_icons)}]"
 
                 new_sample_name = f"{current_sample_name}:{process_code}"
-                self.sample_preparation_object.props["name"] = f"Prep_{new_sample_name}"
+                self.sample_preparation_object.props["name"] = f"PREP_{new_sample_name}"
                 self.sample_preparation_object.add_children(new_process_object.permId)
                 utils.update_openbis_object(self.sample_preparation_object)
 
