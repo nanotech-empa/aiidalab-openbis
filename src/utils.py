@@ -272,6 +272,22 @@ def find_instrument_components(openbis_session, instrument_permid):
     return dict(all_components)
 
 
+def generate_openbis_object_history_url(openbis_session, openbis_object):
+    base_url = openbis_session.url
+    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    obj_id = openbis_object.permId
+    url = f"{base_url}?viewName=showSampleHierarchyPage&viewData={obj_id}"
+    return url
+
+
+def generate_openbis_object_url(openbis_session, openbis_object):
+    base_url = openbis_session.url
+    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    obj_id = openbis_object.permId
+    url = f"{base_url}?viewName=showViewSamplePageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{obj_id}%22%7D"
+    return url
+
+
 # General functions
 def clone_widgets_empty(widgets):
     new_widgets = []

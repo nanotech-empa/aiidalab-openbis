@@ -172,7 +172,12 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 instrument_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=parent
                 )
-                self.instrument_html.value = instrument_object.props["name"]
+                instrument_name = instrument_object.props["name"]
+                instrument_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, instrument_object
+                )
+                instrument_name = f'<a href="{instrument_openbis_url}" target="_blank" rel="noopener noreferrer">{instrument_name}</a>'
+                self.instrument_html.value = instrument_name
                 break
 
         self.load_actions()
@@ -276,16 +281,6 @@ class ActionHistoryWidget(ipw.VBox):
                     make_row(prop_label, prop_val, prop_key, calculated_width)
                 )
 
-            # 2. Gas Bottle
-            elif prop_sampleType == "GAS_BOTTLE":
-                gas_obj = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=prop_val
-                )
-                gas_name = gas_obj.props["name"]
-                props_widgets.append(
-                    make_row(prop_label, gas_name, prop_key, calculated_width)
-                )
-
             # 3. Substance & Image logic
             elif prop_sampleType == "SUBSTANCE":
                 sub_obj = utils.get_openbis_object(
@@ -302,6 +297,11 @@ class ActionHistoryWidget(ipw.VBox):
                     )
                 else:
                     sub_text = f"{name}" + " (Chemical)"
+
+                sub_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, sub_obj
+                )
+                sub_text = f'<a href="{sub_openbis_url}" target="_blank" rel="noopener noreferrer">{sub_text}</a>'
 
                 # Iterate parents directly to find ALL molecules
                 molecule_images_html = ""
@@ -348,7 +348,7 @@ class ActionHistoryWidget(ipw.VBox):
                     make_row(prop_label, sub_text, prop_key, calculated_width)
                 )
 
-            # 4. Components & Settings HTML block
+            # Components & Settings HTML block
             elif (
                 prop_sampleType in OPENBIS_OBJECT_TYPES.values()
                 and f"{prop_sampleType}_SETTINGS" in OPENBIS_OBJECT_TYPES.values()
@@ -357,10 +357,16 @@ class ActionHistoryWidget(ipw.VBox):
                     self.openbis_session, sample_ident=prop_val
                 )
                 comp_name = comp_obj.props["name"]
+                comp_name = f"⚙️ {comp_name}"
+
+                comp_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, comp_obj
+                )
+                comp_name = f'<a href="{comp_openbis_url}" target="_blank" rel="noopener noreferrer">{comp_name}</a>'
 
                 # Fixed missing opening <div> here
                 components_html_content += (
-                    f"<div style='margin-bottom: 10px;'>⚙️ {comp_name}"
+                    f"<div style='margin-bottom: 10px;'>{comp_name}"
                 )
 
                 settings_id = props.get(f"{prop_key}_settings")
@@ -391,6 +397,20 @@ class ActionHistoryWidget(ipw.VBox):
                     components_html_content += "<div style='font-style: italic; margin-left: 20px;'>No settings attached.</div>"
 
                 components_html_content += "</div>"  # Properly closes the block
+
+            # Other object types
+            elif prop_dataType in ["SAMPLE", "OBJECT"]:
+                obj = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=prop_val
+                )
+                obj_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, obj
+                )
+                obj_name = obj.props["name"]
+                obj_name = f'<a href="{obj_openbis_url}" target="_blank" rel="noopener noreferrer">{obj_name}</a>'
+                props_widgets.append(
+                    make_row(prop_label, obj_name, prop_key, calculated_width)
+                )
 
         # Append the final compiled Components HTML string at the bottom
         if not components_html_content:
@@ -1856,6 +1876,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 action_object,
                 process_step_widget=self,
             )
+            self.instrument_dropdown.disabled = True
             actions_accordion_children.append(new_action_widget)
             self.actions_accordion.children = actions_accordion_children
 
@@ -1890,6 +1911,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 instrument_permid,
                 process_step_widget=self,
             )
+            self.instrument_dropdown.disabled = True
             actions_accordion_children.append(new_action_widget)
             self.actions_accordion.children = actions_accordion_children
 

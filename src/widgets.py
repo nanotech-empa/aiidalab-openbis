@@ -1075,7 +1075,6 @@ class SelectExperimentWidget(ipw.VBox):
         options = list(
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
-        options.sort()
         options.insert(0, ("Select experiment...", "-1"))
         self.experiment_dropdown.options = options
 
@@ -1102,7 +1101,6 @@ class SelectExperimentWidget(ipw.VBox):
         options = list(
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
-        options.sort()
         options.insert(0, ("Select project...", "-1"))
         self.project_dropdown.options = options
 
@@ -1311,7 +1309,6 @@ class SelectSampleWidget(ipw.VBox):
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
 
-        options.sort()
         options.insert(0, ("Select sample...", "-1"))
 
         # 5. Update the widget
