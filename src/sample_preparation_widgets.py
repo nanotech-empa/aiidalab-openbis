@@ -9,7 +9,7 @@ import time
 import threading
 import os
 import logging
-import custom_widgets as cw
+from . import custom_widgets as cw
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 ACTIONS_TYPES, ACTIONS_CODES = (
