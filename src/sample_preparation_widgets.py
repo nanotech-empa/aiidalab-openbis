@@ -9,6 +9,8 @@ import time
 import threading
 import os
 import logging
+import pathlib
+from traitlets import TraitError
 import custom_widgets as cw
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
@@ -31,8 +33,9 @@ if not os.path.exists("logs"):
     os.mkdir("logs")
 
 logger = logging.getLogger(__name__)
+app_folder = pathlib.Path().resolve().parent
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
@@ -845,394 +848,437 @@ class RegisterPreparationWidget(ipw.VBox):
         process_steps_widgets = self.new_processes_accordion.children
 
         if process_steps_widgets:
-            experiment_object = utils.get_openbis_collection(
-                self.openbis_session, code=experiment_id
-            )
-            experiment_project_code = experiment_object.project.identifier
-
-            current_sample = utils.get_openbis_object(
-                self.openbis_session, sample_ident=current_sample_id
-            )
-
-            # If sample was used in a measurement session, a new preparation should start
-            sample_object_children = current_sample.children
-            for child_id in sample_object_children:
-                child_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=child_id
+            all_created_objects = []
+            # all_updated_objects = {}
+            try:
+                experiment_object = utils.get_openbis_collection(
+                    self.openbis_session, code=experiment_id
                 )
-                if child_object.type == OPENBIS_OBJECT_TYPES["Measurement Session"]:
-                    self.sample_preparation_object = None
-                    break
+                experiment_project_code = experiment_object.project.identifier
 
-            # Create preparation object when it does not exist
-            if self.sample_preparation_object is None:
-                self.sample_preparation_object = utils.create_openbis_object(
-                    self.openbis_session,
-                    type=OPENBIS_OBJECT_TYPES["Preparation"],
-                    experiment=experiment_object.identifier,
-                    props={"name": current_sample.props["name"]},
+                current_sample = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=current_sample_id
                 )
 
-            sample_preparation_id = self.sample_preparation_object.permId
-            for process_widget in process_steps_widgets:
-                # Reload sample preparation object to load children that was added in the cycle (e.g. process steps)
-                self.sample_preparation_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=sample_preparation_id
-                )
-                sample_type = OPENBIS_OBJECT_TYPES["Sample"]
+                # If sample was used in a measurement session, a new preparation should start
+                sample_object_children = current_sample.children
+                for child_id in sample_object_children:
+                    child_object = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=child_id
+                    )
+                    if child_object.type == OPENBIS_OBJECT_TYPES["Measurement Session"]:
+                        self.sample_preparation_object = None
+                        break
 
-                process_code = ""
-                current_sample.props["object_status"] = "INACTIVE"
-                current_sample_name = current_sample.props["name"]
-                utils.update_openbis_object(current_sample)
+                # Create preparation object when it does not exist
+                if self.sample_preparation_object is None:
+                    self.sample_preparation_object = utils.create_openbis_object(
+                        self.openbis_session,
+                        type=OPENBIS_OBJECT_TYPES["Preparation"],
+                        experiment=experiment_object.identifier,
+                        props={"name": current_sample.props["name"]},
+                    )
+                    all_created_objects.append(self.sample_preparation_object)
 
-                process_step_type = OPENBIS_OBJECT_TYPES["Process Step"]
-                new_process_object = utils.create_openbis_object(
-                    self.openbis_session,
-                    type=process_step_type,
-                    experiment=experiment_object.identifier,
-                )
+                sample_preparation_id = self.sample_preparation_object.permId
+                for process_widget in process_steps_widgets:
+                    # Reload sample preparation object to load children that was added in the cycle (e.g. process steps)
+                    self.sample_preparation_object = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=sample_preparation_id
+                    )
+                    sample_type = OPENBIS_OBJECT_TYPES["Sample"]
 
-                process_properties = {
-                    "name": process_widget.name_textbox.value,
-                    "description": process_widget.description_textbox.value,
-                    "comments": process_widget.comments_textarea.value,
-                }
+                    process_code = ""
+                    current_sample.props["object_status"] = "INACTIVE"
+                    current_sample_name = current_sample.props["name"]
+                    utils.update_openbis_object(current_sample)
 
-                actions_widgets = process_widget.actions_accordion.children
-                observables_widgets = process_widget.observables_accordion.children
-                actions = []
-                actions_codes = []
-                process_step_icons = []
+                    process_step_type = OPENBIS_OBJECT_TYPES["Process Step"]
+                    new_process_object = utils.create_openbis_object(
+                        self.openbis_session,
+                        type=process_step_type,
+                        experiment=experiment_object.identifier,
+                    )
+                    all_created_objects.append(new_process_object)
 
-                if actions_widgets:
-                    for action_widget in actions_widgets:
-                        action_properties_values = {}
-                        action_type = action_widget.action_type_dropdown.value
-                        action_properties_widgets = (
-                            action_widget.action_properties_widgets.children
-                        )
+                    process_properties = {
+                        "name": process_widget.name_textbox.value,
+                        "description": process_widget.description_textbox.value,
+                        "comments": process_widget.comments_textarea.value,
+                    }
 
-                        if action_type == "-1":
-                            continue
+                    actions_widgets = process_widget.actions_accordion.children
+                    observables_widgets = process_widget.observables_accordion.children
+                    actions = []
+                    actions_codes = []
+                    process_step_icons = []
 
-                        action_properties = (
-                            utils.get_openbis_object_type(
-                                self.openbis_session, type=action_type
+                    if actions_widgets:
+                        for action_widget in actions_widgets:
+                            action_properties_values = {}
+                            action_type = action_widget.action_type_dropdown.value
+                            action_properties_widgets = (
+                                action_widget.action_properties_widgets.children
                             )
-                            .get_property_assignments()
-                            .df.code.values
-                        )
 
-                        components_found = False
-                        for prop in action_properties:
-                            prop_type = utils.get_openbis_property_type(
-                                self.openbis_session, code=prop
+                            if action_type == "-1":
+                                continue
+
+                            action_properties = (
+                                utils.get_openbis_object_type(
+                                    self.openbis_session, type=action_type
+                                )
+                                .get_property_assignments()
+                                .df.code.values
                             )
-                            prop_dataType = str(prop_type.dataType)
-                            prop_lower = prop.lower()
 
-                            for widget in action_properties_widgets:
-                                if "property_name" in widget.metadata:
-                                    if widget.metadata["property_name"] == prop:
-                                        if prop == "DURATION":
-                                            duration_days = widget.children[1].value
-                                            duration_hours = widget.children[3].value
-                                            duration_minutes = widget.children[5].value
-                                            duration_seconds = widget.children[7].value
-                                            duration = f"{duration_days} days {duration_hours:02}:{duration_minutes:02}:{duration_seconds:02}"
+                            components_found = False
+                            for prop in action_properties:
+                                prop_type = utils.get_openbis_property_type(
+                                    self.openbis_session, code=prop
+                                )
+                                prop_dataType = str(prop_type.dataType)
+                                prop_lower = prop.lower()
 
-                                            action_properties_values[prop_lower] = (
-                                                duration
-                                            )
+                                for widget in action_properties_widgets:
+                                    if "property_name" in widget.metadata:
+                                        if widget.metadata["property_name"] == prop:
+                                            if prop == "DURATION":
+                                                duration_days = widget.children[1].value
+                                                duration_hours = widget.children[
+                                                    3
+                                                ].value
+                                                duration_minutes = widget.children[
+                                                    5
+                                                ].value
+                                                duration_seconds = widget.children[
+                                                    7
+                                                ].value
+                                                duration = f"{duration_days} days {duration_hours:02}:{duration_minutes:02}:{duration_seconds:02}"
 
-                                        elif prop_dataType in ["SAMPLE", "OBJECT"]:
-                                            selected_value = widget.children[1].value
-                                            if selected_value != "-1":
                                                 action_properties_values[prop_lower] = (
-                                                    selected_value
+                                                    duration
                                                 )
 
-                                        else:
-                                            action_properties_values[prop_lower] = (
-                                                widget.children[1].value
-                                            )
+                                            elif prop_dataType in ["SAMPLE", "OBJECT"]:
+                                                selected_value = widget.children[
+                                                    1
+                                                ].value
+                                                if selected_value != "-1":
+                                                    action_properties_values[
+                                                        prop_lower
+                                                    ] = selected_value
 
-                                        break
-
-                                    elif (
-                                        not components_found
-                                        and f"{prop}_SETTINGS" in action_properties
-                                        and prop_dataType in ["SAMPLE", "OBJECT"]
-                                        and widget.metadata["property_name"]
-                                        == "COMPONENTS"
-                                    ):
-                                        # This part of the code finds all components and settings used in the current action
-                                        for component_widget in widget.children:
-                                            component_name = (
-                                                component_widget.metadata.get(
-                                                    "component_name"
-                                                )
-                                            )
-                                            component_type = (
-                                                component_widget.metadata.get(
-                                                    "component_type"
-                                                )
-                                            )
-                                            component_settings_type = (
-                                                f"{component_type}_SETTINGS"
-                                            )
-                                            component_settings_type_lower = (
-                                                component_settings_type.lower()
-                                            )
-                                            component_permid = (
-                                                component_widget.children[
-                                                    0
-                                                ].metadata.get("object_id")
-                                            )
-                                            component_settings_permid = (
-                                                component_widget.children[1]
-                                                .children[1]
-                                                .value
-                                            )
-                                            component_type_lower = (
-                                                component_type.lower()
-                                            )
-                                            action_properties_values[
-                                                component_type_lower
-                                            ] = component_permid
-                                            if component_settings_permid != "-1":
-                                                action_properties_values[
-                                                    component_settings_type_lower
-                                                ] = component_settings_permid
                                             else:
-                                                component_settings_properties_values = {}
-                                                component_settings_name = (
-                                                    f"{component_name} with "
+                                                action_properties_values[prop_lower] = (
+                                                    widget.children[1].value
                                                 )
-                                                for (
-                                                    setting_widget
-                                                ) in component_widget.children[
-                                                    2
-                                                ].children:
-                                                    setting_prop_type = (
-                                                        setting_widget.metadata.get(
-                                                            "property_name"
+
+                                            break
+
+                                        elif (
+                                            not components_found
+                                            and f"{prop}_SETTINGS" in action_properties
+                                            and prop_dataType in ["SAMPLE", "OBJECT"]
+                                            and widget.metadata["property_name"]
+                                            == "COMPONENTS"
+                                        ):
+                                            # This part of the code finds all components and settings used in the current action
+                                            for component_widget in widget.children:
+                                                component_name = (
+                                                    component_widget.metadata.get(
+                                                        "component_name"
+                                                    )
+                                                )
+                                                component_type = (
+                                                    component_widget.metadata.get(
+                                                        "component_type"
+                                                    )
+                                                )
+                                                component_settings_type = (
+                                                    f"{component_type}_SETTINGS"
+                                                )
+                                                component_settings_type_lower = (
+                                                    component_settings_type.lower()
+                                                )
+                                                component_permid = (
+                                                    component_widget.children[
+                                                        0
+                                                    ].metadata.get("object_id")
+                                                )
+                                                component_settings_permid = (
+                                                    component_widget.children[1]
+                                                    .children[1]
+                                                    .value
+                                                )
+                                                component_type_lower = (
+                                                    component_type.lower()
+                                                )
+                                                action_properties_values[
+                                                    component_type_lower
+                                                ] = component_permid
+                                                if component_settings_permid != "-1":
+                                                    action_properties_values[
+                                                        component_settings_type_lower
+                                                    ] = component_settings_permid
+                                                else:
+                                                    component_settings_properties_values = {}
+                                                    component_settings_name = (
+                                                        f"{component_name} with "
+                                                    )
+                                                    for (
+                                                        setting_widget
+                                                    ) in component_widget.children[
+                                                        2
+                                                    ].children:
+                                                        setting_prop_type = (
+                                                            setting_widget.metadata.get(
+                                                                "property_name"
+                                                            )
+                                                        )
+                                                        setting_prop_label = (
+                                                            setting_widget.children[0]
+                                                            .value.removeprefix("<b>")
+                                                            .removesuffix("</b>")
+                                                            .removesuffix(":")
+                                                        )
+                                                        setting_prop_value = (
+                                                            setting_widget.children[
+                                                                1
+                                                            ].value
+                                                        )
+                                                        setting_prop_type_lower = (
+                                                            setting_prop_type.lower()
+                                                        )
+                                                        component_settings_properties_values[
+                                                            setting_prop_type_lower
+                                                        ] = setting_prop_value
+                                                        component_settings_name += f"{setting_prop_label}: {setting_prop_value}, "
+
+                                                    component_settings_name = (
+                                                        component_settings_name.rstrip(
+                                                            ", "
                                                         )
                                                     )
-                                                    setting_prop_label = (
-                                                        setting_widget.children[0]
-                                                        .value.removeprefix("<b>")
-                                                        .removesuffix("</b>")
-                                                        .removesuffix(":")
-                                                    )
-                                                    setting_prop_value = (
-                                                        setting_widget.children[1].value
-                                                    )
-                                                    setting_prop_type_lower = (
-                                                        setting_prop_type.lower()
-                                                    )
                                                     component_settings_properties_values[
-                                                        setting_prop_type_lower
-                                                    ] = setting_prop_value
-                                                    component_settings_name += f"{setting_prop_label}: {setting_prop_value}, "
+                                                        "name"
+                                                    ] = component_settings_name
 
-                                                component_settings_name = (
-                                                    component_settings_name.rstrip(", ")
+                                                    new_component_settings = utils.create_openbis_object(
+                                                        self.openbis_session,
+                                                        type=component_settings_type,
+                                                        experiment=settings_collection.permId,
+                                                        props=component_settings_properties_values,
+                                                        parents=[component_permid],
+                                                    )
+                                                    all_created_objects.append(
+                                                        new_component_settings
+                                                    )
+
+                                                    component_settings_permid = (
+                                                        new_component_settings.permId
+                                                    )
+
+                                                    action_properties_values[
+                                                        component_settings_type_lower
+                                                    ] = component_settings_permid
+
+                                                component_object = (
+                                                    utils.get_openbis_object(
+                                                        self.openbis_session,
+                                                        sample_ident=component_permid,
+                                                    )
                                                 )
-                                                component_settings_properties_values[
-                                                    "name"
-                                                ] = component_settings_name
 
-                                                new_component_settings = utils.create_openbis_object(
+                                                component_settings_object = utils.get_openbis_object(
                                                     self.openbis_session,
-                                                    type=component_settings_type,
-                                                    experiment=settings_collection.permId,
-                                                    props=component_settings_properties_values,
-                                                    parents=[component_permid],
+                                                    sample_ident=component_settings_permid,
+                                                )
+                                                component_settings_props = (
+                                                    component_settings_object.props()
                                                 )
 
-                                                component_settings_permid = (
-                                                    new_component_settings.permId
-                                                )
-
-                                                action_properties_values[
-                                                    component_settings_type_lower
-                                                ] = component_settings_permid
-
-                                            component_object = utils.get_openbis_object(
-                                                self.openbis_session,
-                                                sample_ident=component_permid,
-                                            )
-
-                                            component_settings_object = utils.get_openbis_object(
-                                                self.openbis_session,
-                                                sample_ident=component_settings_permid,
-                                            )
-                                            component_settings_props = (
-                                                component_settings_object.props()
-                                            )
-
-                                            for (
-                                                prop_key,
-                                                prop_value,
-                                            ) in component_settings_props.items():
-                                                if prop_key in [
-                                                    "name",
-                                                    "description",
-                                                    "comments",
-                                                ]:
-                                                    continue
-                                                else:
-                                                    prop_type = (
-                                                        utils.get_openbis_property_type(
+                                                for (
+                                                    prop_key,
+                                                    prop_value,
+                                                ) in component_settings_props.items():
+                                                    if prop_key in [
+                                                        "name",
+                                                        "description",
+                                                        "comments",
+                                                    ]:
+                                                        continue
+                                                    else:
+                                                        prop_type = utils.get_openbis_property_type(
                                                             self.openbis_session,
                                                             code=prop_key,
                                                         )
-                                                    )
-                                                    prop_dataType = str(
-                                                        prop_type.dataType
-                                                    )
-                                                    if prop_dataType == "INTEGER":
-                                                        prop_value = int(prop_value)
-                                                    elif prop_dataType == "REAL":
-                                                        prop_value = float(prop_value)
-                                                    component_object.props[prop_key] = (
-                                                        prop_value
-                                                    )
+                                                        prop_dataType = str(
+                                                            prop_type.dataType
+                                                        )
+                                                        if prop_dataType == "INTEGER":
+                                                            prop_value = int(prop_value)
+                                                        elif prop_dataType == "REAL":
+                                                            prop_value = float(
+                                                                prop_value
+                                                            )
+                                                        component_object.props[
+                                                            prop_key
+                                                        ] = prop_value
 
-                                            utils.update_openbis_object(
-                                                component_object
-                                            )
+                                                utils.update_openbis_object(
+                                                    component_object
+                                                )
 
-                                        components_found = True
-                                        break
+                                            components_found = True
+                                            break
 
-                        action_collection_code = "ACTIONS_COLLECTION"
-                        openbis_experiments = utils.get_openbis_collections(
-                            self.openbis_session,
-                            code=action_collection_code,
-                            project=experiment_project_code,
-                        )
-
-                        if openbis_experiments.df.empty:
-                            utils.create_openbis_collection(
+                            action_collection_code = "ACTIONS_COLLECTION"
+                            openbis_experiments = utils.get_openbis_collections(
                                 self.openbis_session,
-                                type="COLLECTION",
                                 code=action_collection_code,
                                 project=experiment_project_code,
-                                props={"name": "Actions"},
                             )
 
-                        process_step_icons.append(action_widget.action_icon)
+                            if openbis_experiments.df.empty:
+                                utils.create_openbis_collection(
+                                    self.openbis_session,
+                                    type="COLLECTION",
+                                    code=action_collection_code,
+                                    project=experiment_project_code,
+                                    props={"name": "Actions"},
+                                )
 
-                        new_action_object = utils.create_openbis_object(
-                            self.openbis_session,
-                            type=action_type,
-                            experiment=f"{experiment_project_code}/{action_collection_code}",
-                            props=action_properties_values,
+                            process_step_icons.append(action_widget.action_icon)
+
+                            new_action_object = utils.create_openbis_object(
+                                self.openbis_session,
+                                type=action_type,
+                                experiment=f"{experiment_project_code}/{action_collection_code}",
+                                props=action_properties_values,
+                            )
+                            all_created_objects.append(new_action_object)
+
+                            new_action_code = str(new_action_object.code)
+                            actions_codes.append(new_action_code[0:4])
+                            actions.append(new_action_object.permId)
+
+                    process_properties["actions"] = actions
+
+                    if process_step_icons:
+                        # Compute process code based on the selected actions
+                        counts = Counter(process_step_icons)
+                        unique_codes = list(counts.keys())
+                        num_repeats = (
+                            counts[unique_codes[0]]
+                            if len(counts) == 1
+                            or all(
+                                v == next(iter(counts.values()))
+                                for v in counts.values()
+                            )
+                            else 1
                         )
 
-                        new_action_code = str(new_action_object.code)
-                        actions_codes.append(new_action_code[0:4])
-                        actions.append(new_action_object.permId)
+                        if len(process_step_icons) == 1:
+                            process_code = process_step_icons[0]
+                        elif num_repeats > 1 and all(
+                            v == num_repeats for v in counts.values()
+                        ):
+                            process_code = f"({''.join(unique_codes)}){num_repeats}"
+                        else:
+                            process_code = f"[{''.join(process_step_icons)}]"
 
-                process_properties["actions"] = actions
+                    new_sample_name = f"{current_sample_name}:{process_code}"
+                    self.sample_preparation_object.props["name"] = (
+                        f"PREP_{new_sample_name}"
+                    )
+                    self.sample_preparation_object.add_children(
+                        new_process_object.permId
+                    )
+                    utils.update_openbis_object(self.sample_preparation_object)
 
-                if process_step_icons:
-                    # Compute process code based on the selected actions
-                    counts = Counter(process_step_icons)
-                    unique_codes = list(counts.keys())
-                    num_repeats = (
-                        counts[unique_codes[0]]
-                        if len(counts) == 1
-                        or all(
-                            v == next(iter(counts.values())) for v in counts.values()
-                        )
-                        else 1
+                    new_process_object_parents = [
+                        self.sample_preparation_object,
+                        current_sample,
+                    ]
+                    new_process_object.props = process_properties
+                    instrument_permid = process_widget.instrument_dropdown.value
+
+                    if instrument_permid != "-1":
+                        new_process_object_parents.append(instrument_permid)
+
+                    new_process_object.add_parents(new_process_object_parents)
+                    utils.update_openbis_object(new_process_object)
+
+                    # Get observable info and add them as datasets to the process step object
+                    if observables_widgets:
+                        for observable_widget in observables_widgets:
+                            observable_type = "OBSERVABLE"
+                            observable_properties_widgets = (
+                                observable_widget.observable_properties_widgets.children
+                            )
+
+                            observable_properties = (
+                                utils.get_openbis_dataset_type(
+                                    self.openbis_session, type=observable_type
+                                )
+                                .get_property_assignments()
+                                .df.code.values
+                            )
+
+                            observable_properties_values = {}
+                            for prop in observable_properties:
+                                prop_lower = prop.lower()
+                                prop_type = utils.get_openbis_property_type(
+                                    self.openbis_session, code=prop
+                                )
+                                prop_dataType = str(prop_type.dataType)
+
+                                for widget in observable_properties_widgets:
+                                    if "property_name" in widget.metadata:
+                                        if widget.metadata["property_name"] == prop:
+                                            widget_value = widget.children[1].value
+                                            if widget_value:
+                                                if isinstance(widget_value, tuple):
+                                                    widget_value = list(widget_value)
+                                                observable_properties_values[
+                                                    prop_lower
+                                                ] = widget_value
+                                            break
+
+                            utils.upload_datasets(
+                                self.openbis_session,
+                                new_process_object,
+                                observable_widget.upload_readings_widget,
+                                props=observable_properties_values,
+                                dataset_type="OBSERVABLE",
+                            )
+
+                    new_sample = utils.create_openbis_object(
+                        self.openbis_session,
+                        type=sample_type,
+                        experiment=OPENBIS_COLLECTIONS_PATHS["Sample"],
+                        parents=[new_process_object],
+                        props={"name": new_sample_name, "object_status": "ACTIVE"},
                     )
 
-                    if len(process_step_icons) == 1:
-                        process_code = process_step_icons[0]
-                    elif num_repeats > 1 and all(
-                        v == num_repeats for v in counts.values()
-                    ):
-                        process_code = f"({''.join(unique_codes)}){num_repeats}"
-                    else:
-                        process_code = f"[{''.join(process_step_icons)}]"
+                    # After a process step, the current sample is now the new one
+                    current_sample = new_sample
+                    all_created_objects.append(current_sample)
 
-                new_sample_name = f"{current_sample_name}:{process_code}"
-                self.sample_preparation_object.props["name"] = f"PREP_{new_sample_name}"
-                self.sample_preparation_object.add_children(new_process_object.permId)
-                utils.update_openbis_object(self.sample_preparation_object)
+                print(1 + "a")
 
-                new_process_object_parents = [
-                    self.sample_preparation_object,
-                    current_sample,
-                ]
-                new_process_object.props = process_properties
-                instrument_permid = process_widget.instrument_dropdown.value
+            except Exception as e:
+                logger.error(f"Error while saving process steps: {e}")
+                # Rollback: delete all created objects
+                for obj in all_created_objects:
+                    utils.delete_openbis_object(obj)
 
-                if instrument_permid != "-1":
-                    new_process_object_parents.append(instrument_permid)
-
-                new_process_object.add_parents(new_process_object_parents)
-                utils.update_openbis_object(new_process_object)
-
-                # Get observable info and add them as datasets to the process step object
-                if observables_widgets:
-                    for observable_widget in observables_widgets:
-                        observable_type = "OBSERVABLE"
-                        observable_properties_widgets = (
-                            observable_widget.observable_properties_widgets.children
-                        )
-
-                        observable_properties = (
-                            utils.get_openbis_dataset_type(
-                                self.openbis_session, type=observable_type
-                            )
-                            .get_property_assignments()
-                            .df.code.values
-                        )
-
-                        observable_properties_values = {}
-                        for prop in observable_properties:
-                            prop_lower = prop.lower()
-                            prop_type = utils.get_openbis_property_type(
-                                self.openbis_session, code=prop
-                            )
-                            prop_dataType = str(prop_type.dataType)
-
-                            for widget in observable_properties_widgets:
-                                if "property_name" in widget.metadata:
-                                    if widget.metadata["property_name"] == prop:
-                                        widget_value = widget.children[1].value
-                                        if widget_value:
-                                            if isinstance(widget_value, tuple):
-                                                widget_value = list(widget_value)
-                                            observable_properties_values[prop_lower] = (
-                                                widget_value
-                                            )
-                                        break
-
-                        utils.upload_datasets(
-                            self.openbis_session,
-                            new_process_object,
-                            observable_widget.upload_readings_widget,
-                            props=observable_properties_values,
-                            dataset_type="OBSERVABLE",
-                        )
-
-                new_sample = utils.create_openbis_object(
-                    self.openbis_session,
-                    type=sample_type,
-                    experiment=OPENBIS_COLLECTIONS_PATHS["Sample"],
-                    parents=[new_process_object],
-                    props={"name": new_sample_name, "object_status": "ACTIVE"},
+                display(
+                    Javascript(
+                        data="alert('An error occurred while saving the process steps. All changes have been rolled back.')"
+                    )
                 )
-
-                # After a process step, the current sample is now the new one
-                current_sample = new_sample
 
             self.children = [
                 self.select_experiment_title,
@@ -1258,11 +1304,18 @@ class RegisterPreparationWidget(ipw.VBox):
 
             # Refresh sample dropdown and sample history
             self.select_sample_dropdown.load_samples()
-            self.select_sample_dropdown.sample_dropdown.value = new_sample.permId
-
-            display(
-                Javascript(data="alert('New process steps registered successfully.')")
-            )
+            try:
+                self.select_sample_dropdown.sample_dropdown.value = new_sample.permId
+                display(
+                    Javascript(
+                        data="alert('New process steps registered successfully.')"
+                    )
+                )
+            except TraitError:
+                logger.info(
+                    f"Sample {new_sample.permId} not found in dropdown options."
+                )
+                self.select_sample_dropdown.sample_dropdown.value = "-1"
 
 
 class RegisterProcessWidget(ipw.VBox):
@@ -2309,7 +2362,7 @@ class RegisterActionWidget(ipw.VBox):
                     else:
                         display_name = f"{name} (Chemical)"
                         chemicals.append((display_name, obj.permId))
-                        logging.info(
+                        logger.info(
                             f"Substance {obj.permId} is missing EMPA number or batch."
                         )
 

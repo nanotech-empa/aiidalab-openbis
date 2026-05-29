@@ -4,19 +4,22 @@ import time
 import os
 import argparse
 from pybis import Openbis
+import pathlib
+
 import sys
 
-sys.path.append("/home/jovyan/apps/aiidalab-openbis/")
+sys.path.insert(0, "/home/jovyan/apps/aiidalab-openbis/")
 from src import utils
 from nanonis_importer.nanonis_importer import process_measurement_files
 
 import logging
 
 logger = logging.getLogger(__name__)
+app_folder = pathlib.Path().resolve().parent
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
     encoding="utf-8",
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 
@@ -63,41 +66,38 @@ def process_new_file(
         logging_filepath,
     )
 
-    openbis_bug_solved = False
+    logging_data = utils.read_json(logging_filepath)
 
-    if openbis_bug_solved:
-        logging_data = utils.read_json(logging_filepath)
+    uploaded_files = logging_data.get("processed_files", [])
 
-        uploaded_files = logging_data.get("processed_files", [])
+    # List files in the data folder
+    all_local_files = [
+        os.path.join(data_folder, f)
+        for f in os.listdir(data_folder)
+        if os.path.isfile(os.path.join(data_folder, f))
+    ]
 
-        # List files in the data folder
-        all_local_files = [
-            os.path.join(data_folder, f)
-            for f in os.listdir(data_folder)
-            if os.path.isfile(os.path.join(data_folder, f))
-        ]
+    # Determine which files need uploading
+    missing_files = [
+        f
+        for f in all_local_files
+        if f not in uploaded_files and not f.endswith((".json", ".ini"))
+    ]
 
-        # Determine which files need uploading
-        missing_files = [
-            f
-            for f in all_local_files
-            if f not in uploaded_files and not f.endswith((".json", ".ini"))
-        ]
+    # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
+    for file_path in missing_files:
+        measurement_session_obj = openbis_session.get_object(measurement_session_id)
 
-        # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
-        for file_path in missing_files:
-            measurement_session_obj = openbis_session.get_object(measurement_session_id)
+        utils.create_openbis_dataset(
+            openbis_session,
+            type="ATTACHMENT",
+            sample=measurement_session_obj,
+            files=[file_path],
+        )
 
-            utils.create_openbis_dataset(
-                openbis_session,
-                type="ATTACHMENT",
-                sample=measurement_session_obj,
-                files=[file_path],
-            )
-
-            logging_data["processed_files"].append(file_path)
-            utils.write_json(logging_data, logging_filepath)
-            logger.info(f"Uploaded file: {file_path}")
+        logging_data["processed_files"].append(file_path)
+        utils.write_json(logging_data, logging_filepath)
+        logger.info(f"Uploaded file: {file_path}")
 
 
 if __name__ == "__main__":
@@ -174,42 +174,37 @@ if __name__ == "__main__":
             logging_filepath,
         )
 
-        openbis_bug_solved = False
+        logging_data = utils.read_json(logging_filepath)
 
-        if openbis_bug_solved:
-            logging_data = utils.read_json(logging_filepath)
+        uploaded_files = logging_data.get("processed_files", [])
 
-            uploaded_files = logging_data.get("processed_files", [])
+        # List files in the data folder
+        all_local_files = [
+            os.path.join(data_folder, f)
+            for f in os.listdir(data_folder)
+            if os.path.isfile(os.path.join(data_folder, f))
+        ]
 
-            # List files in the data folder
-            all_local_files = [
-                os.path.join(data_folder, f)
-                for f in os.listdir(data_folder)
-                if os.path.isfile(os.path.join(data_folder, f))
-            ]
+        # Determine which files need uploading
+        missing_files = [
+            f
+            for f in all_local_files
+            if f not in uploaded_files and not f.endswith((".json", ".ini"))
+        ]
 
-            # Determine which files need uploading
-            missing_files = [
-                f
-                for f in all_local_files
-                if f not in uploaded_files and not f.endswith((".json", ".ini"))
-            ]
+        # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
+        for file_path in missing_files:
+            measurement_session_obj = openbis_session.get_object(measurement_session_id)
 
-            # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
-            for file_path in missing_files:
-                measurement_session_obj = openbis_session.get_object(
-                    measurement_session_id
-                )
+            utils.create_openbis_dataset(
+                openbis_session,
+                type="ATTACHMENT",
+                sample=measurement_session_obj,
+                files=[file_path],
+            )
 
-                utils.create_openbis_dataset(
-                    openbis_session,
-                    type="ATTACHMENT",
-                    sample=measurement_session_obj,
-                    files=[file_path],
-                )
-
-                logging_data["processed_files"].append(file_path)
-                utils.write_json(logging_data, logging_filepath)
-                logger.info(f"Uploaded file: {file_path}")
+            logging_data["processed_files"].append(file_path)
+            utils.write_json(logging_data, logging_filepath)
+            logger.info(f"Uploaded file: {file_path}")
 
         monitor_folder(data_folder, custom_function)

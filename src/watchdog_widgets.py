@@ -7,6 +7,7 @@ import ipyfilechooser
 import subprocess
 import logging
 import json
+import pathlib
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -18,8 +19,9 @@ if not os.path.exists("logs"):
     os.mkdir("logs")
 
 logger = logging.getLogger(__name__)
+APP_FOLDER = pathlib.Path().resolve()
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename=APP_FOLDER / "logs" / "aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
@@ -115,7 +117,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                             folder_options.append((folder, pid))
                             valid_entries.append(entry)
                         else:
-                            logging.info(
+                            logger.info(
                                 f"PID {pid} for {folder} is dead. Removing from logs."
                             )
 
@@ -138,10 +140,10 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             for pid in selected_pids:
                 try:
                     os.kill(pid, signal.SIGTERM)
-                    logging.info(f"Terminating watchdog process with PID: {pid}")
+                    logger.info(f"Terminating watchdog process with PID: {pid}")
                 except ProcessLookupError:
                     # The process might have already died/crashed on its own
-                    logging.warning(
+                    logger.warning(
                         f"Process {pid} not found. It may have already exited."
                     )
 
@@ -172,11 +174,11 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                     json.dump(updated_data, f, indent=4)
 
             except (FileNotFoundError, json.JSONDecodeError):
-                logging.error(f"Could not read {json_file} to clean up PIDs.")
+                logger.error(f"Could not read {json_file} to clean up PIDs.")
 
         else:
             display(Javascript(data="alert('Select at least one directory.')"))
-            logging.info("No directory selected.")
+            logger.info("No directory selected.")
 
 
 class GenerateMeasurementsWatchdogWidget(ipw.VBox):
@@ -345,7 +347,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         )
 
         # 4. Better logging: Actually log *what* happened
-        logging.info(
+        logger.info(
             f"Experiment auto-updated to {new_exp_id} based on sample {sample_name}."
         )
 
@@ -411,7 +413,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 measurement_session = utils.get_openbis_object(
                     self.openbis_session, sample_ident=session_id
                 )
-                logging.info(
+                logger.info(
                     f"Uploading data into existing Measurement Session {measurement_session.permId}."
                 )
                 return measurement_session
@@ -433,7 +435,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             },
         )
 
-        logging.info(f"New Measurement Session {measurement_session.permId} created.")
+        logger.info(f"New Measurement Session {measurement_session.permId} created.")
         return measurement_session
 
     def generate_watchdog(self, b):
@@ -467,7 +469,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         watchdog_process = subprocess.Popen(
             [
                 "python",
-                "src/measurements_uploader.py",
+                f"{APP_FOLDER}/src/measurements_uploader.py",
                 "--openbis_url",
                 self.session_data["url"],
                 "--openbis_token",
@@ -484,12 +486,12 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         )
 
         display(Javascript(data="alert('Watchdog process started!');"))
-        logging.info(
+        logger.info(
             f"Watchdog process started with PID: {watchdog_process.pid} for {data_folder}"
         )
 
         # 5. Update the JSON log file
-        json_file = "logs/active_watchdogs.json"
+        json_file = f"{APP_FOLDER}/logs/active_watchdogs.json"
         data = []
         try:
             with open(json_file, "r") as f:
@@ -513,6 +515,6 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
     def cleanup_watchdog(self):
         if self.watchdog_processes:
             for process in self.watchdog_processes:
-                logging.info(f"Terminating watchdog process with PID: {process.pid}")
+                logger.info(f"Terminating watchdog process with PID: {process.pid}")
                 process.terminate()
             self.watchdog_processes = []

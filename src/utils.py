@@ -205,6 +205,11 @@ def create_openbis_dataset(openbis_session, **kwargs):
         openbis_ds.save()
 
 
+def delete_openbis_object(openbis_object):
+    with contextlib.redirect_stdout(string_io):
+        openbis_object.delete("Deleted by AiiDA Lab interface")
+
+
 def update_openbis_object(openbis_object):
     with contextlib.redirect_stdout(string_io):
         openbis_object.save()

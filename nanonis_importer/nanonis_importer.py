@@ -12,6 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
+import pathlib
 import sys
 
 sys.path.append("/home/jovyan/aiidalab-openbis/")
@@ -36,8 +37,9 @@ VERBOSE = False
 DEFAULT_URL = "local.openbis.ch"
 
 logger = logging.getLogger(__name__)
+app_folder = pathlib.Path().resolve()
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
@@ -197,7 +199,7 @@ def demo_sxm_flow(session, file_path, experiment=None, sample=None):
     )
 
     perm_id = dataset_sxm.permId
-    logging.info(f"Created imaging .SXM dataset: {perm_id}")
+    logger.info(f"Created imaging .SXM dataset: {perm_id}")
     img = spm(file_path)
     channels = img.default_channels
     color_scale = get_color_scale_range(img, channels[0])[:2]
@@ -243,7 +245,7 @@ def demo_dat_flow(session, folder_path, experiment, sample):
     )
 
     perm_id = dataset_dat.permId
-    logging.info(f"Created imaging .DAT dataset: {perm_id}")
+    logger.info(f"Created imaging .DAT dataset: {perm_id}")
     data = spm.importall(folder_path, "spec")
 
     # Sort dat files by datetime
@@ -427,7 +429,7 @@ def create_sxm_dataset(
     ]
     imaging_property_config = imaging.ImagingDataSetPropertyConfig(images)
     if VERBOSE:
-        logging.info(imaging_property_config.to_json())
+        logger.info(imaging_property_config.to_json())
 
     return imaging_control.create_imaging_dataset(
         dataset_type=dataset_type,
@@ -625,7 +627,7 @@ def create_dat_dataset(
     ]
     imaging_property_config = imaging.ImagingDataSetPropertyConfig(images)
     if VERBOSE:
-        logging.info(imaging_property_config.to_json())
+        logger.info(imaging_property_config.to_json())
 
     return imaging_control.create_imaging_dataset(
         dataset_type=dataset_type,
@@ -656,7 +658,7 @@ def process_measurement_files(
                 readable_measurement_files.append(f)
                 measurement_datetimes.append(img_datetime)
             except Exception as e:
-                logging.info(f"Cannot read {f}. Reason: {e}")
+                logger.info(f"Cannot read {f}. Reason: {e}")
 
     # Sort files by datetime first, then filename
     paired = list(zip(measurement_datetimes, readable_measurement_files))
@@ -710,8 +712,8 @@ def process_measurement_files(
     for group in grouped_measurement_files:
         # Save sxm files
         if group[0].endswith(".sxm"):
-            logging.info(f"SXM file: {group[0]}")
             file_path = os.path.join(data_folder, group[0])
+            logger.info(f"SXM file: {file_path}")
 
             if file_path not in logging_file["processed_files"]:
                 try:
@@ -727,10 +729,10 @@ def process_measurement_files(
                     utils.write_json(logging_file, logging_filepath)
 
                 except (ValueError, KeyError) as e:
-                    logging.info(f"Cannot upload {file_path}. Reason: {e}")
+                    logger.info(f"Cannot upload {file_path}. Reason: {e}")
                     # Report it in a logging file
             else:
-                logging.info(f"{file_path} already in openBIS.")
+                logger.info(f"{file_path} already in openBIS.")
         else:
             # Split the dat files by measurement type (e.g.: bias spec dI vs V in one list, bias spec z vs V in another list, etc.)
             dat_files_types = []
@@ -791,7 +793,7 @@ def process_measurement_files(
                             utils.write_json(logging_file, logging_filepath)
 
                         except ValueError as e:
-                            logging.info(
+                            logger.info(
                                 f"Cannot upload {dat_files_directory}. Reason: {e}"
                             )
                             # Report it in a logging file
@@ -808,9 +810,7 @@ def process_measurement_files(
                         )
                         utils.write_json(logging_file, logging_filepath)
                     except ValueError as e:
-                        logging.info(
-                            f"Cannot upload {dat_files_directory}. Reason: {e}"
-                        )
+                        logger.info(f"Cannot upload {dat_files_directory}. Reason: {e}")
                 shutil.rmtree(dat_files_directory)
 
     session.logout()
