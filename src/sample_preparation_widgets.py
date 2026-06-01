@@ -848,8 +848,7 @@ class RegisterPreparationWidget(ipw.VBox):
         process_steps_widgets = self.new_processes_accordion.children
 
         if process_steps_widgets:
-            all_created_objects = []
-            # all_updated_objects = {}
+            undo_stack = []
             try:
                 experiment_object = utils.get_openbis_collection(
                     self.openbis_session, code=experiment_id
@@ -878,7 +877,12 @@ class RegisterPreparationWidget(ipw.VBox):
                         experiment=experiment_object.identifier,
                         props={"name": current_sample.props["name"]},
                     )
-                    all_created_objects.append(self.sample_preparation_object)
+                    # Add delete action to undo stack
+                    undo_stack.append(
+                        lambda obj=self.sample_preparation_object: utils.delete_openbis_object(
+                            obj
+                        )
+                    )
 
                 sample_preparation_id = self.sample_preparation_object.permId
                 for process_widget in process_steps_widgets:
@@ -889,9 +893,16 @@ class RegisterPreparationWidget(ipw.VBox):
                     sample_type = OPENBIS_OBJECT_TYPES["Sample"]
 
                     process_code = ""
+                    old_status = current_sample.props.get("object_status")
                     current_sample.props["object_status"] = "INACTIVE"
                     current_sample_name = current_sample.props["name"]
                     utils.update_openbis_object(current_sample)
+
+                    def revert_current_sample(s=current_sample, stat=old_status):
+                        s.props["object_status"] = stat
+                        utils.update_openbis_object(s)
+
+                    undo_stack.append(revert_current_sample)
 
                     process_step_type = OPENBIS_OBJECT_TYPES["Process Step"]
                     new_process_object = utils.create_openbis_object(
@@ -899,7 +910,9 @@ class RegisterPreparationWidget(ipw.VBox):
                         type=process_step_type,
                         experiment=experiment_object.identifier,
                     )
-                    all_created_objects.append(new_process_object)
+                    undo_stack.append(
+                        lambda obj=new_process_object: utils.delete_openbis_object(obj)
+                    )
 
                     process_properties = {
                         "name": process_widget.name_textbox.value,
@@ -1017,6 +1030,18 @@ class RegisterPreparationWidget(ipw.VBox):
                                                 action_properties_values[
                                                     component_type_lower
                                                 ] = component_permid
+
+                                                # Fetch component object early to match identifiers
+                                                component_object = (
+                                                    utils.get_openbis_object(
+                                                        self.openbis_session,
+                                                        sample_ident=component_permid,
+                                                    )
+                                                )
+                                                component_identifier = (
+                                                    component_object.identifier
+                                                )
+
                                                 if component_settings_permid != "-1":
                                                     action_properties_values[
                                                         component_settings_type_lower
@@ -1064,20 +1089,73 @@ class RegisterPreparationWidget(ipw.VBox):
                                                         "name"
                                                     ] = component_settings_name
 
-                                                    new_component_settings = utils.create_openbis_object(
-                                                        self.openbis_session,
-                                                        type=component_settings_type,
-                                                        experiment=settings_collection.permId,
-                                                        props=component_settings_properties_values,
-                                                        parents=[component_permid],
-                                                    )
-                                                    all_created_objects.append(
-                                                        new_component_settings
-                                                    )
+                                                    existing_settings_permid = None
 
-                                                    component_settings_permid = (
-                                                        new_component_settings.permId
-                                                    )
+                                                    try:
+                                                        # Retrieve all objects of this settings type from openBIS
+                                                        potential_settings = self.openbis_session.get_objects(
+                                                            type=component_settings_type,
+                                                            experiment=settings_collection.identifier,
+                                                            attrs=["parents"],
+                                                        )
+
+                                                        for obj in potential_settings:
+                                                            parents_list = getattr(
+                                                                obj, "parents", []
+                                                            )
+                                                            if (
+                                                                component_identifier
+                                                                not in parents_list
+                                                            ):
+                                                                continue
+
+                                                            # 2. Check if all target properties match exactly
+                                                            is_identical = True
+                                                            for (
+                                                                p_key,
+                                                                p_val,
+                                                            ) in component_settings_properties_values.items():
+                                                                # Stringify for safe comparison against PyBIS properties
+                                                                obj_props_dict = (
+                                                                    obj.props()
+                                                                )
+                                                                if str(
+                                                                    obj_props_dict.get(
+                                                                        p_key.lower()
+                                                                    )
+                                                                ) != str(p_val):
+                                                                    is_identical = False
+                                                                    break
+
+                                                            if is_identical:
+                                                                existing_settings_permid = obj.permId
+                                                                break
+
+                                                    except Exception as e:
+                                                        logger.warning(
+                                                            f"Error checking for existing settings object: {e}"
+                                                        )
+
+                                                    if existing_settings_permid:
+                                                        # Reuse existing settings object
+                                                        component_settings_permid = (
+                                                            existing_settings_permid
+                                                        )
+                                                    else:
+                                                        # Create new settings object if no exact match is found
+                                                        new_component_settings = utils.create_openbis_object(
+                                                            self.openbis_session,
+                                                            type=component_settings_type,
+                                                            experiment=settings_collection.permId,
+                                                            props=component_settings_properties_values,
+                                                            parents=[component_permid],
+                                                        )
+                                                        undo_stack.append(
+                                                            lambda obj=new_component_settings: utils.delete_openbis_object(
+                                                                obj
+                                                            )
+                                                        )
+                                                        component_settings_permid = new_component_settings.permId
 
                                                     action_properties_values[
                                                         component_settings_type_lower
@@ -1097,6 +1175,11 @@ class RegisterPreparationWidget(ipw.VBox):
                                                 component_settings_props = (
                                                     component_settings_object.props()
                                                 )
+
+                                                original_component_props = {
+                                                    k: component_object.props.get(k)
+                                                    for k in component_settings_props.keys()
+                                                }
 
                                                 for (
                                                     prop_key,
@@ -1130,6 +1213,22 @@ class RegisterPreparationWidget(ipw.VBox):
                                                     component_object
                                                 )
 
+                                                # Add rollback function to revert component props
+                                                def revert_component(
+                                                    c=component_object,
+                                                    old_p=original_component_props,
+                                                ):
+                                                    for k, v in old_p.items():
+                                                        if v is not None:
+                                                            c.props[k] = v
+                                                        else:
+                                                            c.props[k] = (
+                                                                ""  # Or delete the key if your wrapper supports it
+                                                            )
+                                                    utils.update_openbis_object(c)
+
+                                                undo_stack.append(revert_component)
+
                                             components_found = True
                                             break
 
@@ -1157,7 +1256,11 @@ class RegisterPreparationWidget(ipw.VBox):
                                 experiment=f"{experiment_project_code}/{action_collection_code}",
                                 props=action_properties_values,
                             )
-                            all_created_objects.append(new_action_object)
+                            undo_stack.append(
+                                lambda obj=new_action_object: utils.delete_openbis_object(
+                                    obj
+                                )
+                            )
 
                             new_action_code = str(new_action_object.code)
                             actions_codes.append(new_action_code[0:4])
@@ -1189,6 +1292,7 @@ class RegisterPreparationWidget(ipw.VBox):
                             process_code = f"[{''.join(process_step_icons)}]"
 
                     new_sample_name = f"{current_sample_name}:{process_code}"
+                    old_prep_name = self.sample_preparation_object.props.get("name")
                     self.sample_preparation_object.props["name"] = (
                         f"PREP_{new_sample_name}"
                     )
@@ -1196,6 +1300,14 @@ class RegisterPreparationWidget(ipw.VBox):
                         new_process_object.permId
                     )
                     utils.update_openbis_object(self.sample_preparation_object)
+
+                    def revert_prep(p=self.sample_preparation_object, n=old_prep_name):
+                        p.props["name"] = n
+                        # Note: We don't manually remove the child here because deleting
+                        # new_process_object (handled in undo_stack) removes the link automatically.
+                        utils.update_openbis_object(p)
+
+                    undo_stack.append(revert_prep)
 
                     new_process_object_parents = [
                         self.sample_preparation_object,
@@ -1262,17 +1374,19 @@ class RegisterPreparationWidget(ipw.VBox):
                         props={"name": new_sample_name, "object_status": "ACTIVE"},
                     )
 
-                    # After a process step, the current sample is now the new one
+                    undo_stack.append(
+                        lambda obj=new_sample: utils.delete_openbis_object(obj)
+                    )
                     current_sample = new_sample
-                    all_created_objects.append(current_sample)
-
-                print(1 + "a")
 
             except Exception as e:
                 logger.error(f"Error while saving process steps: {e}")
-                # Rollback: delete all created objects
-                for obj in all_created_objects:
-                    utils.delete_openbis_object(obj)
+                # Rollback sequence: execute the undo stack in reverse order
+                for rollback_action in reversed(undo_stack):
+                    try:
+                        rollback_action()
+                    except Exception as rollback_err:
+                        logger.error(f"Failed to rollback an action: {rollback_err}")
 
                 display(
                     Javascript(
