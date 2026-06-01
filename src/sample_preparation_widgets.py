@@ -1601,226 +1601,333 @@ class RegisterProcessWidget(ipw.VBox):
         process_steps_widgets = self.new_processes_accordion.children
 
         if process_steps_widgets:
-            process_name = ""
-            if self.process_name_text.value:
-                process_name = self.process_name_text.value
+            undo_stack = []
 
-            process_short_name = ""
-            if self.process_short_name_text.value:
-                process_short_name = self.process_short_name_text.value
+            try:
+                process_name = ""
+                if self.process_name_text.value:
+                    process_name = self.process_name_text.value
 
-            process_description = ""
-            if self.process_description_text.value:
-                process_description = self.process_description_text.value
+                process_short_name = ""
+                if self.process_short_name_text.value:
+                    process_short_name = self.process_short_name_text.value
 
-            process_properties = {
-                "name": process_name,
-                "short_name": process_short_name,
-                "description": process_description,
-                "process_steps": [],
-            }
+                process_description = ""
+                if self.process_description_text.value:
+                    process_description = self.process_description_text.value
 
-            for process_widget in process_steps_widgets:
-                process_step_name = process_widget.name_textbox.value
-                process_step_description = process_widget.description_textbox.value
-                process_step_instrument = process_widget.instrument_dropdown.value
-                process_step_comments = process_widget.comments_textarea.value
-                actions_widgets = process_widget.actions_accordion.children
-                actions = []
-
-                if actions_widgets:
-                    for action_widget in actions_widgets:
-                        action_properties_values = {}
-                        action_type = action_widget.action_type_dropdown.value
-                        action_properties_widgets = (
-                            action_widget.action_properties_widgets.children
-                        )
-
-                        if action_type == "-1":
-                            continue
-
-                        action_properties = (
-                            utils.get_openbis_object_type(
-                                self.openbis_session, type=action_type
-                            )
-                            .get_property_assignments()
-                            .df.code.values
-                        )
-
-                        components_found = False
-                        for prop in action_properties:
-                            prop_type = utils.get_openbis_property_type(
-                                self.openbis_session, code=prop
-                            )
-                            prop_dataType = str(prop_type.dataType)
-                            prop_lower = prop.lower()
-
-                            for widget in action_properties_widgets:
-                                if "property_name" in widget.metadata:
-                                    if widget.metadata["property_name"] == prop:
-                                        if prop == "DURATION":
-                                            duration_days = widget.children[1].value
-                                            duration_hours = widget.children[3].value
-                                            duration_minutes = widget.children[5].value
-                                            duration_seconds = widget.children[7].value
-                                            duration = f"{duration_days} days {duration_hours:02}:{duration_minutes:02}:{duration_seconds:02}"
-
-                                            action_properties_values[prop_lower] = (
-                                                duration
-                                            )
-                                        elif prop_dataType in ["SAMPLE", "OBJECT"]:
-                                            selected_value = widget.children[1].value
-                                            if selected_value != "-1":
-                                                action_properties_values[prop_lower] = (
-                                                    selected_value
-                                                )
-                                        else:
-                                            action_properties_values[prop_lower] = (
-                                                widget.children[1].value
-                                            )
-
-                                        break
-
-                                    elif (
-                                        not components_found
-                                        and f"{prop}_SETTINGS" in action_properties
-                                        and prop_dataType in ["SAMPLE", "OBJECT"]
-                                        and widget.metadata["property_name"]
-                                        == "COMPONENTS"
-                                    ):
-                                        # This part of the code finds all components and settings used in the current action
-                                        for component_widget in widget.children:
-                                            component_name = (
-                                                component_widget.metadata.get(
-                                                    "component_name"
-                                                )
-                                            )
-                                            component_type = (
-                                                component_widget.metadata.get(
-                                                    "component_type"
-                                                )
-                                            )
-                                            component_settings_type = (
-                                                f"{component_type}_SETTINGS"
-                                            )
-                                            component_settings_type_lower = (
-                                                component_settings_type.lower()
-                                            )
-                                            component_permid = (
-                                                component_widget.children[
-                                                    0
-                                                ].metadata.get("object_id")
-                                            )
-                                            component_settings_permid = (
-                                                component_widget.children[1]
-                                                .children[1]
-                                                .value
-                                            )
-                                            component_type_lower = (
-                                                component_type.lower()
-                                            )
-                                            action_properties_values[
-                                                component_type_lower
-                                            ] = component_permid
-                                            if component_settings_permid != "-1":
-                                                action_properties_values[
-                                                    component_settings_type_lower
-                                                ] = component_settings_permid
-                                            else:
-                                                component_settings_properties_values = {}
-                                                component_settings_name = (
-                                                    f"{component_name} with "
-                                                )
-                                                for (
-                                                    setting_widget
-                                                ) in component_widget.children[
-                                                    2
-                                                ].children:
-                                                    setting_prop_type = (
-                                                        setting_widget.metadata.get(
-                                                            "property_name"
-                                                        )
-                                                    )
-                                                    setting_prop_label = (
-                                                        setting_widget.children[0]
-                                                        .value.removeprefix("<b>")
-                                                        .removesuffix("</b>")
-                                                        .removesuffix(":")
-                                                    )
-                                                    setting_prop_value = (
-                                                        setting_widget.children[1].value
-                                                    )
-                                                    setting_prop_type_lower = (
-                                                        setting_prop_type.lower()
-                                                    )
-                                                    component_settings_properties_values[
-                                                        setting_prop_type_lower
-                                                    ] = setting_prop_value
-                                                    component_settings_name += f"{setting_prop_label}: {setting_prop_value}, "
-
-                                                component_settings_name = (
-                                                    component_settings_name.rstrip(", ")
-                                                )
-                                                component_settings_properties_values[
-                                                    "name"
-                                                ] = component_settings_name
-
-                                                new_component_settings = utils.create_openbis_object(
-                                                    self.openbis_session,
-                                                    type=component_settings_type,
-                                                    experiment=collection_id,
-                                                    props=component_settings_properties_values,
-                                                    parents=[component_permid],
-                                                )
-
-                                                action_properties_values[
-                                                    component_settings_type_lower
-                                                ] = new_component_settings.permId
-
-                                        components_found = True
-                                        break
-
-                        new_action_object = utils.create_openbis_object(
-                            self.openbis_session,
-                            type=action_type,
-                            experiment=collection_id,
-                            props=action_properties_values,
-                        )
-
-                        actions.append(new_action_object.permId)
-
-                process_step_settings = {
-                    "name": process_step_name,
-                    "description": process_step_description,
-                    "comments": process_step_comments,
-                    "actions": actions,
+                process_properties = {
+                    "name": process_name,
+                    "short_name": process_short_name,
+                    "description": process_description,
+                    "process_steps": [],
                 }
 
-                new_process_step_parents = []
-                if process_step_instrument != "-1":
-                    new_process_step_parents.append(process_step_instrument)
+                for process_widget in process_steps_widgets:
+                    process_step_name = process_widget.name_textbox.value
+                    process_step_description = process_widget.description_textbox.value
+                    process_step_instrument = process_widget.instrument_dropdown.value
+                    process_step_comments = process_widget.comments_textarea.value
+                    actions_widgets = process_widget.actions_accordion.children
+                    actions = []
 
-                new_process_step_object = utils.create_openbis_object(
+                    if actions_widgets:
+                        for action_widget in actions_widgets:
+                            action_properties_values = {}
+                            action_type = action_widget.action_type_dropdown.value
+                            action_properties_widgets = (
+                                action_widget.action_properties_widgets.children
+                            )
+
+                            if action_type == "-1":
+                                continue
+
+                            action_properties = (
+                                utils.get_openbis_object_type(
+                                    self.openbis_session, type=action_type
+                                )
+                                .get_property_assignments()
+                                .df.code.values
+                            )
+
+                            components_found = False
+                            for prop in action_properties:
+                                prop_type = utils.get_openbis_property_type(
+                                    self.openbis_session, code=prop
+                                )
+                                prop_dataType = str(prop_type.dataType)
+                                prop_lower = prop.lower()
+
+                                for widget in action_properties_widgets:
+                                    if "property_name" in widget.metadata:
+                                        if widget.metadata["property_name"] == prop:
+                                            if prop == "DURATION":
+                                                duration_days = widget.children[1].value
+                                                duration_hours = widget.children[
+                                                    3
+                                                ].value
+                                                duration_minutes = widget.children[
+                                                    5
+                                                ].value
+                                                duration_seconds = widget.children[
+                                                    7
+                                                ].value
+                                                duration = f"{duration_days} days {duration_hours:02}:{duration_minutes:02}:{duration_seconds:02}"
+
+                                                action_properties_values[prop_lower] = (
+                                                    duration
+                                                )
+                                            elif prop_dataType in ["SAMPLE", "OBJECT"]:
+                                                selected_value = widget.children[
+                                                    1
+                                                ].value
+                                                if selected_value != "-1":
+                                                    action_properties_values[
+                                                        prop_lower
+                                                    ] = selected_value
+                                            else:
+                                                action_properties_values[prop_lower] = (
+                                                    widget.children[1].value
+                                                )
+
+                                            break
+
+                                        elif (
+                                            not components_found
+                                            and f"{prop}_SETTINGS" in action_properties
+                                            and prop_dataType in ["SAMPLE", "OBJECT"]
+                                            and widget.metadata["property_name"]
+                                            == "COMPONENTS"
+                                        ):
+                                            # This part of the code finds all components and settings used in the current action
+                                            for component_widget in widget.children:
+                                                component_name = (
+                                                    component_widget.metadata.get(
+                                                        "component_name"
+                                                    )
+                                                )
+                                                component_type = (
+                                                    component_widget.metadata.get(
+                                                        "component_type"
+                                                    )
+                                                )
+                                                component_settings_type = (
+                                                    f"{component_type}_SETTINGS"
+                                                )
+                                                component_settings_type_lower = (
+                                                    component_settings_type.lower()
+                                                )
+                                                component_permid = (
+                                                    component_widget.children[
+                                                        0
+                                                    ].metadata.get("object_id")
+                                                )
+                                                component_settings_permid = (
+                                                    component_widget.children[1]
+                                                    .children[1]
+                                                    .value
+                                                )
+                                                component_type_lower = (
+                                                    component_type.lower()
+                                                )
+                                                action_properties_values[
+                                                    component_type_lower
+                                                ] = component_permid
+
+                                                component_object = (
+                                                    utils.get_openbis_object(
+                                                        self.openbis_session,
+                                                        sample_ident=component_permid,
+                                                    )
+                                                )
+                                                component_identifier = (
+                                                    component_object.identifier
+                                                )
+
+                                                if component_settings_permid != "-1":
+                                                    action_properties_values[
+                                                        component_settings_type_lower
+                                                    ] = component_settings_permid
+                                                else:
+                                                    component_settings_properties_values = {}
+                                                    component_settings_name = (
+                                                        f"{component_name} with "
+                                                    )
+                                                    for (
+                                                        setting_widget
+                                                    ) in component_widget.children[
+                                                        2
+                                                    ].children:
+                                                        setting_prop_type = (
+                                                            setting_widget.metadata.get(
+                                                                "property_name"
+                                                            )
+                                                        )
+                                                        setting_prop_label = (
+                                                            setting_widget.children[0]
+                                                            .value.removeprefix("<b>")
+                                                            .removesuffix("</b>")
+                                                            .removesuffix(":")
+                                                        )
+                                                        setting_prop_value = (
+                                                            setting_widget.children[
+                                                                1
+                                                            ].value
+                                                        )
+                                                        setting_prop_type_lower = (
+                                                            setting_prop_type.lower()
+                                                        )
+                                                        component_settings_properties_values[
+                                                            setting_prop_type_lower
+                                                        ] = setting_prop_value
+                                                        component_settings_name += f"{setting_prop_label}: {setting_prop_value}, "
+
+                                                    component_settings_name = (
+                                                        component_settings_name.rstrip(
+                                                            ", "
+                                                        )
+                                                    )
+                                                    component_settings_properties_values[
+                                                        "name"
+                                                    ] = component_settings_name
+
+                                                    existing_settings_permid = None
+                                                    try:
+                                                        # Pass attrs=["parents"] to populate string identifiers
+                                                        potential_settings = self.openbis_session.get_objects(
+                                                            type=component_settings_type,
+                                                            experiment=collection_id,
+                                                            attrs=["parents"],
+                                                        )
+
+                                                        for obj in potential_settings:
+                                                            parents_list = getattr(
+                                                                obj, "parents", []
+                                                            )
+
+                                                            # Verify if either identifier string or permId is in the list
+                                                            if (
+                                                                component_identifier
+                                                                not in parents_list
+                                                            ):
+                                                                continue
+
+                                                            is_identical = True
+                                                            for (
+                                                                p_key,
+                                                                p_val,
+                                                            ) in component_settings_properties_values.items():
+                                                                if str(
+                                                                    obj.props.get(
+                                                                        p_key.lower()
+                                                                    )
+                                                                ) != str(p_val):
+                                                                    is_identical = False
+                                                                    break
+
+                                                            if is_identical:
+                                                                existing_settings_permid = obj.permId
+                                                                break
+                                                    except Exception as e:
+                                                        logger.warning(
+                                                            f"Error checking for existing settings object: {e}"
+                                                        )
+
+                                                    if existing_settings_permid:
+                                                        action_properties_values[
+                                                            component_settings_type_lower
+                                                        ] = existing_settings_permid
+                                                    else:
+                                                        new_component_settings = utils.create_openbis_object(
+                                                            self.openbis_session,
+                                                            type=component_settings_type,
+                                                            experiment=collection_id,
+                                                            props=component_settings_properties_values,
+                                                            parents=[component_permid],
+                                                        )
+                                                        undo_stack.append(
+                                                            lambda obj=new_component_settings: utils.delete_openbis_object(
+                                                                obj
+                                                            )
+                                                        )
+                                                        action_properties_values[
+                                                            component_settings_type_lower
+                                                        ] = new_component_settings.permId
+
+                                            components_found = True
+                                            break
+
+                            new_action_object = utils.create_openbis_object(
+                                self.openbis_session,
+                                type=action_type,
+                                experiment=collection_id,
+                                props=action_properties_values,
+                            )
+
+                            undo_stack.append(
+                                lambda obj=new_action_object: utils.delete_openbis_object(
+                                    obj
+                                )
+                            )
+                            actions.append(new_action_object.permId)
+
+                    process_step_settings = {
+                        "name": process_step_name,
+                        "description": process_step_description,
+                        "comments": process_step_comments,
+                        "actions": actions,
+                    }
+
+                    new_process_step_parents = []
+                    if process_step_instrument != "-1":
+                        new_process_step_parents.append(process_step_instrument)
+
+                    new_process_step_object = utils.create_openbis_object(
+                        self.openbis_session,
+                        type=OPENBIS_OBJECT_TYPES["Process Step"],
+                        experiment=collection_id,
+                        props=process_step_settings,
+                        parents=new_process_step_parents,
+                    )
+
+                    undo_stack.append(
+                        lambda obj=new_process_step_object: utils.delete_openbis_object(
+                            obj
+                        )
+                    )
+                    process_properties["process_steps"].append(
+                        new_process_step_object.permId
+                    )
+
+                new_process_object = utils.create_openbis_object(
                     self.openbis_session,
-                    type=OPENBIS_OBJECT_TYPES["Process Step"],
+                    type=OPENBIS_OBJECT_TYPES["Process"],
                     experiment=collection_id,
-                    props=process_step_settings,
-                    parents=new_process_step_parents,
+                    props=process_properties,
                 )
 
-                process_properties["process_steps"].append(
-                    new_process_step_object.permId
+                undo_stack.append(
+                    lambda obj=new_process_object: utils.delete_openbis_object(obj)
                 )
 
-            new_process_object = utils.create_openbis_object(
-                self.openbis_session,
-                type=OPENBIS_OBJECT_TYPES["Process"],
-                experiment=collection_id,
-                props=process_properties,
-            )
+                display(Javascript(data="alert('Process created successfully.')"))
+                logger.info(
+                    f"Process {new_process_object.permId} created successfully."
+                )
 
-            display(Javascript(data="alert('Process created successfully.')"))
-            logger.info(f"Process {new_process_object.permId} created successfully.")
+            except Exception as e:
+                logger.error(f"Error while saving process steps template: {e}")
+                for rollback_action in reversed(undo_stack):
+                    try:
+                        rollback_action()
+                    except Exception as rollback_err:
+                        logger.error(f"Failed to rollback an action: {rollback_err}")
+
+                display(
+                    Javascript(
+                        data="alert('An error occurred while creating the process template. All changes have been rolled back.')"
+                    )
+                )
 
             # Reset new processes accordion
             processes_accordion_children = list(self.new_processes_accordion.children)

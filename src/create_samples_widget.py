@@ -323,67 +323,101 @@ class CreateSampleWidget(ipw.VBox):
             else:
                 material_id = self.material_details_vbox.children[0].children[0].value
 
-                material_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=material_id
-                )
+                undo_stack = []
 
-                # Check samples that use this material which are still active
-                sample_objects = utils.get_openbis_objects(
-                    self.openbis_session,
-                    type=OPENBIS_OBJECT_TYPES["Sample"],
-                    where={"object_status": "ACTIVE"},
-                    attrs=["parents"],
-                )
+                try:
+                    material_object = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=material_id
+                    )
 
-                for sample in sample_objects:
-                    obj = sample
-                    while obj:
-                        parents = obj.parents
-                        found_parent = False
+                    # Check samples that use this material which are still active
+                    sample_objects = utils.get_openbis_objects(
+                        self.openbis_session,
+                        type=OPENBIS_OBJECT_TYPES["Sample"],
+                        where={"object_status": "ACTIVE"},
+                        attrs=["parents"],
+                    )
 
-                        for parent_id in parents:
-                            parent = utils.get_openbis_object(
-                                self.openbis_session, sample_ident=parent_id
+                    for sample in sample_objects:
+                        obj = sample
+                        while obj:
+                            parents = obj.parents
+                            found_parent = False
+
+                            for parent_id in parents:
+                                parent = utils.get_openbis_object(
+                                    self.openbis_session, sample_ident=parent_id
+                                )
+                                parent_type = parent.type.code
+
+                                if parent_type in [
+                                    OPENBIS_OBJECT_TYPES["Process Step"],
+                                    OPENBIS_OBJECT_TYPES["Sample"],
+                                ]:
+                                    obj = parent
+                                    found_parent = True
+                                    break
+
+                                elif (
+                                    parent_type == material_object.type.code
+                                    and parent.permId == material_object.permId
+                                ):
+                                    old_status = sample.props.get("object_status")
+                                    sample.props["object_status"] = "DISPOSED"
+                                    utils.update_openbis_object(sample)
+
+                                    # Add rollback function for this specific sample
+                                    def revert_sample_status(s=sample, stat=old_status):
+                                        s.props["object_status"] = stat
+                                        utils.update_openbis_object(s)
+
+                                    undo_stack.append(revert_sample_status)
+
+                                    found_parent = True
+                                    break
+
+                            if not found_parent:
+                                obj = None
+
+                            if sample.props["object_status"] == "DISPOSED":
+                                break
+
+                    sample_name = self.sample_name_textbox.value
+                    sample_type = OPENBIS_OBJECT_TYPES["Sample"]
+                    sample_props = {"name": sample_name, "object_status": "ACTIVE"}
+
+                    sample_object = utils.create_openbis_object(
+                        self.openbis_session,
+                        type=sample_type,
+                        collection=OPENBIS_COLLECTIONS_PATHS["Sample"],
+                        props=sample_props,
+                        parents=[material_object],
+                    )
+
+                    undo_stack.append(
+                        lambda obj=sample_object: utils.delete_openbis_object(obj)
+                    )
+
+                    display(Javascript(data="alert('Sample created successfully!')"))
+                    logger.info(f"Sample {sample_object.permId} created successfully!")
+
+                except Exception as e:
+                    logger.error(f"Error while saving sample: {e}")
+
+                    # Rollback sequence: execute the undo stack in reverse order
+                    for rollback_action in reversed(undo_stack):
+                        try:
+                            rollback_action()
+                        except Exception as rollback_err:
+                            logger.error(
+                                f"Failed to rollback an action: {rollback_err}"
                             )
-                            parent_type = parent.type.code
 
-                            if parent_type in [
-                                OPENBIS_OBJECT_TYPES["Process Step"],
-                                OPENBIS_OBJECT_TYPES["Sample"],
-                            ]:
-                                obj = parent
-                                found_parent = True
-                                break
-
-                            elif (
-                                parent_type == material_object.type.code
-                                and parent.permId == material_object.permId
-                            ):
-                                sample.props["object_status"] = "DISPOSED"
-                                utils.update_openbis_object(sample)
-                                found_parent = True
-                                break
-
-                        if not found_parent:
-                            obj = None
-
-                        if sample.props["object_status"] == "DISPOSED":
-                            break
-
-                sample_name = self.sample_name_textbox.value
-                sample_type = OPENBIS_OBJECT_TYPES["Sample"]
-                sample_props = {"name": sample_name, "object_status": "ACTIVE"}
-                sample_object = utils.create_openbis_object(
-                    self.openbis_session,
-                    type=sample_type,
-                    collection=OPENBIS_COLLECTIONS_PATHS["Sample"],
-                    props=sample_props,
-                    parents=[material_object],
-                )
-
-                display(Javascript(data="alert('Sample created successfully!')"))
-
-                logger.info(f"Sample {sample_object.permId} created successfully!")
+                    display(
+                        Javascript(
+                            data="alert('An error occurred while saving the sample. All changes have been rolled back.')"
+                        )
+                    )
 
                 # Clear interface
                 self.material_type_dropdown.value = "-1"
