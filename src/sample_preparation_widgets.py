@@ -40,9 +40,26 @@ logging.basicConfig(
 
 
 def set_accordion_children_titles(accordion, children, titles):
-    accordion.children = list(children)
+    children = list(children)
+    titles = list(titles)
+
+    for index in range(max(len(accordion.children), len(children))):
+        try:
+            accordion.set_title(index, "")
+        except IndexError:
+            pass
+
+    if not children:
+        accordion.children = []
+        accordion.selected_index = None
+        return
+
+    accordion.children = children
     for index, title in enumerate(titles):
         accordion.set_title(index, title or "")
+
+    for index in range(len(titles), len(children)):
+        accordion.set_title(index, "")
 
 
 class SampleHistoryWidget(ipw.VBox):
@@ -749,7 +766,14 @@ class RegisterPreparationWidget(ipw.VBox):
             self.openbis_session, self.new_processes_accordion, process_step_index
         )
         processes_accordion_children.append(new_process_step_widget)
-        self.new_processes_accordion.children = processes_accordion_children
+        set_accordion_children_titles(
+            self.new_processes_accordion,
+            processes_accordion_children,
+            [
+                process_step.name_textbox.value
+                for process_step in processes_accordion_children
+            ],
+        )
 
     def load_process(self, b):
         openbis_processes = utils.get_openbis_objects(
@@ -804,7 +828,14 @@ class RegisterPreparationWidget(ipw.VBox):
                         process_step=process_step,
                     )
                     processes_accordion_children.append(new_process_step_widget)
-                    self.new_processes_accordion.children = processes_accordion_children
+                    set_accordion_children_titles(
+                        self.new_processes_accordion,
+                        processes_accordion_children,
+                        [
+                            process_step.name_textbox.value
+                            for process_step in processes_accordion_children
+                        ],
+                    )
 
             self.load_processes_hbox.children = []
 
@@ -1417,7 +1448,14 @@ class RegisterProcessWidget(ipw.VBox):
             allow_observables=False,
         )
         processes_accordion_children.append(new_process_step_widget)
-        self.new_processes_accordion.children = processes_accordion_children
+        set_accordion_children_titles(
+            self.new_processes_accordion,
+            processes_accordion_children,
+            [
+                process_step.name_textbox.value
+                for process_step in processes_accordion_children
+            ],
+        )
 
     def save_process_steps(self, b):
         collection_id = self.select_collection_dropdown.value
@@ -1872,15 +1910,42 @@ class RegisterProcessStepWidget(ipw.VBox):
                 process_step_widget=self,
             )
             actions_accordion_children.append(new_action_widget)
-            self.actions_accordion.children = actions_accordion_children
+            set_accordion_children_titles(
+                self.actions_accordion,
+                actions_accordion_children,
+                [
+                    getattr(action, "action_icon", "")
+                    for action in actions_accordion_children
+                ],
+            )
 
     def change_process_step_title(self, change):
         title = self.name_textbox.value
         self.processes_accordion.set_title(self.process_step_index, title)
 
+    def refresh_action_icon_prefix(self, pending_action=None):
+        actions = list(self.actions_accordion.children)
+        if pending_action is not None and pending_action not in actions:
+            actions.append(pending_action)
+
+        action_icons = "".join(
+            getattr(action, "action_icon", "") for action in actions
+        )
+        current_text = self.name_textbox.value or ""
+        body_text = current_text
+        if current_text.startswith("[") and "]" in current_text:
+            body_text = current_text[current_text.find("]") + 1 :].lstrip()
+
+        new_text = (
+            f"[{action_icons}] {body_text}".rstrip()
+            if action_icons
+            else body_text
+        )
+        self.name_textbox.value = new_text
+        self.processes_accordion.set_title(self.process_step_index, new_text)
+
     def remove_process_step(self, b):
         processes_accordion_children = list(self.processes_accordion.children)
-        num_process_steps = len(processes_accordion_children)
         processes_accordion_children.pop(self.process_step_index)
 
         for index, process_step in enumerate(processes_accordion_children):
@@ -1907,7 +1972,14 @@ class RegisterProcessStepWidget(ipw.VBox):
                 process_step_widget=self,
             )
             actions_accordion_children.append(new_action_widget)
-            self.actions_accordion.children = actions_accordion_children
+            set_accordion_children_titles(
+                self.actions_accordion,
+                actions_accordion_children,
+                [
+                    getattr(action, "action_icon", "")
+                    for action in actions_accordion_children
+                ],
+            )
 
     def add_observable(self, b):
         instrument_permid = self.instrument_dropdown.value
@@ -1922,7 +1994,18 @@ class RegisterProcessStepWidget(ipw.VBox):
                 process_step_widget=self,
             )
             observables_accordion_children.append(new_observable_widget)
-            self.observables_accordion.children = observables_accordion_children
+            set_accordion_children_titles(
+                self.observables_accordion,
+                observables_accordion_children,
+                [
+                    observable.observable_properties_widgets.children[0]
+                    .children[1]
+                    .value
+                    if observable.observable_properties_widgets.children
+                    else ""
+                    for observable in observables_accordion_children
+                ],
+            )
 
 
 class RegisterActionWidget(ipw.VBox):
@@ -2149,42 +2232,16 @@ class RegisterActionWidget(ipw.VBox):
     def load_action_properties(self, change):
         action_type = self.action_type_dropdown.value
         if action_type == "-1":
+            self.action_icon = ""
             self.action_properties_widgets.children = []
+            if self.process_step_widget is not None:
+                self.process_step_widget.refresh_action_icon_prefix()
             return
 
         icon_mapping = INTERFACE_CONFIG_INFO["actions_types_icons"]
         self.action_icon = icon_mapping.get(action_type, "⚙️")
-        current_text = self.process_step_widget.name_textbox.value
-
-        if current_text.startswith("[") and "]" in current_text:
-            close_idx = current_text.find("]")
-            current_icons_str = current_text[1:close_idx]
-
-            # 1. Safely break the string into a list of complete emojis
-            icons_list = []
-            for char in current_icons_str:
-                # If the character is a modifier (like \ufe0f or ZWJ), attach it to the previous emoji
-                if char in ("\ufe0f", "\u200d") and icons_list:
-                    icons_list[-1] += char
-                else:
-                    icons_list.append(char)
-
-            # 2. Safely replace or append the new icon based on the index
-            if self.action_index < len(icons_list):
-                icons_list[self.action_index] = self.action_icon
-            else:
-                # If adding a brand new action
-                icons_list.append(self.action_icon)
-
-            # 3. Join them back together and rebuild the text
-            new_icons_str = "".join(icons_list)
-            new_text = f"[{new_icons_str}]" + current_text[close_idx + 1 :]
-
-        else:
-            # Create the brackets if they don't exist yet
-            new_text = f"[{self.action_icon}] {current_text}"
-
-        self.process_step_widget.name_textbox.value = new_text
+        if self.process_step_widget is not None:
+            self.process_step_widget.refresh_action_icon_prefix(pending_action=self)
         self.actions_accordion.set_title(self.action_index, self.action_icon)
 
         action_properties = (
@@ -2677,27 +2734,6 @@ class RegisterActionWidget(ipw.VBox):
         self.actions_accordion.set_title(self.action_index, f"{change['new']}")
 
     def remove_action(self, b):
-        current_text = self.process_step_widget.name_textbox.value
-        icon = self.action_icon
-
-        if current_text.startswith("[") and "]" in current_text:
-            close_idx = current_text.find("]")
-            prefix = current_text[: close_idx + 1]
-            rest_of_text = current_text[close_idx + 1 :]
-
-            # If the icon is inside the brackets, remove it
-            if icon in prefix:
-                # Replace only one occurrence of the icon
-                new_prefix = prefix.replace(icon, "", 1)
-
-                # If removing the icon leaves the brackets completely empty, remove them entirely
-                if new_prefix == "[]":
-                    self.process_step_widget.name_textbox.value = rest_of_text.lstrip()
-                else:
-                    self.process_step_widget.name_textbox.value = (
-                        new_prefix + rest_of_text
-                    )
-
         children = list(self.actions_accordion.children)
         children.pop(self.action_index)
 
@@ -2715,6 +2751,8 @@ class RegisterActionWidget(ipw.VBox):
             action_titles.append(action_name)
 
         set_accordion_children_titles(self.actions_accordion, children, action_titles)
+        if self.process_step_widget is not None:
+            self.process_step_widget.refresh_action_icon_prefix()
 
 
 class RegisterObservableWidget(ipw.VBox):
