@@ -1914,7 +1914,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.actions_accordion,
                 actions_accordion_children,
                 [
-                    getattr(action, "action_icon", "")
+                    action.get_action_title()
                     for action in actions_accordion_children
                 ],
             )
@@ -1976,7 +1976,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.actions_accordion,
                 actions_accordion_children,
                 [
-                    getattr(action, "action_icon", "")
+                    action.get_action_title()
                     for action in actions_accordion_children
                 ],
             )
@@ -2729,9 +2729,16 @@ class RegisterActionWidget(ipw.VBox):
             comp_dropdown_widget.observe(add_component_ui, names="value")
 
         self.action_properties_widgets.children = action_properties_widgets
+        self.actions_accordion.set_title(self.action_index, self.get_action_title())
 
     def change_action_title(self, change):
-        self.actions_accordion.set_title(self.action_index, f"{change['new']}")
+        self.actions_accordion.set_title(self.action_index, self.get_action_title())
+
+    def get_action_title(self):
+        for widget in self.action_properties_widgets.children:
+            if widget.metadata.get("property_name", "") == "NAME":
+                return widget.children[1].value or self.action_icon
+        return self.action_icon
 
     def remove_action(self, b):
         children = list(self.actions_accordion.children)
@@ -2740,16 +2747,7 @@ class RegisterActionWidget(ipw.VBox):
         for i in range(self.action_index, len(children)):
             children[i].action_index = i
 
-        action_titles = []
-        for action in children:
-            action_name = ""
-            if action.action_properties_widgets.children:
-                for widget in action.action_properties_widgets.children:
-                    if widget.metadata.get("property_name", "") == "NAME":
-                        action_name += widget.children[1].value
-                        break
-            action_titles.append(action_name)
-
+        action_titles = [action.get_action_title() for action in children]
         set_accordion_children_titles(self.actions_accordion, children, action_titles)
         if self.process_step_widget is not None:
             self.process_step_widget.refresh_action_icon_prefix()
