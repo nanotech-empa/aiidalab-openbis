@@ -752,11 +752,25 @@ class RegisterPreparationWidget(ipw.VBox):
         # Load sample history
         self.sample_history_vbox.load_sample_history(sample_object)
 
+        # Update sample_id in new_process_widgets and update target substrate options in action properties widgets
+        for new_process_widget in self.new_processes_accordion.children:
+            new_process_widget.sample_id = sample_identifier
+            for action_widget in new_process_widget.actions_accordion.children:
+                for child in action_widget.action_properties_widgets.children:
+                    if child.metadata["property_name"] == "TARGET_SUBSTRATE":
+                        child.children[
+                            1
+                        ].options = action_widget.load_target_substrate_options()
+                        child.children[1].value = "-1"
+
     def add_process_step(self, b):
         processes_accordion_children = list(self.new_processes_accordion.children)
         process_step_index = len(processes_accordion_children)
         new_process_step_widget = RegisterProcessStepWidget(
-            self.openbis_session, self.new_processes_accordion, process_step_index
+            self.openbis_session,
+            self.new_processes_accordion,
+            process_step_index,
+            sample_id=self.select_sample_dropdown.sample_dropdown.value,
         )
         processes_accordion_children.append(new_process_step_widget)
         self.new_processes_accordion.children = processes_accordion_children
@@ -811,6 +825,7 @@ class RegisterPreparationWidget(ipw.VBox):
                         self.openbis_session,
                         self.new_processes_accordion,
                         process_step_index,
+                        sample_id=self.select_sample_dropdown.sample_dropdown.value,
                         process_step=process_step,
                     )
                     processes_accordion_children.append(new_process_step_widget)
@@ -983,6 +998,26 @@ class RegisterPreparationWidget(ipw.VBox):
                                                     action_properties_values[
                                                         prop_lower
                                                     ] = selected_value
+
+                                                selected_obj = utils.get_openbis_object(
+                                                    self.openbis_session,
+                                                    sample_ident=selected_value,
+                                                )
+
+                                                # If sample is being used as a property of an action, we set it to INACTIVE to indicate it was consumed in the process (e.g. used as a target substrate)
+                                                if selected_obj.type.code == "SAMPLE":
+                                                    selected_obj["object_status"] = (
+                                                        "INACTIVE"
+                                                    )
+                                                    utils.update_openbis_object(
+                                                        selected_obj
+                                                    )
+
+                                                    def revert_sample(obj=selected_obj):
+                                                        obj["object_status"] = "ACTIVE"
+                                                        utils.update_openbis_object(obj)
+
+                                                    undo_stack.append(revert_sample)
 
                                             else:
                                                 action_properties_values[prop_lower] = (
@@ -1952,6 +1987,7 @@ class RegisterProcessStepWidget(ipw.VBox):
         openbis_session,
         processes_accordion,
         process_step_index,
+        sample_id=None,
         process_step=None,
         allow_observables=True,
     ):
@@ -1959,6 +1995,7 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.processes_accordion = processes_accordion
         self.process_step_index = process_step_index
+        self.sample_id = sample_id if sample_id != "-1" else None
 
         label_layout = ipw.Layout(width="100px")
 
@@ -2372,6 +2409,29 @@ class RegisterActionWidget(ipw.VBox):
         # 4. Inject all the generated image widgets into the UI container at once
         self.substance_images_container.children = image_widgets
 
+    def load_target_substrate_options(self):
+        wafer_substrate_list = utils.get_openbis_objects(
+            self.openbis_session, type=OPENBIS_OBJECT_TYPES["Wafer Substrate"]
+        )
+        sample_list = utils.get_openbis_objects(
+            self.openbis_session, type=OPENBIS_OBJECT_TYPES["Sample"]
+        )
+        target_substrate_options = [("Select a target substrate...", "-1")] + [
+            (f"{obj.props['name']} (Wafer Substrate)", obj.permId)
+            for obj in wafer_substrate_list
+        ]
+
+        for obj in sample_list:
+            if (
+                obj.props.get("object_status") == "ACTIVE"
+                and obj.permId != self.process_step_widget.sample_id
+            ):
+                target_substrate_options.append(
+                    (f"{obj.props['name']} (Sample)", obj.permId)
+                )
+
+        return target_substrate_options
+
     def load_action(self, settings):
         action_object = settings
         action_properties_values = action_object.props.all()
@@ -2649,8 +2709,304 @@ class RegisterActionWidget(ipw.VBox):
                     )
                 )
 
+            elif prop == "TARGET_SUBSTRATE":
+                target_substrate_options = self.load_target_substrate_options()
+                target_substrate_dropdown = ipw.Dropdown(
+                    options=target_substrate_options, value="-1"
+                )
+
+                action_properties_widgets.append(
+                    cw.HBox(
+                        children=[
+                            ipw.HTML(
+                                value="<b>Target substrate:</b>", layout=label_layout
+                            ),
+                            target_substrate_dropdown,
+                        ],
+                        metadata={"property_name": prop},
+                    )
+                )
+
+            elif prop == "SOLUTION":
+                # 1. Existing Setup (Main Dropdown)
+                solution_list = utils.get_openbis_objects(
+                    self.openbis_session, type=prop
+                )
+                solution_options = [("Select a solution...", "-1")] + [
+                    (obj.props["name"], obj.permId) for obj in solution_list
+                ]
+
+                solution_dropdown = ipw.Dropdown(options=solution_options, value="-1")
+
+                add_new_solution_btn = ipw.Button(
+                    icon="plus",
+                    tooltip="Add new solution",
+                    layout=ipw.Layout(width="50px", height="28px"),
+                )
+
+                # 2. Building the "New Solution" Form Elements
+                shared_label_layout = ipw.Layout(
+                    width="160px", margin="0px 10px 0px 0px"
+                )
+                shared_input_layout = ipw.Layout(width="150px")
+
+                # Name Box
+                solution_name_label = ipw.HTML("Name:", layout=shared_label_layout)
+                solution_name_input = ipw.Text(layout=shared_input_layout)
+                name_box = ipw.HBox(
+                    [solution_name_label, solution_name_input],
+                    layout=ipw.Layout(align_items="center"),
+                )
+
+                # Final Concentration Box
+                final_conc_label = ipw.HTML(
+                    "Final Concentration [mol/L]:", layout=shared_label_layout
+                )
+                final_conc_input = ipw.FloatText(layout=shared_input_layout)
+                final_conc_box = ipw.HBox(
+                    [final_conc_label, final_conc_input],
+                    layout=ipw.Layout(align_items="center"),
+                )
+
+                # Table Title
+                table_title = ipw.HTML(
+                    "<b>Solution Elements:</b>",
+                    layout=ipw.Layout(margin="15px 0px 5px 0px"),
+                )
+
+                rows_container = cw.VBox()
+
+                # Fetch chemicals ONCE
+                chemical_collection_path = OPENBIS_COLLECTIONS_PATHS["Chemical"]
+                chemical_objects = utils.get_openbis_objects(
+                    self.openbis_session,
+                    type="SUBSTANCE",
+                    collection=chemical_collection_path,
+                )
+                base_chemical_options = [("Select a chemical...", "-1")] + [
+                    (obj.props["name"], obj.permId) for obj in chemical_objects
+                ]
+
+                def create_row():
+                    """Generates a single row, excluding previously selected chemicals."""
+                    type_label = ipw.HTML(
+                        "Chemical:", layout=ipw.Layout(margin="0px 5px 0px 0px")
+                    )
+                    conc_label = ipw.HTML(
+                        "Initial Concent. [mol/L]:",
+                        layout=ipw.Layout(margin="0px 5px 0px 15px"),
+                    )
+                    amount_label = ipw.HTML(
+                        "Amount:", layout=ipw.Layout(margin="0px 5px 0px 15px")
+                    )
+
+                    # Logic to exclude already selected chemicals
+                    selected_chemicals = set()
+                    for child in rows_container.children:
+                        dropdown = child.children[1]
+                        if dropdown.value != "-1":
+                            selected_chemicals.add(dropdown.value)
+
+                    filtered_options = [
+                        opt
+                        for opt in base_chemical_options
+                        if opt[1] == "-1" or opt[1] not in selected_chemicals
+                    ]
+
+                    component_dropdown = ipw.Dropdown(
+                        options=filtered_options, layout=ipw.Layout(width="190px")
+                    )
+                    init_conc_input = ipw.FloatText(layout=ipw.Layout(width="50px"))
+                    amount_input = ipw.FloatText(layout=ipw.Layout(width="50px"))
+                    unit_dropdown = ipw.Dropdown(
+                        options=["mg", "ml"], layout=ipw.Layout(width="60px")
+                    )
+
+                    return ipw.HBox(
+                        [
+                            type_label,
+                            component_dropdown,
+                            conc_label,
+                            init_conc_input,
+                            amount_label,
+                            amount_input,
+                            unit_dropdown,
+                        ],
+                        layout=ipw.Layout(
+                            margin="0px 0px 5px 0px", align_items="center"
+                        ),
+                    )
+
+                def clear_form():
+                    """Resets the form to its initial empty state."""
+                    solution_name_input.value = ""
+                    final_conc_input.value = 0.0
+                    rows_container.children = []  # Empty it before creating the first row
+                    rows_container.children = [create_row()]
+
+                # Initialize with one empty row
+                clear_form()
+
+                # 3. Form Buttons & Logic
+                add_more_rows_btn = ipw.Button(description="Add More Rows", icon="plus")
+                remove_last_row_btn = ipw.Button(
+                    description="Remove Last Row", icon="minus", button_style="warning"
+                )
+
+                def on_add_more_rows_clicked(b):
+                    if len(rows_container.children) > 0:
+                        last_row = rows_container.children[-1]
+                        last_dropdown = last_row.children[1]
+                        last_init_conc = last_row.children[3]
+                        last_amount = last_row.children[5]
+
+                        if last_dropdown.value == "-1":
+                            return
+
+                        if last_init_conc.value == 0.0 and last_amount.value == 0.0:
+                            return
+
+                    rows_container.children = list(rows_container.children) + [
+                        create_row()
+                    ]
+
+                add_more_rows_btn.on_click(on_add_more_rows_clicked)
+
+                def on_remove_last_row_clicked(b):
+                    """Removes the last row, provided there is more than 1 row remaining."""
+                    if len(rows_container.children) > 1:
+                        rows_container.children = rows_container.children[:-1]
+
+                remove_last_row_btn.on_click(on_remove_last_row_clicked)
+
+                row_controls = ipw.HBox(
+                    [add_more_rows_btn, remove_last_row_btn],
+                    layout=ipw.Layout(margin="5px 0px 10px 0px"),
+                )
+
+                save_solution_btn = ipw.Button(
+                    description="",
+                    disabled=False,
+                    button_style="",
+                    tooltip="Save",
+                    icon="save",
+                    layout=ipw.Layout(width="100px", height="50px"),
+                )
+
+                cancel_btn = ipw.Button(
+                    description="",
+                    disabled=False,
+                    button_style="",
+                    tooltip="Cancel",
+                    icon="times",
+                    layout=ipw.Layout(width="100px", height="50px"),
+                )
+
+                def on_save_solution_clicked(b):
+                    # --- 1. Extract Dictionary Data ---
+                    substances = []
+                    solution_elements = []
+
+                    for row in rows_container.children:
+                        dropdown = row.children[1]
+                        init_conc = row.children[3].value
+                        amount = row.children[5].value
+                        unit = row.children[6].value
+
+                        # Only process rows where a chemical is actually selected
+                        if dropdown.value != "-1":
+                            substances.append(dropdown.value)  # Append the permId
+
+                            # Build the dictionary explicitly defining both unit keys
+                            solution_elements.append(
+                                {
+                                    "Name": dropdown.label,
+                                    "Initial Concentration [mol/L]": init_conc,
+                                    "Amount [mg]": amount if unit == "mg" else None,
+                                    "Amount [ml]": amount if unit == "ml" else None,
+                                }
+                            )
+
+                    solution_data = {
+                        "name": solution_name_input.value,
+                        "final_concentration_mol_l": final_conc_input.value,
+                        "substances": substances,
+                        "solution_elements": solution_elements,
+                    }
+
+                    # Print it out to verify it works perfectly
+                    print(solution_data)
+
+                    # --- 2. Save to UI / OpenBIS ---
+                    new_name = solution_data["name"]
+
+                    # [Insert actual utils.create_openbis_object(...) logic using solution_data here]
+                    new_permId = f"NEW_ID_{new_name.replace(' ', '_').upper()}"
+
+                    current_options = list(solution_dropdown.options)
+                    current_options.append((new_name, new_permId))
+                    solution_dropdown.options = current_options
+                    solution_dropdown.value = new_permId
+
+                    new_solution_form.layout.display = "none"
+                    clear_form()
+
+                save_solution_btn.on_click(on_save_solution_clicked)
+
+                def on_cancel_clicked(b):
+                    new_solution_form.layout.display = "none"
+                    clear_form()
+
+                cancel_btn.on_click(on_cancel_clicked)
+
+                # 4. Compile the Form using cw.VBox
+                new_solution_form = cw.VBox(
+                    children=[
+                        ipw.HTML(
+                            "<b>Create New Solution</b>", layout=shared_label_layout
+                        ),
+                        name_box,
+                        final_conc_box,
+                        table_title,
+                        rows_container,
+                        row_controls,
+                        ipw.HBox(
+                            [save_solution_btn, cancel_btn],
+                            layout=ipw.Layout(margin="10px 0px 0px 0px"),
+                        ),
+                    ],
+                    layout=ipw.Layout(
+                        display="none",
+                        border="solid 1px #ccc",
+                        padding="15px",
+                        margin="10px 0px",
+                    ),
+                )
+
+                # 5. Connect the '+' button and assemble the main layout
+                def on_add_new_solution_clicked(b):
+                    new_solution_form.layout.display = "block"
+
+                add_new_solution_btn.on_click(on_add_new_solution_clicked)
+
+                main_action_row = cw.HBox(
+                    children=[
+                        ipw.HTML(
+                            value="<b>Solution:</b>", layout=label_layout
+                        ),  # Assumes label_layout exists
+                        solution_dropdown,
+                        add_new_solution_btn,
+                    ],
+                    metadata={"property_name": prop},
+                )
+
+                # Append to your global widget list
+                action_properties_widgets.append(main_action_row)
+                action_properties_widgets.append(new_solution_form)
+
             elif (
                 prop_dataType in ["OBJECT", "SAMPLE"]
+                and "SETTINGS" not in prop
                 and f"{prop}_SETTINGS" not in action_properties
             ):
                 if prop != "(All)":
