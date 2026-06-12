@@ -757,7 +757,7 @@ class RegisterPreparationWidget(ipw.VBox):
             new_process_widget.sample_id = sample_identifier
             for action_widget in new_process_widget.actions_accordion.children:
                 for child in action_widget.action_properties_widgets.children:
-                    if child.metadata["property_name"] == "TARGET_SUBSTRATE":
+                    if child.metadata.get("property_name", "") == "TARGET_SUBSTRATE":
                         child.children[
                             1
                         ].options = action_widget.load_target_substrate_options()
@@ -1456,7 +1456,9 @@ class RegisterPreparationWidget(ipw.VBox):
             # Refresh sample dropdown and sample history
             self.select_sample_dropdown.load_samples()
             try:
-                self.select_sample_dropdown.sample_dropdown.value = new_sample.permId
+                self.select_sample_dropdown.sample_dropdown.value = (
+                    current_sample.permId
+                )
                 display(
                     Javascript(
                         data="alert('New process steps registered successfully.')"
@@ -1464,7 +1466,7 @@ class RegisterPreparationWidget(ipw.VBox):
                 )
             except TraitError:
                 logger.info(
-                    f"Sample {new_sample.permId} not found in dropdown options."
+                    f"Sample {current_sample.permId} not found in dropdown options."
                 )
                 self.select_sample_dropdown.sample_dropdown.value = "-1"
 
@@ -2903,45 +2905,71 @@ class RegisterActionWidget(ipw.VBox):
                 )
 
                 def on_save_solution_clicked(b):
-                    # --- 1. Extract Dictionary Data ---
-                    substances = []
-                    solution_elements = []
+                    # --- 1. Filter Valid Rows ---
+                    # Only grab the rows where a chemical has actually been selected
+                    valid_rows = [
+                        row
+                        for row in rows_container.children
+                        if row.children[1].value != "-1"
+                    ]
 
-                    for row in rows_container.children:
+                    # --- 2. Initialize pybis Spreadsheet ---
+                    # Create a spreadsheet with 4 columns and exactly the number of valid rows we need
+                    spreadsheet = self.openbis_session.new_spreadsheet(
+                        columns=4, rows=len(valid_rows)
+                    )
+
+                    # Set the column headers (A, B, C, D are the default alphabetic identifiers)
+                    spreadsheet.column("A").header = "Name"
+                    spreadsheet.column("B").header = "Initial Concentration [mol/L]"
+                    spreadsheet.column("C").header = "Amount [mg]"
+                    spreadsheet.column("D").header = "Amount [ml]"
+
+                    # --- 3. Populate Spreadsheet Data ---
+                    substances = []
+
+                    for idx, row in enumerate(valid_rows):
+                        # pybis spreadsheet rows are 1-indexed, so we add 1 to the loop index
+                        row_num = idx + 1
+
                         dropdown = row.children[1]
                         init_conc = row.children[3].value
                         amount = row.children[5].value
                         unit = row.children[6].value
 
-                        # Only process rows where a chemical is actually selected
-                        if dropdown.value != "-1":
-                            substances.append(dropdown.value)  # Append the permId
+                        # Add permId to our substances list
+                        substances.append(dropdown.value)
 
-                            # Build the dictionary explicitly defining both unit keys
-                            solution_elements.append(
-                                {
-                                    "Name": dropdown.label,
-                                    "Initial Concentration [mol/L]": init_conc,
-                                    "Amount [mg]": amount if unit == "mg" else None,
-                                    "Amount [ml]": amount if unit == "ml" else None,
-                                }
-                            )
+                        # Write values into the cells using the .formula attribute
+                        spreadsheet.cell("Name", row_num).formula = dropdown.label
+                        spreadsheet.cell(
+                            "Initial Concentration [mol/L]", row_num
+                        ).formula = init_conc
+                        spreadsheet.cell("Amount [mg]", row_num).formula = (
+                            amount if unit == "mg" else ""
+                        )
+                        spreadsheet.cell("Amount [ml]", row_num).formula = (
+                            amount if unit == "ml" else ""
+                        )
 
+                    # --- 4. Build Final Payload ---
                     solution_data = {
                         "name": solution_name_input.value,
                         "final_concentration_mol_l": final_conc_input.value,
                         "substances": substances,
-                        "solution_elements": solution_elements,
+                        "solution_elements": spreadsheet,  # Pass the native pybis object directly!
                     }
 
-                    # Print it out to verify it works perfectly
-                    print(solution_data)
-
-                    # --- 2. Save to UI / OpenBIS ---
+                    # --- 5. Save to UI / openBIS ---
                     new_name = solution_data["name"]
 
-                    # [Insert actual utils.create_openbis_object(...) logic using solution_data here]
-                    new_permId = f"NEW_ID_{new_name.replace(' ', '_').upper()}"
+                    solution_obj = utils.create_openbis_object(
+                        self.openbis_session,
+                        type="SOLUTION",
+                        props=solution_data,
+                        collection=OPENBIS_COLLECTIONS_PATHS["Solution"],
+                    )
+                    new_permId = solution_obj.permId
 
                     current_options = list(solution_dropdown.options)
                     current_options.append((new_name, new_permId))
@@ -2981,6 +3009,7 @@ class RegisterActionWidget(ipw.VBox):
                         padding="15px",
                         margin="10px 0px",
                     ),
+                    metadata={},
                 )
 
                 # 5. Connect the '+' button and assemble the main layout
