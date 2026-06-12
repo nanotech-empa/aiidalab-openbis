@@ -14,9 +14,11 @@ from traitlets import TraitError
 import custom_widgets as cw
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
-ACTIONS_TYPES, ACTIONS_CODES = (
+
+ACTIONS_TYPES, ACTIONS_CODES, ACTIONS_USE_INSTRUMENT = (
     INTERFACE_CONFIG_INFO["actions_types"],
     INTERFACE_CONFIG_INFO["actions_types_codes"],
+    INTERFACE_CONFIG_INFO["actions_use_instrument"],
 )
 OPENBIS_OBJECT_TYPES, OPENBIS_OBJECT_CODES = (
     INTERFACE_CONFIG_INFO["object_types"],
@@ -1316,7 +1318,7 @@ class RegisterPreparationWidget(ipw.VBox):
                     new_process_object.props = process_properties
                     instrument_permid = process_widget.instrument_dropdown.value
 
-                    if instrument_permid != "-1":
+                    if instrument_permid not in ["-1", "No instrument"]:
                         new_process_object_parents.append(instrument_permid)
 
                     new_process_object.add_parents(new_process_object_parents)
@@ -1879,7 +1881,7 @@ class RegisterProcessWidget(ipw.VBox):
                     }
 
                     new_process_step_parents = []
-                    if process_step_instrument != "-1":
+                    if process_step_instrument not in ["-1", "No instrument"]:
                         new_process_step_parents.append(process_step_instrument)
 
                     new_process_step_object = utils.create_openbis_object(
@@ -1982,6 +1984,7 @@ class RegisterProcessStepWidget(ipw.VBox):
             (obj.props["name"], obj.permId) for obj in instrument_objects
         ]
         instrument_options.insert(0, ("Select an instrument...", "-1"))
+        instrument_options.insert(1, ("No instrument", "No instrument"))
         self.instrument_dropdown = ipw.Dropdown(options=instrument_options, value="-1")
         self.instrument_hbox = ipw.HBox(
             children=[self.instrument_label, self.instrument_dropdown]
@@ -2070,53 +2073,63 @@ class RegisterProcessStepWidget(ipw.VBox):
             ]
 
     def load_instrument_actions(self, change):
+        global INSTRUMENTS_COMPONENTS
+        global INSTRUMENTS_ACTIONS
+
         instrument_permid = change["new"]
 
         if instrument_permid == "-1":
             return
-
-        global INSTRUMENTS_COMPONENTS
-        global INSTRUMENTS_ACTIONS
-
-        # 2. Simplify Component Caching
-        if instrument_permid not in INSTRUMENTS_COMPONENTS:
-            raw_components = utils.find_instrument_components(
-                self.openbis_session, instrument_permid
-            )
-            INSTRUMENTS_COMPONENTS[instrument_permid] = {
-                k: list(v) for k, v in raw_components.items()
-            }
-
-        instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
-
-        # 3. Simplify Action Lookup
-        if instrument_permid not in INSTRUMENTS_ACTIONS:
+        elif instrument_permid == "No instrument":
             instrument_actions = []
+            for action_type, action_use_instrument in ACTIONS_USE_INSTRUMENT.items():
+                if not action_use_instrument:
+                    for action_label, action_code in ACTIONS_TYPES.items():
+                        if action_label == action_type:
+                            instrument_actions.append((action_label, action_code))
 
-            for action_label, action_type in ACTIONS_TYPES.items():
-                obj_type_props = (
-                    utils.get_openbis_object_type(
-                        self.openbis_session, type=action_type
-                    )
-                    .get_property_assignments()
-                    .df.code.values
-                )
-
-                for prop in obj_type_props:
-                    prop_type = utils.get_openbis_property_type(
-                        self.openbis_session, code=prop
-                    )
-
-                    # Combine the type check and component match into one statement
-                    if (
-                        prop_type.dataType in ["SAMPLE", "OBJECT"]
-                        and str(prop_type.sampleType) in instrument_components
-                    ):
-                        instrument_actions.append((action_label, action_type))
-                        break
-
-            instrument_actions.insert(0, ("Action", "ACTION"))
             INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
+
+        else:
+            # 2. Simplify Component Caching
+            if instrument_permid not in INSTRUMENTS_COMPONENTS:
+                raw_components = utils.find_instrument_components(
+                    self.openbis_session, instrument_permid
+                )
+                INSTRUMENTS_COMPONENTS[instrument_permid] = {
+                    k: list(v) for k, v in raw_components.items()
+                }
+
+            instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
+
+            # 3. Simplify Action Lookup
+            if instrument_permid not in INSTRUMENTS_ACTIONS:
+                instrument_actions = []
+
+                for action_label, action_type in ACTIONS_TYPES.items():
+                    obj_type_props = (
+                        utils.get_openbis_object_type(
+                            self.openbis_session, type=action_type
+                        )
+                        .get_property_assignments()
+                        .df.code.values
+                    )
+
+                    for prop in obj_type_props:
+                        prop_type = utils.get_openbis_property_type(
+                            self.openbis_session, code=prop
+                        )
+
+                        # Combine the type check and component match into one statement
+                        if (
+                            prop_type.dataType in ["SAMPLE", "OBJECT"]
+                            and str(prop_type.sampleType) in instrument_components
+                        ):
+                            instrument_actions.append((action_label, action_type))
+                            break
+
+                instrument_actions.insert(0, ("Action", "ACTION"))
+                INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
 
     def load_process_step(self, process_step):
         """
@@ -2227,7 +2240,10 @@ class RegisterActionWidget(ipw.VBox):
 
         global INSTRUMENTS_COMPONENTS
 
-        if instrument_permid not in INSTRUMENTS_COMPONENTS:
+        if instrument_permid == "No instrument":
+            self.instrument_components = {instrument_permid: []}
+
+        elif instrument_permid not in INSTRUMENTS_COMPONENTS:
             self.instrument_components = utils.find_instrument_components(
                 self.openbis_session, instrument_permid
             )
@@ -2619,9 +2635,7 @@ class RegisterActionWidget(ipw.VBox):
                 action_properties_widgets.append(substance_widgets)
 
             elif prop == "GAS_BOTTLE":
-                gas_list = utils.get_openbis_objects(
-                    self.openbis_session, type=OPENBIS_OBJECT_TYPES["Gas Bottle"]
-                )
+                gas_list = utils.get_openbis_objects(self.openbis_session, type=prop)
                 gas_options = [("Select a dosing gas...", "-1")] + [
                     (obj.props["name"], obj.permId) for obj in gas_list
                 ]
@@ -2635,10 +2649,30 @@ class RegisterActionWidget(ipw.VBox):
                     )
                 )
 
-            else:
-                if prop_dataType not in widget_type_map:
-                    continue
+            elif (
+                prop_dataType in ["OBJECT", "SAMPLE"]
+                and f"{prop}_SETTINGS" not in action_properties
+            ):
+                if prop != "(All)":
+                    obj_list = utils.get_openbis_objects(
+                        self.openbis_session, type=prop
+                    )
+                    obj_options = [("Select an option...", "-1")] + [
+                        (obj.props["name"], obj.permId) for obj in obj_list
+                    ]
+                    action_properties_widgets.append(
+                        cw.HBox(
+                            children=[
+                                ipw.HTML(
+                                    value=f"<b>{prop_label}:</b>", layout=label_layout
+                                ),
+                                ipw.Dropdown(options=obj_options, value="-1"),
+                            ],
+                            metadata={"property_name": prop},
+                        )
+                    )
 
+            elif prop_dataType in widget_type_map:
                 prop_value_widget = widget_type_map[prop_dataType]()
                 if prop == "NAME":
                     prop_value_widget.observe(self.change_action_title, names="value")
@@ -3020,7 +3054,11 @@ class RegisterObservableWidget(ipw.VBox):
 
         global INSTRUMENTS_COMPONENTS
 
-        if instrument_permid not in INSTRUMENTS_COMPONENTS:
+        if instrument_permid == "No instrument":
+            self.instrument_components = {instrument_permid: []}
+            pass
+
+        elif instrument_permid not in INSTRUMENTS_COMPONENTS:
             self.instrument_components = utils.find_instrument_components(
                 self.openbis_session, instrument_permid
             )
