@@ -758,10 +758,15 @@ class RegisterPreparationWidget(ipw.VBox):
             for action_widget in new_process_widget.actions_accordion.children:
                 for child in action_widget.action_properties_widgets.children:
                     if child.metadata.get("property_name", "") == "TARGET_SUBSTRATE":
+                        current_target_substrate_value = child.children[1].value
                         child.children[
                             1
                         ].options = action_widget.load_target_substrate_options()
-                        child.children[1].value = "-1"
+
+                        if current_target_substrate_value == sample_identifier:
+                            child.children[1].value = "-1"
+                        else:
+                            child.children[1].value = current_target_substrate_value
 
     def add_process_step(self, b):
         processes_accordion_children = list(self.new_processes_accordion.children)
@@ -770,6 +775,7 @@ class RegisterPreparationWidget(ipw.VBox):
             self.openbis_session,
             self.new_processes_accordion,
             process_step_index,
+            preparation_widget=self,
             sample_id=self.select_sample_dropdown.sample_dropdown.value,
         )
         processes_accordion_children.append(new_process_step_widget)
@@ -825,6 +831,7 @@ class RegisterPreparationWidget(ipw.VBox):
                         self.openbis_session,
                         self.new_processes_accordion,
                         process_step_index,
+                        preparation_widget=self,
                         sample_id=self.select_sample_dropdown.sample_dropdown.value,
                         process_step=process_step,
                     )
@@ -1989,6 +1996,7 @@ class RegisterProcessStepWidget(ipw.VBox):
         openbis_session,
         processes_accordion,
         process_step_index,
+        preparation_widget=None,
         sample_id=None,
         process_step=None,
         allow_observables=True,
@@ -1997,6 +2005,7 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.processes_accordion = processes_accordion
         self.process_step_index = process_step_index
+        self.preparation_widget = preparation_widget
         self.sample_id = sample_id if sample_id != "-1" else None
 
         label_layout = ipw.Layout(width="100px")
@@ -2189,6 +2198,12 @@ class RegisterProcessStepWidget(ipw.VBox):
 
         actions_list = process_step.props["actions"]
         for action_id in actions_list:
+            if self.instrument_dropdown.value == "-1":
+                self.instrument_dropdown.value = "No instrument"
+                logger.info(
+                    "Instrument not found for action. Defaulting to 'No instrument'."
+                )
+
             action_object = utils.get_openbis_object(
                 self.openbis_session, sample_ident=action_id
             )
@@ -2466,6 +2481,17 @@ class RegisterActionWidget(ipw.VBox):
                                 widget.children[5].value = minutes
                                 widget.children[7].value = seconds
 
+                        elif prop in ["TARGET_SUBSTRATE"]:
+                            current_sample_id = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value
+                            if current_sample_id == prop_value:
+                                display(
+                                    Javascript(
+                                        data="alert('The target substrate could not be loaded because it is the same as the selected sample. Please select a different sample and reload the process.')"
+                                    )
+                                )
+                            else:
+                                widget.children[1].value = prop_value or "-1"
+
                         elif (
                             prop_dataType in ["SAMPLE", "OBJECT"]
                             and not widget.metadata["property_name"] == "COMPONENT"
@@ -2716,6 +2742,36 @@ class RegisterActionWidget(ipw.VBox):
                 target_substrate_dropdown = ipw.Dropdown(
                     options=target_substrate_options, value="-1"
                 )
+
+                self.all_sample_options = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options
+
+                def update_sample_dropdown(change):
+                    selected_target = change["new"]
+
+                    # Create a new list of options, omitting the one that was just selected
+                    filtered_options = [
+                        (key, value)
+                        for key, value in self.all_sample_options
+                        if value != selected_target
+                    ]
+
+                    current_sample_id = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value
+
+                    # Apply the filtered options to the sample dropdown
+                    self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options = filtered_options
+
+                    if current_sample_id == selected_target:
+                        self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value = "-1"
+                        display(
+                            Javascript(
+                                data="alert('Reset sample selection because it is being used as a target substrate. Please select a sample again.')"
+                            )
+                        )
+                    else:
+                        self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value = current_sample_id
+
+                # 4. Bind the callback to the target dropdown's 'value' trait
+                target_substrate_dropdown.observe(update_sample_dropdown, names="value")
 
                 action_properties_widgets.append(
                     cw.HBox(
