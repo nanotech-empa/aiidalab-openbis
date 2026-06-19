@@ -762,7 +762,6 @@ class RegisterPreparationWidget(ipw.VBox):
                         child.children[
                             1
                         ].options = action_widget.load_target_substrate_options()
-
                         if current_target_substrate_value == sample_identifier:
                             child.children[1].value = "-1"
                         else:
@@ -2752,7 +2751,7 @@ class RegisterActionWidget(ipw.VBox):
                     filtered_options = [
                         (key, value)
                         for key, value in self.all_sample_options
-                        if value != selected_target
+                        if value != selected_target or selected_target == "-1"
                     ]
 
                     current_sample_id = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value
@@ -3454,13 +3453,18 @@ class RegisterActionWidget(ipw.VBox):
                     )
 
         children = list(self.actions_accordion.children)
-        children.pop(self.action_index)
+        action_widgets = children.pop(self.action_index)
+
+        # Update the sample dropdown after getting the target substrate dropdown free
+        for widget in action_widgets.action_properties_widgets.children:
+            if widget.metadata.get("property_name", "") == "TARGET_SUBSTRATE":
+                widget.children[1].value = "-1"
+                break
 
         for i in range(self.action_index, len(children)):
             children[i].action_index = i
 
         self.actions_accordion.children = children
-
         for i, action in enumerate(children):
             action_name = ""
             if self.action_properties_widgets.children:
