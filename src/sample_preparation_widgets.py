@@ -1012,15 +1012,17 @@ class RegisterPreparationWidget(ipw.VBox):
 
                                                 # If sample is being used as a property of an action, we set it to INACTIVE to indicate it was consumed in the process (e.g. used as a target substrate)
                                                 if selected_obj.type.code == "SAMPLE":
-                                                    selected_obj["object_status"] = (
-                                                        "INACTIVE"
-                                                    )
+                                                    selected_obj.props[
+                                                        "object_status"
+                                                    ] = "INACTIVE"
                                                     utils.update_openbis_object(
                                                         selected_obj
                                                     )
 
                                                     def revert_sample(obj=selected_obj):
-                                                        obj["object_status"] = "ACTIVE"
+                                                        obj.props["object_status"] = (
+                                                            "ACTIVE"
+                                                        )
                                                         utils.update_openbis_object(obj)
 
                                                     undo_stack.append(revert_sample)
