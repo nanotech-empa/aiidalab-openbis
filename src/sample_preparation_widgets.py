@@ -15,10 +15,9 @@ import custom_widgets as cw
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 
-ACTIONS_TYPES, ACTIONS_CODES, ACTIONS_USE_INSTRUMENT = (
+ACTIONS_TYPES, ACTIONS_CODES = (
     INTERFACE_CONFIG_INFO["actions_types"],
     INTERFACE_CONFIG_INFO["actions_types_codes"],
-    INTERFACE_CONFIG_INFO["actions_use_instrument"],
 )
 OPENBIS_OBJECT_TYPES, OPENBIS_OBJECT_CODES = (
     INTERFACE_CONFIG_INFO["object_types"],
@@ -1361,7 +1360,7 @@ class RegisterPreparationWidget(ipw.VBox):
                     new_process_object.props = process_properties
                     instrument_permid = process_widget.instrument_dropdown.value
 
-                    if instrument_permid not in ["-1", "No instrument"]:
+                    if instrument_permid != "-1":
                         new_process_object_parents.append(instrument_permid)
 
                     new_process_object.add_parents(new_process_object_parents)
@@ -1926,7 +1925,7 @@ class RegisterProcessWidget(ipw.VBox):
                     }
 
                     new_process_step_parents = []
-                    if process_step_instrument not in ["-1", "No instrument"]:
+                    if process_step_instrument != "-1":
                         new_process_step_parents.append(process_step_instrument)
 
                     new_process_step_object = utils.create_openbis_object(
@@ -2018,7 +2017,9 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.description_label = ipw.HTML(
             value="<b>Description:</b>", layout=label_layout
         )
-        self.description_textbox = ipw.Text()
+        self.description_textbox = ipw.Text(
+            placeholder="Write relevant information for the process step..."
+        )
         self.description_hbox = ipw.HBox(
             children=[self.description_label, self.description_textbox]
         )
@@ -2033,14 +2034,15 @@ class RegisterProcessStepWidget(ipw.VBox):
             (obj.props["name"], obj.permId) for obj in instrument_objects
         ]
         instrument_options.insert(0, ("Select an instrument...", "-1"))
-        instrument_options.insert(1, ("No instrument", "No instrument"))
         self.instrument_dropdown = ipw.Dropdown(options=instrument_options, value="-1")
         self.instrument_hbox = ipw.HBox(
             children=[self.instrument_label, self.instrument_dropdown]
         )
 
         self.comments_label = ipw.HTML(value="<b>Comments:</b>", layout=label_layout)
-        self.comments_textarea = ipw.Textarea()
+        self.comments_textarea = ipw.Textarea(
+            placeholder="Write other observations, e.g. errors while doing the process step..."
+        )
         self.comments_hbox = ipw.HBox(
             children=[self.comments_label, self.comments_textarea]
         )
@@ -2129,16 +2131,6 @@ class RegisterProcessStepWidget(ipw.VBox):
 
         if instrument_permid == "-1":
             return
-        elif instrument_permid == "No instrument":
-            instrument_actions = []
-            for action_type, action_use_instrument in ACTIONS_USE_INSTRUMENT.items():
-                if not action_use_instrument:
-                    for action_label, action_code in ACTIONS_TYPES.items():
-                        if action_label == action_type:
-                            instrument_actions.append((action_label, action_code))
-
-            INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
-
         else:
             # 2. Simplify Component Caching
             if instrument_permid not in INSTRUMENTS_COMPONENTS:
@@ -2154,7 +2146,6 @@ class RegisterProcessStepWidget(ipw.VBox):
             # 3. Simplify Action Lookup
             if instrument_permid not in INSTRUMENTS_ACTIONS:
                 instrument_actions = []
-
                 for action_label, action_type in ACTIONS_TYPES.items():
                     obj_type_props = (
                         utils.get_openbis_object_type(
@@ -2176,6 +2167,18 @@ class RegisterProcessStepWidget(ipw.VBox):
                         ):
                             instrument_actions.append((action_label, action_type))
                             break
+
+                    obj_type = utils.get_openbis_object_type(
+                        self.openbis_session, type=action_type
+                    )
+                    requires_component = obj_type.metaData.get(
+                        "requires_component", "True"
+                    )
+                    if (
+                        requires_component == "False"
+                        and "BY_HAND" in instrument_components
+                    ):
+                        instrument_actions.append((action_label, action_type))
 
                 instrument_actions.insert(0, ("Action", "ACTION"))
                 INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
@@ -2199,12 +2202,6 @@ class RegisterProcessStepWidget(ipw.VBox):
 
         actions_list = process_step.props["actions"]
         for action_id in actions_list:
-            if self.instrument_dropdown.value == "-1":
-                self.instrument_dropdown.value = "No instrument"
-                logger.info(
-                    "Instrument not found for action. Defaulting to 'No instrument'."
-                )
-
             action_object = utils.get_openbis_object(
                 self.openbis_session, sample_ident=action_id
             )
@@ -2295,10 +2292,7 @@ class RegisterActionWidget(ipw.VBox):
 
         global INSTRUMENTS_COMPONENTS
 
-        if instrument_permid == "No instrument":
-            self.instrument_components = {instrument_permid: []}
-
-        elif instrument_permid not in INSTRUMENTS_COMPONENTS:
+        if instrument_permid not in INSTRUMENTS_COMPONENTS:
             self.instrument_components = utils.find_instrument_components(
                 self.openbis_session, instrument_permid
             )
@@ -3120,6 +3114,12 @@ class RegisterActionWidget(ipw.VBox):
                     prop_value_widget.observe(self.change_action_title, names="value")
                     default_action_name = action_type.replace("_", " ").title()
                     prop_value_widget.value = f"{self.action_icon} {default_action_name} {self.action_index + 1}"
+                elif prop == "DESCRIPTION":
+                    prop_value_widget.placeholder = (
+                        "Write relevant information for the action..."
+                    )
+                elif prop == "COMMENTS":
+                    prop_value_widget.placeholder = "Write other observations, e.g. errors while doing the action..."
 
                 action_properties_widgets.append(
                     cw.HBox(
@@ -3501,11 +3501,7 @@ class RegisterObservableWidget(ipw.VBox):
 
         global INSTRUMENTS_COMPONENTS
 
-        if instrument_permid == "No instrument":
-            self.instrument_components = {instrument_permid: []}
-            pass
-
-        elif instrument_permid not in INSTRUMENTS_COMPONENTS:
+        if instrument_permid not in INSTRUMENTS_COMPONENTS:
             self.instrument_components = utils.find_instrument_components(
                 self.openbis_session, instrument_permid
             )

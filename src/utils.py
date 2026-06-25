@@ -52,11 +52,6 @@ def get_interface_config_info():
         if meta:
             meta_type = meta.get("type")
             meta_icon = meta.get("icon", "")
-            meta_use_instrument = meta.get("use_instrument", True) not in (
-                "False",
-                "false",
-                False,
-            )
             if meta_type == "slab":
                 info["slabs_types"][desc_str] = code_str
                 info["slabs_types_codes"][desc_str] = prefix_str
@@ -67,7 +62,6 @@ def get_interface_config_info():
                 info["actions_types"][desc_str] = code_str
                 info["actions_types_codes"][desc_str] = prefix_str
                 info["actions_types_icons"][code_str] = meta_icon
-                info["actions_use_instrument"][desc_str] = meta_use_instrument
             elif meta_type == "instrument":
                 info["instruments_types"][desc_str] = code_str
 
