@@ -754,6 +754,8 @@ class RegisterPreparationWidget(ipw.VBox):
         # Update sample_id in new_process_widgets and update target substrate options in action properties widgets
         for new_process_widget in self.new_processes_accordion.children:
             new_process_widget.sample_id = sample_identifier
+            # new_process_widget.sample_name = sample_object.props["name"]
+            # new_process_widget.sample_out_name_textbox.value = new_process_widget.sample_name
             for action_widget in new_process_widget.actions_accordion.children:
                 for child in action_widget.action_properties_widgets.children:
                     if child.metadata.get("property_name", "") == "TARGET_SUBSTRATE":
@@ -765,6 +767,14 @@ class RegisterPreparationWidget(ipw.VBox):
                             child.children[1].value = "-1"
                         else:
                             child.children[1].value = current_target_substrate_value
+
+                    elif child.metadata.get("property_name", "") == "STAMP":
+                        current_stamp_value = child.children[1].value
+                        child.children[1].options = action_widget.load_stamp_options()
+                        if current_stamp_value == sample_identifier:
+                            child.children[1].value = "-1"
+                        else:
+                            child.children[1].value = current_stamp_value
 
     def add_process_step(self, b):
         processes_accordion_children = list(self.new_processes_accordion.children)
@@ -814,31 +824,42 @@ class RegisterPreparationWidget(ipw.VBox):
             process_object = utils.get_openbis_object(
                 self.openbis_session, sample_ident=process_id
             )
+            process_name = process_object.props["name"]
             process_step_list = process_object.props["process_steps"]
             self.process_short_name = process_object.props["short_name"] or ""
             if process_step_list:
-                for process_step_id in process_step_list:
-                    process_step = utils.get_openbis_object(
-                        self.openbis_session, sample_ident=process_step_id
+                try:
+                    for process_step_id in process_step_list:
+                        process_step = utils.get_openbis_object(
+                            self.openbis_session, sample_ident=process_step_id
+                        )
+                        processes_accordion_children = list(
+                            self.new_processes_accordion.children
+                        )
+                        process_step_index = len(processes_accordion_children)
+                        new_process_step_widget = RegisterProcessStepWidget(
+                            self.openbis_session,
+                            self.new_processes_accordion,
+                            process_step_index,
+                            preparation_widget=self,
+                            sample_id=self.select_sample_dropdown.sample_dropdown.value,
+                            process_step=process_step,
+                        )
+                        processes_accordion_children.append(new_process_step_widget)
+                        self.new_processes_accordion.children = (
+                            processes_accordion_children
+                        )
+                except Exception:
+                    display(
+                        Javascript(
+                            data=f"alert('Error loading process {process_name}. Please verify that the process is correctly defined in openBIS.')"
+                        )
                     )
-                    processes_accordion_children = list(
-                        self.new_processes_accordion.children
-                    )
-                    process_step_index = len(processes_accordion_children)
-                    new_process_step_widget = RegisterProcessStepWidget(
-                        self.openbis_session,
-                        self.new_processes_accordion,
-                        process_step_index,
-                        preparation_widget=self,
-                        sample_id=self.select_sample_dropdown.sample_dropdown.value,
-                        process_step=process_step,
-                    )
-                    processes_accordion_children.append(new_process_step_widget)
-                    self.new_processes_accordion.children = processes_accordion_children
 
             self.load_processes_hbox.children = []
 
             self.children = [
+                self.notes,
                 self.select_experiment_title,
                 self.select_experiment_dropdown,
                 self.select_sample_title,
@@ -851,6 +872,33 @@ class RegisterPreparationWidget(ipw.VBox):
                 self.process_buttons_hbox,
                 self.save_button,
             ]
+
+    def _get_preparation_parent(self, sample_parents):
+        """Finds the most recent Process Step parent, then returns its Preparation parent."""
+        most_recent_step = None
+
+        # 1. Find the most recent 'Process Step' parent
+        for parent_id in sample_parents:
+            parent_obj = utils.get_openbis_object(
+                self.openbis_session, sample_ident=parent_id
+            )
+            if parent_obj.type == OPENBIS_OBJECT_TYPES["Process Step"]:
+                if (
+                    not most_recent_step
+                    or parent_obj.registrationDate > most_recent_step.registrationDate
+                ):
+                    most_recent_step = parent_obj
+
+        # 2. Find the 'Preparation' parent of that Process Step
+        if most_recent_step:
+            for parent_id in most_recent_step.parents:
+                parent_obj = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=parent_id
+                )
+                if parent_obj.type == OPENBIS_OBJECT_TYPES["Preparation"]:
+                    return parent_obj
+
+        return None
 
     def save_process_steps(self, b):
         experiment_id = self.select_experiment_dropdown.experiment_dropdown.value
@@ -870,6 +918,35 @@ class RegisterPreparationWidget(ipw.VBox):
         process_steps_widgets = self.new_processes_accordion.children
 
         if process_steps_widgets:
+            # Verify if the user forgot to select samples in actions that require them
+            for process_widget in process_steps_widgets:
+                process_step_name = process_widget.name_textbox.value
+                actions_widgets = process_widget.actions_accordion.children
+                for action_widget in actions_widgets:
+                    action_properties_widgets = (
+                        action_widget.action_properties_widgets.children
+                    )
+
+                    for widget in action_properties_widgets:
+                        if "property_name" in widget.metadata:
+                            prop_name = widget.metadata["property_name"]
+                            if prop_name == "TARGET_SUBSTRATE":
+                                if widget.children[1].value == "-1":
+                                    display(
+                                        Javascript(
+                                            data=f"alert('Select a target substrate in process step {process_step_name}.')"
+                                        )
+                                    )
+                                    return
+                            elif prop_name == "STAMP":
+                                if widget.children[1].value == "-1":
+                                    display(
+                                        Javascript(
+                                            data=f"alert('Select a stamp in process step {process_step_name}.')"
+                                        )
+                                    )
+                                    return
+
             undo_stack = []
             try:
                 experiment_object = utils.get_openbis_collection(
@@ -1421,6 +1498,181 @@ class RegisterPreparationWidget(ipw.VBox):
                     undo_stack.append(
                         lambda obj=new_sample: utils.delete_openbis_object(obj)
                     )
+
+                    for action in actions:
+                        action_object = utils.get_openbis_object(
+                            self.openbis_session, sample_ident=action
+                        )
+
+                        # Early exit to avoid deep nesting
+                        if str(action_object.type.code) != "MECHANICAL_PRESSING":
+                            continue
+
+                        stamp_id = action_object.props.get("stamp")
+                        stamp_object = utils.get_openbis_object(
+                            self.openbis_session, sample_ident=stamp_id
+                        )
+
+                        parallel_sample_object = None
+                        preparation_object = None
+
+                        # --- Branch 1: Handle Existing Sample ---
+                        if stamp_object.type.code == "SAMPLE":
+                            parallel_sample_object = stamp_object
+                            original_props = parallel_sample_object.props.copy()
+
+                            parallel_sample_object.props["object_status"] = "INACTIVE"
+                            utils.update_openbis_object(parallel_sample_object)
+
+                            # Undo logic for reverting the sample
+                            def revert_sample(
+                                c=parallel_sample_object, old_p=original_props
+                            ):
+                                for k, v in old_p.items():
+                                    c.props[k] = v if v is not None else ""
+                                utils.update_openbis_object(c)
+
+                            undo_stack.append(revert_sample)
+
+                            # Use the helper function to find the preparation object
+                            preparation_object = self._get_preparation_parent(
+                                parallel_sample_object.parents
+                            )
+
+                        # --- Branch 2: Handle Non-Sample (Create New) ---
+                        else:
+                            current_time_str = utils.convert_datetime_to_string(
+                                utils.get_current_datetime()
+                            )
+                            parallel_sample_object = utils.create_openbis_object(
+                                self.openbis_session,
+                                type=OPENBIS_OBJECT_TYPES["Sample"],
+                                experiment=OPENBIS_COLLECTIONS_PATHS["Sample"],
+                                parents=[stamp_object],
+                                props={
+                                    "name": f"{current_time_str}_{stamp_object.props['name']}",
+                                    "object_status": "INACTIVE",
+                                },
+                            )
+                            undo_stack.append(
+                                lambda obj=parallel_sample_object: utils.delete_openbis_object(
+                                    obj
+                                )
+                            )
+
+                        # --- Common Logic: Create Preparation if Missing ---
+                        if not preparation_object:
+                            preparation_object = utils.create_openbis_object(
+                                self.openbis_session,
+                                type=OPENBIS_OBJECT_TYPES["Preparation"],
+                                experiment=experiment_object.identifier,
+                                props={
+                                    "name": f"PREP_{parallel_sample_object.props['name']}:{process_code}"
+                                },
+                            )
+                            undo_stack.append(
+                                lambda obj=preparation_object: utils.delete_openbis_object(
+                                    obj
+                                )
+                            )
+                        else:
+                            original_preparation_object_props = (
+                                preparation_object.props().copy()
+                            )
+                            preparation_object.props["name"] = (
+                                preparation_object.props["name"] + f"_{process_code}"
+                            )
+                            utils.update_openbis_object(preparation_object)
+
+                            # Undo logic for reverting the sample
+                            def revert_sample(
+                                c=preparation_object,
+                                old_p=original_preparation_object_props,
+                            ):
+                                for k, v in old_p.items():
+                                    c.props[k] = v if v is not None else ""
+                                utils.update_openbis_object(c)
+
+                            undo_stack.append(revert_sample)
+
+                        # --- FIX: Deep copy the actions list to prevent mutating original data ---
+                        parallel_process_properties = process_properties.copy()
+                        parallel_process_properties["actions"] = process_properties[
+                            "actions"
+                        ].copy()
+
+                        # Find and duplicate the parallel action
+                        for p_action in parallel_process_properties["actions"]:
+                            p_action_obj = utils.get_openbis_object(
+                                self.openbis_session, sample_ident=p_action
+                            )
+
+                            if str(p_action_obj.type.code) == "MECHANICAL_PRESSING":
+                                new_p_action_props = p_action_obj.props().copy()
+                                new_p_action_props["stamp"] = current_sample.permId
+
+                                new_p_action_obj = utils.create_openbis_object(
+                                    self.openbis_session,
+                                    type=str(p_action_obj.type.code),
+                                    experiment=f"{experiment_project_code}/{action_collection_code}",
+                                    props=new_p_action_props,
+                                )
+                                undo_stack.append(
+                                    lambda obj=new_p_action_obj: utils.delete_openbis_object(
+                                        obj
+                                    )
+                                )
+
+                                # Update the list safely
+                                parallel_process_properties["actions"].remove(p_action)
+                                parallel_process_properties["actions"].append(
+                                    new_p_action_obj.permId
+                                )
+                                break
+
+                        # --- Create Process Step ---
+                        new_step_object = utils.create_openbis_object(
+                            self.openbis_session,
+                            type=process_step_type,
+                            experiment=experiment_object.identifier,
+                            parents=[preparation_object, parallel_sample_object],
+                            props=parallel_process_properties,
+                        )
+
+                        if observables_widgets:
+                            utils.upload_datasets(
+                                self.openbis_session,
+                                new_step_object,
+                                observable_widget.upload_readings_widget,
+                                props=observable_properties_values,
+                                dataset_type="OBSERVABLE",
+                            )
+
+                        undo_stack.append(
+                            lambda obj=new_step_object: utils.delete_openbis_object(obj)
+                        )
+
+                        # --- Create New Active Sample ---
+                        new_parallel_sample_name = (
+                            f"{parallel_sample_object.props['name']}:{process_code}"
+                        )
+                        new_parallel_sample = utils.create_openbis_object(
+                            self.openbis_session,
+                            type=sample_type,
+                            experiment=OPENBIS_COLLECTIONS_PATHS["Sample"],
+                            parents=[new_step_object],
+                            props={
+                                "name": new_parallel_sample_name,
+                                "object_status": "ACTIVE",
+                            },
+                        )
+                        undo_stack.append(
+                            lambda obj=new_parallel_sample: utils.delete_openbis_object(
+                                obj
+                            )
+                        )
+
+                    # Existing logic from the bottom of your loop
                     current_sample = new_sample
 
             except Exception as e:
@@ -2009,16 +2261,42 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.sample_id = sample_id if sample_id != "-1" else None
 
         label_layout = ipw.Layout(width="100px")
+        box_layout = ipw.Layout(width="450px")
+        # header_style = "font-weight: bold; font-size: 14px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
+
+        # # If this step is created from save process template side, we don't have a sample yet, so we don't need to show the sample name box.
+        # self.sample_name = ""
+        # if self.sample_id != "No sample" and self.sample_id:
+        #     self.sample_name = utils.get_openbis_object(self.openbis_session, sample_ident=self.sample_id).props.get("name")
+
+        # self.sample_out_name_label = ipw.HTML(value="<b>Name:</b>", layout=label_layout)
+        # self.sample_out_name_textbox = ipw.Text(
+        #     value = self.sample_name,
+        #     placeholder = "Write the name of the sample that will be generated by this process step...",
+        #     layout=box_layout
+        # )
+        # self.sample_out_name_hbox = ipw.HBox(children=[self.sample_out_name_label, self.sample_out_name_textbox])
+
+        # self.new_sample_title = ipw.HTML(
+        #     f"<div style='{header_style}'>Sample properties</div>"
+        # )
+
+        # self.new_process_step_title = ipw.HTML(
+        #     f"<div style='{header_style}'>Process step properties</div>"
+        # )
 
         self.name_label = ipw.HTML(value="<b>Name:</b>", layout=label_layout)
-        self.name_textbox = ipw.Text()
+        self.name_textbox = ipw.Text(
+            placeholder="Write the name of the process step...", layout=box_layout
+        )
         self.name_hbox = ipw.HBox(children=[self.name_label, self.name_textbox])
 
         self.description_label = ipw.HTML(
             value="<b>Description:</b>", layout=label_layout
         )
         self.description_textbox = ipw.Text(
-            placeholder="Write relevant information for the process step..."
+            placeholder="Write relevant information for the process step...",
+            layout=box_layout,
         )
         self.description_hbox = ipw.HBox(
             children=[self.description_label, self.description_textbox]
@@ -2034,14 +2312,17 @@ class RegisterProcessStepWidget(ipw.VBox):
             (obj.props["name"], obj.permId) for obj in instrument_objects
         ]
         instrument_options.insert(0, ("Select an instrument...", "-1"))
-        self.instrument_dropdown = ipw.Dropdown(options=instrument_options, value="-1")
+        self.instrument_dropdown = ipw.Dropdown(
+            options=instrument_options, value="-1", layout=box_layout
+        )
         self.instrument_hbox = ipw.HBox(
             children=[self.instrument_label, self.instrument_dropdown]
         )
 
         self.comments_label = ipw.HTML(value="<b>Comments:</b>", layout=label_layout)
         self.comments_textarea = ipw.Textarea(
-            placeholder="Write other observations, e.g. errors while doing the process step..."
+            placeholder="Write other observations, e.g. errors while doing the process step...",
+            layout=box_layout,
         )
         self.comments_hbox = ipw.HBox(
             children=[self.comments_label, self.comments_textarea]
@@ -2104,6 +2385,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 ]
             )
             self.add_observable_button.on_click(self.add_observable)
+
             self.children = [
                 self.name_hbox,
                 self.description_hbox,
@@ -2444,6 +2726,27 @@ class RegisterActionWidget(ipw.VBox):
 
         return target_substrate_options
 
+    def load_stamp_options(self):
+        wafer_substrate_list = utils.get_openbis_objects(
+            self.openbis_session, type=OPENBIS_OBJECT_TYPES["Wafer Substrate"]
+        )
+        sample_list = utils.get_openbis_objects(
+            self.openbis_session, type=OPENBIS_OBJECT_TYPES["Sample"]
+        )
+        stamp_options = [("Select a stamp...", "-1")] + [
+            (f"{obj.props['name']} (Wafer Substrate)", obj.permId)
+            for obj in wafer_substrate_list
+        ]
+
+        for obj in sample_list:
+            if (
+                obj.props.get("object_status") == "ACTIVE"
+                and obj.permId != self.process_step_widget.sample_id
+            ):
+                stamp_options.append((f"{obj.props['name']} (Sample)", obj.permId))
+
+        return stamp_options
+
     def load_action(self, settings):
         action_object = settings
         action_properties_values = action_object.props.all()
@@ -2476,7 +2779,7 @@ class RegisterActionWidget(ipw.VBox):
                                 widget.children[5].value = minutes
                                 widget.children[7].value = seconds
 
-                        elif prop in ["TARGET_SUBSTRATE"]:
+                        elif prop in ["TARGET_SUBSTRATE", "STAMP"]:
                             current_sample_id = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value
                             if current_sample_id == prop_value:
                                 display(
@@ -2775,6 +3078,50 @@ class RegisterActionWidget(ipw.VBox):
                                 value="<b>Target substrate:</b>", layout=label_layout
                             ),
                             target_substrate_dropdown,
+                        ],
+                        metadata={"property_name": prop},
+                    )
+                )
+
+            elif prop == "STAMP":
+                stamp_options = self.load_stamp_options()
+                stamp_dropdown = ipw.Dropdown(options=stamp_options, value="-1")
+
+                self.all_sample_options = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options
+
+                def update_sample_dropdown(change):
+                    selected_target = change["new"]
+
+                    # Create a new list of options, omitting the one that was just selected
+                    filtered_options = [
+                        (key, value)
+                        for key, value in self.all_sample_options
+                        if value != selected_target or selected_target == "-1"
+                    ]
+
+                    current_sample_id = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value
+
+                    # Apply the filtered options to the sample dropdown
+                    self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options = filtered_options
+
+                    if current_sample_id == selected_target:
+                        self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value = "-1"
+                        display(
+                            Javascript(
+                                data="alert('Reset sample selection because it is being used as a target substrate. Please select a sample again.')"
+                            )
+                        )
+                    else:
+                        self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value = current_sample_id
+
+                # 4. Bind the callback to the target dropdown's 'value' trait
+                stamp_dropdown.observe(update_sample_dropdown, names="value")
+
+                action_properties_widgets.append(
+                    cw.HBox(
+                        children=[
+                            ipw.HTML(value="<b>Stamp:</b>", layout=label_layout),
+                            stamp_dropdown,
                         ],
                         metadata={"property_name": prop},
                     )

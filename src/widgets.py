@@ -1160,8 +1160,10 @@ class SelectSampleWidget(ipw.VBox):
 
         # 2. Build the UI
         self._setup_ui()
+        self._setup_edit_ui()
 
         # 3. Load the data exactly once
+        self.children = [self.main_ui_container, self.edit_sample_widgets]
         self.load_samples()
 
     def _setup_ui(self):
@@ -1171,6 +1173,14 @@ class SelectSampleWidget(ipw.VBox):
             value="<b>Sample:</b>", layout=ipw.Layout(width="70px")
         )
         self.sample_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+
+        self.edit_sample_button = ipw.Button(
+            tooltip="Edit selected sample",
+            icon="edit",
+            layout=ipw.Layout(width="50px", height="28px"),
+        )
+
+        self.edit_sample_button.on_click(self.show_edit_panel)
 
         # --- Sorting Checkboxes ---
         self.sort_label = ipw.HTML(
@@ -1203,7 +1213,9 @@ class SelectSampleWidget(ipw.VBox):
         self.filter_my_samples_cb.observe(self.update_dropdown, names="value")
 
         # --- Layout Assembly ---
-        self.sample_hbox = ipw.HBox([self.sample_label, self.sample_dropdown])
+        self.sample_hbox = ipw.HBox(
+            [self.sample_label, self.sample_dropdown, self.edit_sample_button]
+        )
 
         self.sort_hbox = ipw.HBox(
             children=[
@@ -1225,7 +1237,47 @@ class SelectSampleWidget(ipw.VBox):
             layout=ipw.Layout(align_items="center"),
         )
 
-        self.children = [self.sample_hbox, self.sort_hbox, self.filter_hbox]
+        self.main_ui_container = ipw.VBox(
+            [self.sample_hbox, self.sort_hbox, self.filter_hbox]
+        )
+
+    def _setup_edit_ui(self):
+        """Sets up the 'Edit Sample Name' form (initially hidden)."""
+        self.edit_sample_widgets = ipw.VBox()
+
+        # Name input text box
+        self.edit_name_label = ipw.HTML(
+            value="<b>New Name:</b>", layout=ipw.Layout(width="80px")
+        )
+        self.edit_name_textbox = ipw.Text(
+            placeholder="Enter new sample name...", layout=ipw.Layout(width="500px")
+        )
+        self.edit_name_hbox = ipw.HBox([self.edit_name_label, self.edit_name_textbox])
+
+        # Buttons matches your original sizing
+        self.save_btn = ipw.Button(
+            tooltip="Save",
+            icon="save",
+            layout=ipw.Layout(width="100px", height="50px"),
+        )
+        self.cancel_btn = ipw.Button(
+            tooltip="Cancel",
+            icon="times",
+            layout=ipw.Layout(width="100px", height="50px"),
+        )
+        self.buttons_hbox = ipw.HBox([self.save_btn, self.cancel_btn])
+
+        self.save_btn.on_click(self.save_sample_edit)
+        self.cancel_btn.on_click(self.hide_edit_panel)
+
+        header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
+
+        self.edit_panel_content = [
+            ipw.HTML(f"<div style='{header_style}'>Edit selected sample</div>"),
+            self.edit_name_hbox,
+            self.buttons_hbox,
+            ipw.HTML("<hr>"),
+        ]
 
     def load_samples(self):
         """Fetches data from openBIS ONCE and stores it in a master DataFrame."""
@@ -1314,6 +1366,57 @@ class SelectSampleWidget(ipw.VBox):
         # 5. Update the widget
         self.sample_dropdown.options = options
         self.sample_dropdown.value = "-1"
+
+    def show_edit_panel(self, b):
+        sample_id = self.sample_dropdown.value
+
+        # Block opening if no valid sample is chosen
+        if sample_id == "-1":
+            display(Javascript(data="alert('Please select a sample to edit first.')"))
+            return
+
+        # Disable the dropdown so user cannot switch selections during editing
+        self.sample_dropdown.disabled = True
+
+        # Grab current display name to pre-populate textbox
+        current_label = [
+            opt[0] for opt in self.sample_dropdown.options if opt[1] == sample_id
+        ][0]
+        self.edit_name_textbox.value = current_label
+
+        # Render panel
+        self.edit_sample_widgets.children = self.edit_panel_content
+
+    def hide_edit_panel(self, b=None):
+        # Re-enable dropdown
+        self.sample_dropdown.disabled = False
+        self.edit_sample_widgets.children = []
+        self.edit_name_textbox.value = ""
+
+    def save_sample_edit(self, b):
+        sample_id = self.sample_dropdown.value
+        new_name = self.edit_name_textbox.value.strip()
+
+        if not new_name:
+            display(Javascript(data="alert('Sample name cannot be empty.')"))
+            return
+
+        try:
+            # Fetch object via openbis session
+            sample_obj = self.openbis_session.get_sample(sample_id)
+            sample_obj.props["name"] = new_name
+            utils.update_openbis_object(sample_obj)
+
+            # Post-save UI reset
+            self.hide_edit_panel()
+            self.load_samples()  # Refresh DataFrame & Repopulate dropdown
+            self.sample_dropdown.value = (
+                sample_id  # Set focus back onto the edited sample
+            )
+            display(Javascript(data="alert('Sample updated successfully!')"))
+
+        except Exception as e:
+            display(Javascript(data=f"alert('Error updating sample: {str(e)}')"))
 
 
 class SelectProjectWidget(ipw.VBox):
