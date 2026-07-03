@@ -12,6 +12,7 @@ import logging
 import pathlib
 from traitlets import TraitError
 import custom_widgets as cw
+from bs4 import BeautifulSoup
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 
@@ -78,11 +79,13 @@ class SampleHistoryWidget(ipw.VBox):
                 self.openbis_session, process_step
             )
             sample_history_children.append(process_step_widget)
+            process_step_name = process_step_widget.name_html.value
+            process_step_name = BeautifulSoup(
+                process_step_name, "html.parser"
+            ).get_text()
+            process_step_registration_date = process_step_widget.registration_date
             process_step_title = (
-                process_step_widget.name_html.value
-                + " ("
-                + process_step_widget.registration_date
-                + ")"
+                process_step_name + " (" + process_step_registration_date + ")"
             )
             self.sample_history.set_title(i, process_step_title)
 
@@ -153,9 +156,14 @@ class ProcessStepHistoryWidget(ipw.VBox):
         ]
 
     def load_process_step_data(self):
-        openbis_object_props = self.openbis_object.props.all()
+        openbis_object_props = self.openbis_object.props()
         if openbis_object_props["name"]:
-            self.name_html.value = openbis_object_props["name"]
+            process_step_name = openbis_object_props["name"]
+            process_step_url = utils.generate_openbis_object_url(
+                self.openbis_session, self.openbis_object
+            )
+            process_step_name = f'<a href="{process_step_url}" target="_blank" rel="noopener noreferrer">{process_step_name}</a>'
+            self.name_html.value = process_step_name
 
         if openbis_object_props["description"]:
             self.description_html.value = openbis_object_props["description"]
@@ -212,7 +220,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 obs_dataset = utils.get_openbis_dataset(self.openbis_session, obs_id)
                 obs_widget = ObservableHistoryWidget(self.openbis_session, obs_dataset)
                 observables_accordion_children.append(obs_widget)
-                obs_title = obs_widget.name_html.value
+                obs_title = obs_dataset.props["name"]
                 self.observables_accordion.set_title(i, obs_title)
 
             self.observables_accordion.children = observables_accordion_children
@@ -281,6 +289,13 @@ class ActionHistoryWidget(ipw.VBox):
                 "FLOAT",
                 "BOOLEAN",
             ]:
+                if prop_key == "name":
+                    action_name = prop_val
+                    prop_val = utils.generate_openbis_object_url(
+                        self.openbis_session, self.openbis_object
+                    )
+                    prop_val = f'<a href="{prop_val}" target="_blank" rel="noopener noreferrer">{action_name}</a>'
+
                 props_widgets.append(
                     make_row(prop_label, prop_val, prop_key, calculated_width)
                 )
@@ -500,7 +515,11 @@ class ObservableHistoryWidget(ipw.VBox):
     def load_observable_data(self):
         openbis_dataset_props = self.openbis_dataset.props.all()
         if openbis_dataset_props["name"]:
-            self.name_html.value = openbis_dataset_props["name"]
+            observable_name = openbis_dataset_props["name"]
+            observable_url = utils.generate_openbis_dataset_url(
+                self.openbis_session, self.openbis_dataset
+            )
+            self.name_html.value = f'<a href="{observable_url}" target="_blank" rel="noopener noreferrer">{observable_name}</a>'
 
         if openbis_dataset_props["description"]:
             self.description_html.value = openbis_dataset_props["description"]
@@ -514,7 +533,12 @@ class ObservableHistoryWidget(ipw.VBox):
                 component_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=component_id
                 )
-                self.components_html.value += f"<p>{component_object.props['name']}</p>"
+                component_obj_name = component_object.props["name"]
+                component_obj_url = utils.generate_openbis_object_url(
+                    self.openbis_session, component_object
+                )
+                component_obj_url = f'<a href="{component_obj_url}" target="_blank" rel="noopener noreferrer">{component_obj_name}</a>'
+                self.components_html.value += f"<p>{component_obj_url}</p>"
 
     def delayed_cleanup(self, folder_path, zip_filepath, delay_seconds=60):
         """Waits in the background, then deletes the temporary files."""
@@ -1519,7 +1543,7 @@ class RegisterPreparationWidget(ipw.VBox):
                         # --- Branch 1: Handle Existing Sample ---
                         if stamp_object.type.code == "SAMPLE":
                             parallel_sample_object = stamp_object
-                            original_props = parallel_sample_object.props.copy()
+                            original_props = parallel_sample_object.props().copy()
 
                             parallel_sample_object.props["object_status"] = "INACTIVE"
                             utils.update_openbis_object(parallel_sample_object)
@@ -1635,7 +1659,11 @@ class RegisterPreparationWidget(ipw.VBox):
                             self.openbis_session,
                             type=process_step_type,
                             experiment=experiment_object.identifier,
-                            parents=[preparation_object, parallel_sample_object],
+                            parents=[
+                                preparation_object,
+                                parallel_sample_object,
+                                instrument_permid,
+                            ],
                             props=parallel_process_properties,
                         )
 

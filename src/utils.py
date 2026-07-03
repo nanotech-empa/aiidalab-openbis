@@ -294,6 +294,14 @@ def generate_openbis_object_url(openbis_session, openbis_object):
     return url
 
 
+def generate_openbis_dataset_url(openbis_session, openbis_dataset):
+    base_url = openbis_session.url
+    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    obj_id = openbis_dataset.permId
+    url = f"{base_url}?viewName=showViewDataSetPageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{obj_id}%22%7D"
+    return url
+
+
 # General functions
 def clone_widgets_empty(widgets):
     new_widgets = []
