@@ -1126,6 +1126,219 @@
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
 
+### Mean Field Hubbard
+* **Code:** `MEAN_FIELD_HUBBARD`
+* **Generated code prefix:** `MFHU`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `charge` | Charge | Charge | INTEGER | False | False | False |
+| `convergence_coefficient` | Convergence Coefficient | Convergence Coefficient | REAL | False | False | False |
+| `density_tolerance` | Density Tolerance | Density Tolerance | REAL | False | False | False |
+| `down_densities` | Down densities | Down densities | REAL | False | True | False |
+| `down_electrons` | Down electrons | Down electrons | REAL | False | True | False |
+| `number_k_points` | Number of k points | Number of k points | INTEGER | False | False | False |
+| `on_site_hubbard_repulsion_value` | On-site Hubbard Repulsion U Value | On-site Hubbard Repulsion U Value | JSON | False | False | False |
+| `up_densities` | Up densities | Up densities | REAL | False | True | False |
+| `up_electrons` | Up electrons | Up electrons | REAL | False | True | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |
+
+### Measurement Session
+* **Code:** `MEASUREMENT_SESSION`
+* **Generated code prefix:** `MSSE`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `default_object_view` | Default Object View | Default Object View | CONTROLLEDVOCABULARY (DEFAULT_OBJECT_VIEWS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `measurement_folder_path` | Measurement Folder Path | Measurement Folder Path | VARCHAR | False | False | False |
+
+### Mechanical Pressing
+* **Code:** `MECHANICAL_PRESSING`
+* **Generated code prefix:** `MEPR`
+* **Semantic Annotation:**
+* **Metadata:** `{'icon': '🔩', 'type': 'action'}`
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |
+| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |
+| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |
+
+### Minimum Energy Potential
+* **Code:** `MINIMUM_ENERGY_POTENTIAL`
+* **Generated code prefix:** `MEPO`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `energies` | Energies | Energies | JSON | False | False | False |
+| `energy_barrier` | Energy Barrier | Energy Barrier | JSON | False | False | False |
+| `geometry_constraints` | Geometry Constraints | Geometry Constraints | REAL | False | True | False |
+| `geometry_constraints_increments` | Geometry Constraints Increments | Geometry Constraints Increments | REAL | False | True | False |
+| `method_type` | Method Type | Method Type | CONTROLLEDVOCABULARY (PATHFINDINGMETHODENUM) | False | False | False |
+| `number_geometries` | Number of geometries | Number of geometries | INTEGER | False | False | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |
+
+### Molecule
+* **Code:** `MOLECULE`
+* **Generated code prefix:** `MOLE`
+* **Semantic Annotation:**
+* **Metadata:** `{'type': 'material_concept'}`
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `chemdraw_name` | ChemDraw Name | ChemDraw Name | VARCHAR | False | False | False |
+| `empa_number` | Empa Number | Empa Number | INTEGER | False | False | False |
+| `smiles` | SMILES | SMILES | VARCHAR | False | False | False |
+| `sum_formula` | Sum Formula | Sum Formula | VARCHAR | False | False | False |
+| `cas_number` | CAS Number | CAS Number | VARCHAR | False | False | False |
+| `iupac_name` | IUPAC Name | IUPAC Name | VARCHAR | False | False | False |
+
+### Organisation
+* **Code:** `ORGANISATION`
+* **Generated code prefix:** `ORGA`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `address` | Address | Address | VARCHAR | False | False | False |
+| `email` | Email | Email | VARCHAR | False | False | False |
+| `work_phone` | Work Phone | Work Phone | VARCHAR | False | False | False |
+
+### 📝 Other
+* **Code:** `OTHER_LOGENTRY`
+* **Generated code prefix:** `OTHERLOG`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#788c96', 'icon': '📝', 'type': 'OTHER_LOGENTRY'}`
+
+#### Section: GeneralInfo
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+
+### PBN Stage
+* **Code:** `PBN_STAGE`
+* **Generated code prefix:** `PBNS`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+#### Section: Settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False | |
+
+### PBN Stage
+* **Code:** `PBN_STAGE_SETTINGS`
+* **Generated code prefix:** `PBST`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False | |
+
+### PDOS
+* **Code:** `PDOS`
+* **Generated code prefix:** `PDOS`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
+### Person
+* **Code:** `PERSON`
+* **Generated code prefix:** `PERS`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `username` | Username | Username | VARCHAR | False | False | False |
+| `email` | Email | Email | VARCHAR | False | False | False |
+| `work_phone` | Work Phone | Work Phone | VARCHAR | False | False | False |
+| `work_status` | Work Status | Work Status | CONTROLLEDVOCABULARY (WORKSTATUSENUM) | False | False | False |
+| `office` | Office | Office | OBJECT (All) | False | False | False |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
 ---
 
 ## 2. Data Set Types
