@@ -1284,7 +1284,7 @@
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False | |
 
-### PBN Stage
+### PBN Stage Settings
 * **Code:** `PBN_STAGE_SETTINGS`
 * **Generated code prefix:** `PBST`
 * **Semantic Annotation:**
@@ -1338,6 +1338,612 @@
 | `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
 | `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
 | `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
+### Potential Energy Calculation
+* **Code:** `POTENTIAL_ENERGY_CALCULATION`
+* **Generated code prefix:** `PECA`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
+### Preparation
+* **Code:** `PREPARATION`
+* **Generated code prefix:** `PREP`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Process
+* **Code:** `PROCESS`
+* **Generated code prefix:** `PROC`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `short_name` | Short name | Short name | VARCHAR | False | False | False |
+| `process_steps` | Process steps | Process steps | OBJECT (PROCESS_STEP) | False | True | False |
+
+### Process Step
+* **Code:** `PROCESS_STEP`
+* **Generated code prefix:** `PRST`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `actions` | Actions | Actions | OBJECT (All) | False | True | False |
+
+### Publication
+* **Code:** `PUBLICATION`
+* **Generated code prefix:** `PUB`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `abstract` | Abstract | Abstract | MULTILINE_VARCHAR | False | False | False |
+| `year` | Year | Year | INTEGER | False | False | False |
+| `dataset_url` | Dataset URL | Dataset URL | HYPERLINK | False | False | False |
+
+### Result
+* **Code:** `RESULT`
+* **Generated code prefix:** `RESL`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Rinse
+* **Code:** `RINSE`
+* **Generated code prefix:** `RINS`
+* **Semantic Annotation:**
+* **Metadata:** `{'icon': '🚿', 'type': 'action'}`
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |
+| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |
+| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |
+
+### Room
+* **Code:** `ROOM`
+* **Generated code prefix:** `ROOM`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+
+### Sample
+* **Code:** `SAMPLE`
+* **Generated code prefix:** `SAMP`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `object_status` | Object Status | Object Status | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+
+### Scroll Pump
+* **Code:** `SCROLL_PUMP`
+* **Generated code prefix:** `SCLP`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Software
+* **Code:** `SOFTWARE`
+* **Generated code prefix:** `SOFT`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `version` | Version | Version | VARCHAR | False | False | False |
+| `url` | URL | URL | VARCHAR | False | False | False |
+
+### SPM Controller
+* **Code:** `SPM_CONTROLLER`
+* **Generated code prefix:** `SPMC`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Sputter Gun
+* **Code:** `SPUTTER_GUN`
+* **Generated code prefix:** `SPTG`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+#### Section: Settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `sputter_ion` | Ion | Ion | VARCHAR | False | False | False |
+| `angle_deg` | Angle [deg] | Angle [deg] | REAL | False | False | False |
+| `bias_voltage_v` | Bias voltage [V] | Bias voltage [V] | REAL | False | False | False |
+| `discharge_voltage_v` | Discharge voltage [V] | Discharge voltage [V] | REAL | False | False | False |
+| `discharge_current_a` | Discharge current [A] | Discharge current [A] | REAL | False | False | False |
+
+### Sputter Gun Settings
+* **Code:** `SPUTTER_GUN_SETTINGS`
+* **Generated code prefix:** `SGST`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `sputter_ion` | Ion | Ion | VARCHAR | False | False | False |
+| `angle_deg` | Angle [deg] | Angle [deg] | REAL | False | False | False |
+| `bias_voltage_v` | Bias voltage [V] | Bias voltage [V] | REAL | False | False | False |
+| `discharge_voltage_v` | Discharge voltage [V] | Discharge voltage [V] | REAL | False | False | False |
+| `discharge_current_a` | Discharge current [A] | Discharge current [A] | REAL | False | False | False |
+
+### Sputtering
+* **Code:** `SPUTTERING`
+* **Generated code prefix:** `IONB`
+* **Semantic Annotation:**
+* **Metadata:** `{'icon': '🔫', 'type': 'action'}`
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |
+| `sputter_gun` | Sputter Gun | Sputter Gun | OBJECT (SPUTTER_GUN) | False | False | False |
+| `sputter_gun_settings` | Sputter Gun Settings | Sputter Gun Settings | OBJECT (SPUTTER_GUN_SETTINGS) | False | False | False |
+
+### Stamp
+* **Code:** `STAMP`
+* **Generated code prefix:** `STMP`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `material` | Material | Material | VARCHAR | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `assembled_by` | Assembled by | Assembled by | OBJECT (All) | False | False | False |
+| `assembled_date` | Assembled date | Assembled date | DATE | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### STM Simulation
+* **Code:** `STM_SIMULATION`
+* **Generated code prefix:** `STMS`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `default_object_view` | Default object view | Default object view | CONTROLLEDVOCABULARY (DEFAULT_OBJECT_VIEWS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `p_tip` | P-tip | P-tip | JSON | False | False | False |
+| `bias_voltages` | Bias voltages | Bias voltages | JSON | False | False | False |
+| `isovalues` | Isovalues | Isovalues | JSON | False | False | False |
+| `heights` | Heights | Heights | JSON | False | False | False | |
+
+### STMP Tip
+* **Code:** `STM_TIP`
+* **Generated code prefix:** `STMT`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `fabrication_method` | Fabrication method | Fabrication method | VARCHAR | False | False | False |
+| `fabrication_date` | Fabrication date | Fabrication date | DATE | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Substance
+* **Code:** `SUBSTANCE`
+* **Generated code prefix:** `SUBS`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Parents
+| Object Type| Minimum | Maximum |
+| :--- | :--- | :--- |
+| MOLECULE | 1 | 1 |
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `barcode` | Custom Barcode | Custom Barcode | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `empa_number` | EMPA Number | EMPA Number | INTEGER | False | False | False |
+| `batch` | Batch | Batch | VARCHAR | False | False | False |
+| `vial` | Vial | Vial | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
+| `studied_by` | Studied by | Studied by | OBJECT (PERSON) | False | True | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+#### Section: Chemical properties
+
+| `evaporation_temperatures` | Evaporation temperatures | Evaporation temperatures | XML | False | False | False | | `{'custom_widget': 'Spreadsheet'}`
+| `purity` | Purity | Purity | REAL | False | False | False |
+| `substance_type` | Substance type | Substance type | VARCHAR | False | False | False |
+
+#### Section: Storage
+
+| `amount_mg` | Amount [mg] | Amount [mg] | REAL | False | False | False |
+| `amount_ml` | Amount [ml] | Amount [ml] | REAL | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
+| `storage_field` | Storage Field | Storage Field | VARCHAR | False | False | False |
+
+### Thyracont
+* **Code:** `THYRACONT`
+* **Generated code prefix:** `THYR`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Turbo Pump
+* **Code:** `TURBO_PUMP`
+* **Generated code prefix:** `TRBP`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Unclassified Simulation
+* **Code:** `UNCLASSIFIED_SIMULATION`
+* **Generated code prefix:** `UNSM`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
+### Valve
+* **Code:** `VALVE`
+* **Generated code prefix:** `VALV`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+#### Section: Settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |
+
+### Valve Settings
+* **Code:** `VALVE_SETTINGS`
+* **Generated code prefix:** `VVST`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |
+
+### Vibrational Spectroscopy
+* **Code:** `VIBRATIONAL_SPECTROSCOPY`
+* **Generated code prefix:** `VBSP`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
+### Wafer
+* **Code:** `WAFER`
+* **Generated code prefix:** `WAFR`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `face` | Face | Face | VARCHAR | False | False | False |
+| `material` | Material | Material | VARCHAR | False | False | False |
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
+| `diameter_inch` | Diameter [inch] | Diameter [inch] | REAL | False | False | False |
+| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |
+| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |
+| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Wafer Substrate
+* **Code:** `WAFER_SUBSTRATE`
+* **Generated code prefix:** `WFSB`
+* **Semantic Annotation:**
+* **Metadata:** `{'type': 'slab'}`
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `face` | Face | Face | VARCHAR | False | False | False |
+| `material` | Material | Material | VARCHAR | False | False | False |
+| `material_coating` | Material coating | Material coating | XML | False | False | False | | `{'custom_widget': 'Spreadsheet'}`
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
+| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |
+| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |
+| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Wire
+* **Code:** `WIRE`
+* **Generated code prefix:** `WIRE`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `material` | Material | Material | VARCHAR | False | False | False |
+| `purity` | Purity (%) | Purity (%) | REAL | False | False | False |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ---
 
