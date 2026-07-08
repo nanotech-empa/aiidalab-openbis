@@ -315,8 +315,8 @@ final_max_force: quantity [Hartree/bohr]
 number_of_steps: integer
 spin_multiplicity: integer
 total_magnetization: quantity [Bohr magnetons]
-fermi_energy: quantity [eV]
-electronic_gap: quantity [eV]
+fermi_energy: quantity [eV] [] list
+electronic_gap: quantity [eV] [] list
 comments: text
 ```
 
