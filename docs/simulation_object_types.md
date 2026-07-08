@@ -102,7 +102,8 @@ MLPotential
 Required:
 
 ```text
-ATOMISTIC_MODEL
+ATOMISTIC_MODEL [] list
+Molecule concept [list] e.g. TB calculations
 ```
 
 Relation:
