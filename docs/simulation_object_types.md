@@ -159,9 +159,8 @@ tar.gz or zip with relevant input/output files
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
-total_energy: quantity
+charge: float
+total_energy: quantity (Hartree)
 converged: boolean
 ```
 
@@ -169,9 +168,9 @@ converged: boolean
 
 ```text
 spin_multiplicity: integer
-total_magnetization: quantity
-fermi_energy: quantity
-electronic_gap: quantity
+total_magnetization: quantity (Bohr magnetons)
+fermi_energy: quantity (eV)
+electronic_gap: quantity (eV)
 comments: text
 ```
 
