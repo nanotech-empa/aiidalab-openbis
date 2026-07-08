@@ -88,6 +88,7 @@ Simulation that computes the energy of a fixed `ATOMISTIC_MODEL` without intenti
 
 ```text
 DFT
+DFTB
 TB
 MFH-TB
 DMRG
@@ -218,8 +219,7 @@ Simulation that optimizes the geometry of an `ATOMISTIC_MODEL`, optionally inclu
 
 ```text
 DFT
-TB
-MFH-TB
+DFTB
 CASSCF
 ForceField
 MLPotential
@@ -299,11 +299,10 @@ tar.gz or zip with relevant input/output files
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 constrained: boolean
 cell_optimization: boolean
-final_energy: quantity
+final_energy: quantity [Hartree]
 converged: boolean
 ```
 
@@ -312,12 +311,12 @@ converged: boolean
 ```text
 constraints_description: text
 cell_constraints: string
-final_max_force: quantity
+final_max_force: quantity [Hartree/bohr]
 number_of_steps: integer
 spin_multiplicity: integer
-total_magnetization: quantity
-fermi_energy: quantity
-electronic_gap: quantity
+total_magnetization: quantity [Bohr magnetons]
+fermi_energy: quantity [eV]
+electronic_gap: quantity [eV]
 comments: text
 ```
 
