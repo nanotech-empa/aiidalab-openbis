@@ -2245,7 +2245,7 @@ class RegisterActionWidget(ipw.VBox):
         self.action_icon = icon_mapping.get(action_type, "⚙️")
         if self.process_step_widget is not None:
             self.process_step_widget.refresh_action_icon_prefix(pending_action=self)
-        self.actions_accordion.set_title(self.action_index, self.action_icon)
+        self._set_action_title(self.action_icon)
 
         action_properties = (
             utils.get_openbis_object_type(self.openbis_session, type=action_type)
@@ -2732,10 +2732,14 @@ class RegisterActionWidget(ipw.VBox):
             comp_dropdown_widget.observe(add_component_ui, names="value")
 
         self.action_properties_widgets.children = action_properties_widgets
-        self.actions_accordion.set_title(self.action_index, self.get_action_title())
+        self._set_action_title(self.get_action_title())
 
     def change_action_title(self, change):
-        self.actions_accordion.set_title(self.action_index, self.get_action_title())
+        self._set_action_title(self.get_action_title())
+
+    def _set_action_title(self, title):
+        if self.action_index < len(self.actions_accordion.children):
+            self.actions_accordion.set_title(self.action_index, title)
 
     def get_action_title(self):
         for widget in self.action_properties_widgets.children:
