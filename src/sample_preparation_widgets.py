@@ -1920,8 +1920,11 @@ class RegisterProcessStepWidget(ipw.VBox):
             )
 
     def change_process_step_title(self, change):
-        title = self.name_textbox.value
-        self.processes_accordion.set_title(self.process_step_index, title)
+        self._set_process_step_title(self.name_textbox.value)
+
+    def _set_process_step_title(self, title):
+        if self.process_step_index < len(self.processes_accordion.children):
+            self.processes_accordion.set_title(self.process_step_index, title)
 
     def refresh_action_icon_prefix(self, pending_action=None):
         actions = list(self.actions_accordion.children)
@@ -1942,7 +1945,7 @@ class RegisterProcessStepWidget(ipw.VBox):
             else body_text
         )
         self.name_textbox.value = new_text
-        self.processes_accordion.set_title(self.process_step_index, new_text)
+        self._set_process_step_title(new_text)
 
     def remove_process_step(self, b):
         processes_accordion_children = list(self.processes_accordion.children)
