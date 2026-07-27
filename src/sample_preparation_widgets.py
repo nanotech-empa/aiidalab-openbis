@@ -69,20 +69,17 @@ class SampleHistoryWidget(ipw.VBox):
                         process_steps.append(parent_object)
             sample_parents = next_parents
         sample_history_children = []
+        sample_history_titles = []
         for i, process_step in enumerate(process_steps):
             process_step_widget = ProcessStepHistoryWidget(
                 self.openbis_session, process_step
             )
             sample_history_children.append(process_step_widget)
-            process_step_title = (
-                process_step_widget.name_html.value
-                + " ("
-                + process_step_widget.registration_date
-                + ")"
-            )
-            self.sample_history.set_title(i, process_step_title)
+            process_step_title = f"{process_step_widget.name_html.value} ({process_step_widget.registration_date})"
+            sample_history_titles.append(process_step_title)
 
         self.sample_history.children = sample_history_children
+        self.sample_history.titles = sample_history_titles
         logger.info("Sample history loaded successfully.")
 
 
@@ -182,32 +179,35 @@ class ProcessStepHistoryWidget(ipw.VBox):
         actions_ids = self.openbis_object.props["actions"]
         if actions_ids:
             actions_accordion_children = []
+            actions_accordion_titles = []
             for i, act_id in enumerate(actions_ids):
                 act_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=act_id
                 )
                 act_widget = ActionHistoryWidget(self.openbis_session, act_object)
                 actions_accordion_children.append(act_widget)
-                act_title = act_widget.name
-                self.actions_accordion.set_title(i, act_title)
+                actions_accordion_titles.append(act_widget.name)
 
             self.actions_accordion.children = actions_accordion_children
+            self.actions_accordion.titles = actions_accordion_titles
 
     def load_observables(self):
         observables_ids = self.openbis_object.get_datasets(
             type="OBSERVABLE"
         ).df.permId.values
-        if observables_ids:
+        if len(observables_ids) > 0:
             observables_accordion_children = []
+            observables_accordion_titles = []
             for i, obs_id in enumerate(observables_ids):
                 obs_dataset = utils.get_openbis_dataset(self.openbis_session, obs_id)
                 obs_widget = ObservableHistoryWidget(self.openbis_session, obs_dataset)
                 observables_accordion_children.append(obs_widget)
                 obs_title = obs_widget.name_html.value
-                self.observables_accordion.set_title(i, obs_title)
+                observables_accordion_titles.append(obs_title)
 
             self.observables_accordion.children = observables_accordion_children
-
+            self.observables_accordion.titles = observables_accordion_titles
+            
 
 class ActionHistoryWidget(ipw.VBox):
     def __init__(self, openbis_session, openbis_object):
@@ -782,13 +782,17 @@ class RegisterPreparationWidget(ipw.VBox):
                         self.new_processes_accordion.children
                     )
                     process_step_index = len(processes_accordion_children)
+                    
+                    processes_accordion_children.append(ipw.VBox())
+                    self.new_processes_accordion.children = processes_accordion_children
+                    
                     new_process_step_widget = RegisterProcessStepWidget(
                         self.openbis_session,
                         self.new_processes_accordion,
                         process_step_index,
                         process_step=process_step,
                     )
-                    processes_accordion_children.append(new_process_step_widget)
+                    processes_accordion_children[process_step_index] = new_process_step_widget
                     self.new_processes_accordion.children = processes_accordion_children
 
             self.load_processes_hbox.children = []
@@ -1229,10 +1233,6 @@ class RegisterPreparationWidget(ipw.VBox):
             ]
 
             # Reset new processes accordion
-            processes_accordion_children = list(self.new_processes_accordion.children)
-            for index, process_step in enumerate(processes_accordion_children):
-                self.new_processes_accordion.set_title(index, "")
-
             self.process_short_name = ""
             self.new_processes_accordion.children = []
 
@@ -1635,13 +1635,7 @@ class RegisterProcessWidget(ipw.VBox):
             display(Javascript(data="alert('Process created successfully.')"))
             logger.info(f"Process {new_process_object.permId} created successfully.")
 
-            # Reset new processes accordion
-            processes_accordion_children = list(self.new_processes_accordion.children)
-            for index, _ in enumerate(processes_accordion_children):
-                self.new_processes_accordion.set_title(index, "")
-
             self.new_processes_accordion.children = []
-
             self.process_name_text.value = ""
             self.process_short_name_text.value = ""
             self.process_description_text.value = ""
@@ -1848,6 +1842,10 @@ class RegisterProcessStepWidget(ipw.VBox):
             )
             actions_accordion_children = list(self.actions_accordion.children)
             action_index = len(actions_accordion_children)
+            
+            actions_accordion_children.append(ipw.VBox())
+            self.actions_accordion.children = actions_accordion_children
+            
             new_action_widget = RegisterActionWidget(
                 self.openbis_session,
                 self.actions_accordion,
@@ -1856,7 +1854,8 @@ class RegisterProcessStepWidget(ipw.VBox):
                 action_object,
                 process_step_widget=self,
             )
-            actions_accordion_children.append(new_action_widget)
+            
+            actions_accordion_children[action_index] = new_action_widget
             self.actions_accordion.children = actions_accordion_children
 
     def change_process_step_title(self, change):
@@ -1865,18 +1864,19 @@ class RegisterProcessStepWidget(ipw.VBox):
 
     def remove_process_step(self, b):
         processes_accordion_children = list(self.processes_accordion.children)
-        num_process_steps = len(processes_accordion_children)
         processes_accordion_children.pop(self.process_step_index)
 
+        # Re-index remaining step widgets
         for index, process_step in enumerate(processes_accordion_children):
             if index >= self.process_step_index:
                 process_step.process_step_index -= 1
-                self.processes_accordion.set_title(
-                    process_step.process_step_index, process_step.name_textbox.value
-                )
 
-        self.processes_accordion.set_title(num_process_steps - 1, "")
+        # Reassign children first
         self.processes_accordion.children = processes_accordion_children
+        # Rebuild titles to match the new children length
+        self.processes_accordion.titles = tuple(
+            step.name_textbox.value for step in processes_accordion_children
+        )
 
     def add_action(self, b):
         instrument_permid = self.instrument_dropdown.value
@@ -2690,17 +2690,17 @@ class RegisterActionWidget(ipw.VBox):
 
         self.actions_accordion.children = children
 
-        for i, action in enumerate(children):
+        # Rebuild title list based on remaining widgets
+        titles = []
+        for action in children:
             action_name = ""
-            if self.action_properties_widgets.children:
-                for widget in action.action_properties_widgets.children:
-                    if widget.metadata.get("property_name", "") == "NAME":
-                        action_name += widget.children[1].value
-                        break
-            self.actions_accordion.set_title(i, action_name)
-
-        # Handle the accordion title edge case for the popped index
-        self.actions_accordion.set_title(len(children), "")
+            for widget in action.action_properties_widgets.children:
+                if widget.metadata.get("property_name", "") == "NAME":
+                    action_name = widget.children[1].value
+                    break
+            titles.append(action_name)
+        
+        self.actions_accordion.titles = tuple(titles)
 
 
 class RegisterObservableWidget(ipw.VBox):
@@ -2875,13 +2875,13 @@ class RegisterObservableWidget(ipw.VBox):
 
         self.observables_accordion.children = children
 
-        for index, observable in enumerate(children):
+        titles = []
+        for observable in children:
             observable_name = ""
-            if self.observable_properties_widgets.children:
-                for widget in observable.observable_properties_widgets.children:
-                    if widget.metadata.get("property_name", "") == "NAME":
-                        observable_name += widget.children[1].value
-                        break
-            self.observables_accordion.set_title(index, observable_name)
+            for widget in observable.observable_properties_widgets.children:
+                if widget.metadata.get("property_name", "") == "NAME":
+                    observable_name = widget.children[1].value
+                    break
+            titles.append(observable_name)
 
-        self.observables_accordion.set_title(len(children), "")
+        self.observables_accordion.titles = tuple(titles)

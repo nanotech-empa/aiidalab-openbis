@@ -1078,6 +1078,7 @@ class SelectExperimentWidget(ipw.VBox):
         options.sort()
         options.insert(0, ("Select experiment...", "-1"))
         self.experiment_dropdown.options = options
+        self.experiment_dropdown.value = "-1"
 
     def update_project_dropdown(self, change):
         if self.raw_projects_df is None or self.raw_projects_df.empty:
@@ -1105,6 +1106,7 @@ class SelectExperimentWidget(ipw.VBox):
         options.sort()
         options.insert(0, ("Select project...", "-1"))
         self.project_dropdown.options = options
+        self.project_dropdown.value = "-1"
 
     # ==========================================
     # 4. ACTION HANDLERS
