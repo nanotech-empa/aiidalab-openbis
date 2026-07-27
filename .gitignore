@@ -23,3 +23,5 @@ images/
 logs/
 chroma_db/
 temp_dataset_download/
+*-[0-9].ipynb
+*-[0-9][0-9].ipynb
