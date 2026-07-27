@@ -1,4 +1,4 @@
-# openBIS Data Model Documentation
+# OpenBIS Data Model Documentation
 
 This document provides a comprehensive overview of the openBIS Data Model schema configured for tracking experimental, operational, and computational workflows in advanced materials science, surface physics, and nanotechnology infrastructure. openBIS is an open-source Research Data Management (RDM) platform designed to support data provenance, reproducibility, and compliance with FAIR (Findable, Accessible, Interoperable, and Reusable) data principles.
 
