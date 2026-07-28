@@ -1077,7 +1077,12 @@ class SelectExperimentWidget(ipw.VBox):
         )
         options.sort()
         options.insert(0, ("Select experiment...", "-1"))
+        current_value = self.experiment_dropdown.value
+        option_values = {value for _, value in options}
         self.experiment_dropdown.options = options
+        self.experiment_dropdown.value = (
+            current_value if current_value in option_values else "-1"
+        )
 
     def update_project_dropdown(self, change):
         if self.raw_projects_df is None or self.raw_projects_df.empty:
@@ -1104,7 +1109,12 @@ class SelectExperimentWidget(ipw.VBox):
         )
         options.sort()
         options.insert(0, ("Select project...", "-1"))
+        current_value = self.project_dropdown.value
+        option_values = {value for _, value in options}
         self.project_dropdown.options = options
+        self.project_dropdown.value = (
+            current_value if current_value in option_values else "-1"
+        )
 
     # ==========================================
     # 4. ACTION HANDLERS

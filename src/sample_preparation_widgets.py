@@ -43,23 +43,13 @@ def set_accordion_children_titles(accordion, children, titles):
     children = list(children)
     titles = list(titles)
 
-    for index in range(max(len(accordion.children), len(children))):
-        try:
-            accordion.set_title(index, "")
-        except IndexError:
-            pass
-
-    if not children:
-        accordion.children = []
-        accordion.selected_index = None
-        return
-
     accordion.children = children
-    for index, title in enumerate(titles):
-        accordion.set_title(index, title or "")
-
-    for index in range(len(titles), len(children)):
-        accordion.set_title(index, "")
+    accordion.titles = tuple(
+        (titles[index] if index < len(titles) else "") or ""
+        for index in range(len(children))
+    )
+    if not children:
+        accordion.selected_index = None
 
 
 class SampleHistoryWidget(ipw.VBox):
@@ -225,7 +215,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
         observables_ids = self.openbis_object.get_datasets(
             type="OBSERVABLE"
         ).df.permId.values
-        if observables_ids:
+        if len(observables_ids) > 0:
             observables_accordion_children = []
             observables_accordion_titles = []
             for obs_id in observables_ids:
