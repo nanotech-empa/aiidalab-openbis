@@ -2911,7 +2911,11 @@ class RegisterObservableWidget(ipw.VBox):
         ]
 
     def change_observable_title(self, change):
-        self.observables_accordion.set_title(self.observable_index, f"{change['new']}")
+        self._set_observable_title(f"{change['new']}")
+
+    def _set_observable_title(self, title):
+        if self.observable_index < len(self.observables_accordion.children):
+            self.observables_accordion.set_title(self.observable_index, title)
 
     def remove_observable(self, b):
         children = list(self.observables_accordion.children)
