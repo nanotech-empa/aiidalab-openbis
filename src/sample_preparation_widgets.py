@@ -1265,12 +1265,10 @@ class RegisterPreparationWidget(ipw.VBox):
             ]
 
             # Reset new processes accordion
-            processes_accordion_children = list(self.new_processes_accordion.children)
-            for index, process_step in enumerate(processes_accordion_children):
-                self.new_processes_accordion.set_title(index, "")
+            self.new_processes_accordion.children = []
+            self.new_processes_accordion.titles = ()
 
             self.process_short_name = ""
-            self.new_processes_accordion.children = []
 
             # Refresh sample dropdown and sample history
             self.select_sample_dropdown.load_samples()
@@ -1679,11 +1677,8 @@ class RegisterProcessWidget(ipw.VBox):
             logger.info(f"Process {new_process_object.permId} created successfully.")
 
             # Reset new processes accordion
-            processes_accordion_children = list(self.new_processes_accordion.children)
-            for index, _ in enumerate(processes_accordion_children):
-                self.new_processes_accordion.set_title(index, "")
-
             self.new_processes_accordion.children = []
+            self.new_processes_accordion.titles = ()
 
             self.process_name_text.value = ""
             self.process_short_name_text.value = ""
