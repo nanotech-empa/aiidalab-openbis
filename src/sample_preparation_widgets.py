@@ -873,12 +873,13 @@ class RegisterPreparationWidget(ipw.VBox):
                         self.new_processes_accordion.children = (
                             processes_accordion_children
                         )
-                except Exception:
+                except Exception as e:
                     display(
                         Javascript(
                             data=f"alert('Error loading process {process_name}. Please verify that the process is correctly defined in openBIS.')"
                         )
                     )
+                    logger.error(f"Error loading process {process_name}: {e}")
 
             self.load_processes_hbox.children = []
 
@@ -2478,18 +2479,6 @@ class RegisterProcessStepWidget(ipw.VBox):
                             instrument_actions.append((action_label, action_type))
                             break
 
-                    obj_type = utils.get_openbis_object_type(
-                        self.openbis_session, type=action_type
-                    )
-                    requires_component = obj_type.metaData.get(
-                        "requires_component", "True"
-                    )
-                    if (
-                        requires_component == "False"
-                        and "BY_HAND" in instrument_components
-                    ):
-                        instrument_actions.append((action_label, action_type))
-
                 instrument_actions.insert(0, ("Action", "ACTION"))
                 INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
 
@@ -2511,23 +2500,24 @@ class RegisterProcessStepWidget(ipw.VBox):
                 break
 
         actions_list = process_step.props["actions"]
-        for action_id in actions_list:
-            action_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=action_id
-            )
-            actions_accordion_children = list(self.actions_accordion.children)
-            action_index = len(actions_accordion_children)
-            new_action_widget = RegisterActionWidget(
-                self.openbis_session,
-                self.actions_accordion,
-                action_index,
-                self.instrument_dropdown.value,
-                action_object,
-                process_step_widget=self,
-            )
-            self.instrument_dropdown.disabled = True
-            actions_accordion_children.append(new_action_widget)
-            self.actions_accordion.children = actions_accordion_children
+        if actions_list:
+            for action_id in actions_list:
+                action_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=action_id
+                )
+                actions_accordion_children = list(self.actions_accordion.children)
+                action_index = len(actions_accordion_children)
+                new_action_widget = RegisterActionWidget(
+                    self.openbis_session,
+                    self.actions_accordion,
+                    action_index,
+                    self.instrument_dropdown.value,
+                    action_object,
+                    process_step_widget=self,
+                )
+                self.instrument_dropdown.disabled = True
+                actions_accordion_children.append(new_action_widget)
+                self.actions_accordion.children = actions_accordion_children
 
     def change_process_step_title(self, change):
         title = self.name_textbox.value
@@ -2812,7 +2802,7 @@ class RegisterActionWidget(ipw.VBox):
                             if current_sample_id == prop_value:
                                 display(
                                     Javascript(
-                                        data="alert('The target substrate could not be loaded because it is the same as the selected sample. Please select a different sample and reload the process.')"
+                                        data="alert('The target substrate could not be loaded because it is the same as the selected sample.')"
                                     )
                                 )
                             else:
@@ -3069,7 +3059,12 @@ class RegisterActionWidget(ipw.VBox):
                     options=target_substrate_options, value="-1"
                 )
 
-                self.all_sample_options = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options
+                # If this widget is None, it means the user is registering a template. So, no sample is selected.
+                main_select_sample_dropdown = (
+                    self.process_step_widget.preparation_widget
+                )
+                if main_select_sample_dropdown:
+                    self.all_sample_options = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options
 
                 def update_sample_dropdown(change):
                     selected_target = change["new"]
@@ -3096,8 +3091,12 @@ class RegisterActionWidget(ipw.VBox):
                     else:
                         self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value = current_sample_id
 
-                # 4. Bind the callback to the target dropdown's 'value' trait
-                target_substrate_dropdown.observe(update_sample_dropdown, names="value")
+                # 4. Bind the callback to the target dropdown's 'value' trait.
+                # If the user is registering a template, the main sample dropdown is None, so we skip this binding.
+                if main_select_sample_dropdown:
+                    target_substrate_dropdown.observe(
+                        update_sample_dropdown, names="value"
+                    )
 
                 action_properties_widgets.append(
                     cw.HBox(
@@ -3115,7 +3114,12 @@ class RegisterActionWidget(ipw.VBox):
                 stamp_options = self.load_stamp_options()
                 stamp_dropdown = ipw.Dropdown(options=stamp_options, value="-1")
 
-                self.all_sample_options = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options
+                # If this dropdown is None, it means the user is registering a template. So, no sample is selected.
+                main_select_sample_dropdown = (
+                    self.process_step_widget.preparation_widget
+                )
+                if main_select_sample_dropdown:
+                    self.all_sample_options = self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.options
 
                 def update_sample_dropdown(change):
                     selected_target = change["new"]
@@ -3143,7 +3147,9 @@ class RegisterActionWidget(ipw.VBox):
                         self.process_step_widget.preparation_widget.select_sample_dropdown.sample_dropdown.value = current_sample_id
 
                 # 4. Bind the callback to the target dropdown's 'value' trait
-                stamp_dropdown.observe(update_sample_dropdown, names="value")
+                # If the user is registering a template, the main sample dropdown is None, so we skip this binding.
+                if main_select_sample_dropdown:
+                    stamp_dropdown.observe(update_sample_dropdown, names="value")
 
                 action_properties_widgets.append(
                     cw.HBox(
@@ -3188,11 +3194,16 @@ class RegisterActionWidget(ipw.VBox):
 
                 # Final Concentration Box
                 final_conc_label = ipw.HTML(
-                    "Final Concentration [mol/L]:", layout=shared_label_layout
+                    "Final Concentration:", layout=shared_label_layout
                 )
                 final_conc_input = ipw.FloatText(layout=shared_input_layout)
+                final_conc_unit_dropdown = ipw.Dropdown(
+                    options=["mol/L", "%"],
+                    value="mol/L",
+                    layout=ipw.Layout(width="70px"),
+                )
                 final_conc_box = ipw.HBox(
-                    [final_conc_label, final_conc_input],
+                    [final_conc_label, final_conc_input, final_conc_unit_dropdown],
                     layout=ipw.Layout(align_items="center"),
                 )
 
@@ -3221,7 +3232,7 @@ class RegisterActionWidget(ipw.VBox):
                         "Chemical:", layout=ipw.Layout(margin="0px 5px 0px 0px")
                     )
                     conc_label = ipw.HTML(
-                        "Initial Concent. [mol/L]:",
+                        "Initial Concent.:",
                         layout=ipw.Layout(margin="0px 5px 0px 15px"),
                     )
                     amount_label = ipw.HTML(
@@ -3242,9 +3253,12 @@ class RegisterActionWidget(ipw.VBox):
                     ]
 
                     component_dropdown = ipw.Dropdown(
-                        options=filtered_options, layout=ipw.Layout(width="190px")
+                        options=filtered_options, layout=ipw.Layout(width="150px")
                     )
                     init_conc_input = ipw.FloatText(layout=ipw.Layout(width="50px"))
+                    init_conc_dropdown = ipw.Dropdown(
+                        options=["mol/L", "%"], layout=ipw.Layout(width="70px")
+                    )
                     amount_input = ipw.FloatText(layout=ipw.Layout(width="50px"))
                     unit_dropdown = ipw.Dropdown(
                         options=["mg", "ml"], layout=ipw.Layout(width="60px")
@@ -3256,6 +3270,7 @@ class RegisterActionWidget(ipw.VBox):
                             component_dropdown,
                             conc_label,
                             init_conc_input,
+                            init_conc_dropdown,
                             amount_label,
                             amount_input,
                             unit_dropdown,
@@ -3348,8 +3363,9 @@ class RegisterActionWidget(ipw.VBox):
                     # Set the column headers (A, B, C, D are the default alphabetic identifiers)
                     spreadsheet.column("A").header = "Name"
                     spreadsheet.column("B").header = "Initial Concentration [mol/L]"
-                    spreadsheet.column("C").header = "Amount [mg]"
-                    spreadsheet.column("D").header = "Amount [ml]"
+                    spreadsheet.column("C").header = "Initial Concentration [%]"
+                    spreadsheet.column("D").header = "Amount [mg]"
+                    spreadsheet.column("E").header = "Amount [ml]"
 
                     # --- 3. Populate Spreadsheet Data ---
                     substances = []
@@ -3360,6 +3376,7 @@ class RegisterActionWidget(ipw.VBox):
 
                         dropdown = row.children[1]
                         init_conc = row.children[3].value
+                        init_conc_unit = row.children[4].value
                         amount = row.children[5].value
                         unit = row.children[6].value
 
@@ -3368,20 +3385,49 @@ class RegisterActionWidget(ipw.VBox):
 
                         # Write values into the cells using the .formula attribute
                         spreadsheet.cell("Name", row_num).formula = dropdown.label
+
                         spreadsheet.cell(
                             "Initial Concentration [mol/L]", row_num
-                        ).formula = init_conc
-                        spreadsheet.cell("Amount [mg]", row_num).formula = (
-                            amount if unit == "mg" else ""
+                        ).formula = (
+                            init_conc
+                            if init_conc_unit == "mol/L" and init_conc != 0
+                            else ""
                         )
+
+                        spreadsheet.cell(
+                            "Initial Concentration [%]", row_num
+                        ).formula = (
+                            init_conc
+                            if init_conc_unit == "%" and init_conc != 0
+                            else ""
+                        )
+
+                        spreadsheet.cell("Amount [mg]", row_num).formula = (
+                            amount if unit == "mg" and amount != 0 else ""
+                        )
+
                         spreadsheet.cell("Amount [ml]", row_num).formula = (
-                            amount if unit == "ml" else ""
+                            amount if unit == "ml" and amount != 0 else ""
                         )
 
                     # --- 4. Build Final Payload ---
+                    if final_conc_unit_dropdown.value == "mol/L":
+                        final_concentration_value = (
+                            final_conc_input.value
+                            if final_conc_input.value != 0
+                            else ""
+                        )
+                        final_concentration_prop = "final_concentration_mol_l"
+                    elif final_conc_unit_dropdown.value == "%":
+                        final_concentration_value = (
+                            final_conc_input.value
+                            if final_conc_input.value != 0
+                            else ""
+                        )
+                        final_concentration_prop = "final_concentration_percentage"
                     solution_data = {
                         "name": solution_name_input.value,
-                        "final_concentration_mol_l": final_conc_input.value,
+                        final_concentration_prop: final_concentration_value,
                         "substances": substances,
                         "solution_elements": spreadsheet,  # Pass the native pybis object directly!
                     }
