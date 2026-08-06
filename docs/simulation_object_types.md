@@ -1154,20 +1154,6 @@ Relation:
 ATOMISTIC_MODEL → VIBRATIONAL_SPECTROSCOPY
 ```
 
-Optional, if the vibrational calculation derives from a previous electronic-structure calculation:
-
-```text
-ENERGY_CALCULATION
-GEOMETRY_OPTIMIZATION
-```
-
-Relations:
-
-```text
-ENERGY_CALCULATION → VIBRATIONAL_SPECTROSCOPY
-GEOMETRY_OPTIMIZATION → VIBRATIONAL_SPECTROSCOPY
-```
-
 ## Child objects
 
 None required.
@@ -1243,8 +1229,6 @@ IR+Raman
 
 ```text
 parent: ATOMISTIC_MODEL
-optional parent: ENERGY_CALCULATION
-optional parent: GEOMETRY_OPTIMIZATION
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
 aiida_node: AIIDA_NODE, if AiiDA
