@@ -82,7 +82,9 @@ Examples:
 
 ## Definition
 
-Simulation that computes the energy of a fixed `ATOMISTIC_MODEL` without intentionally modifying its geometry.
+Simulation that computes the energy of a fixed `ATOMISTIC_MODEL`,
+`MOLECULE_CONCEPT`, or `CRYSTAL_CONCEPT` without intentionally modifying its
+geometry.
 
 ## Suggested method families
 
@@ -100,17 +102,20 @@ MLPotential
 
 ## Parent objects
 
-Required:
+Required (one or more of):
 
 ```text
-ATOMISTIC_MODEL [] list
-Molecule concept [list] e.g. TB calculations
+ATOMISTIC_MODEL[]
+MOLECULE_CONCEPT[]
+CRYSTAL_CONCEPT[]
 ```
 
-Relation:
+Relations:
 
 ```text
 ATOMISTIC_MODEL → ENERGY_CALCULATION
+MOLECULE_CONCEPT → ENERGY_CALCULATION
+CRYSTAL_CONCEPT → ENERGY_CALCULATION
 ```
 
 ## Child objects
@@ -140,7 +145,7 @@ ELN_PREVIEW
 Content:
 
 ```text
-image of the input ATOMISTIC_MODEL
+image of the input ATOMISTIC_MODEL, MOLECULE_CONCEPT, or CRYSTAL_CONCEPT
 ```
 
 Required if non-AiiDA:
@@ -179,7 +184,7 @@ comments: text
 ## Required linked content
 
 ```text
-parent: ATOMISTIC_MODEL
+parents: ATOMISTIC_MODEL[], MOLECULE_CONCEPT[], and/or CRYSTAL_CONCEPT[]
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
 aiida_node: AIIDA_NODE, if AiiDA
@@ -361,7 +366,8 @@ forces on all atoms
 
 ## Definition
 
-Simulation that computes the electronic band structure of an `ATOMISTIC_MODEL`.
+Simulation that computes the electronic band structure of an `ATOMISTIC_MODEL`
+or `CRYSTAL_CONCEPT`.
 
 ## Suggested method families
 
@@ -373,16 +379,18 @@ MFH-TB
 
 ## Parent objects
 
-Required:
+Required (one or more of):
 
 ```text
 ATOMISTIC_MODEL
+CRYSTAL_CONCEPT
 ```
 
-Relation:
+Relations:
 
 ```text
 ATOMISTIC_MODEL → BAND_STRUCTURE
+CRYSTAL_CONCEPT → BAND_STRUCTURE
 ```
 
 ## Child objects
@@ -461,7 +469,7 @@ unknown
 ## Required linked content
 
 ```text
-parent: ATOMISTIC_MODEL
+parent: ATOMISTIC_MODEL and/or CRYSTAL_CONCEPT
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
 aiida_node: AIIDA_NODE, if AiiDA
@@ -643,7 +651,8 @@ full volumetric charge files
 
 ## Definition
 
-Simulation or post-processing analysis that computes the electronic density of states of an `ATOMISTIC_MODEL`.
+Simulation or post-processing analysis that computes the electronic density of
+states of an `ATOMISTIC_MODEL`, `MOLECULE_CONCEPT`, or `CRYSTAL_CONCEPT`.
 
 If projected density of states is included, set:
 
@@ -661,16 +670,20 @@ MFH-TB
 
 ## Parent objects
 
-Required:
+Required (one or more of):
 
 ```text
 ATOMISTIC_MODEL
+MOLECULE_CONCEPT
+CRYSTAL_CONCEPT
 ```
 
-Relation:
+Relations:
 
 ```text
 ATOMISTIC_MODEL → DOS
+MOLECULE_CONCEPT → DOS
+CRYSTAL_CONCEPT → DOS
 ```
 
 Optional, if the DOS derives from a previous calculation:
@@ -760,7 +773,7 @@ comments: text
 ## Required linked content
 
 ```text
-parent: ATOMISTIC_MODEL
+parents: ATOMISTIC_MODEL, MOLECULE_CONCEPT, and/or CRYSTAL_CONCEPT
 optional parent: ENERGY_CALCULATION
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
