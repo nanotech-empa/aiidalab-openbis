@@ -1472,16 +1472,23 @@ other
 
 ## Parent objects
 
-Required if applicable:
+Required if applicable (one or more of):
 
 ```text
 ATOMISTIC_MODEL[]
+MOLECULE_CONCEPT[]
+CRYSTAL_CONCEPT[]
 ```
 
-Relation:
+When no `ATOMISTIC_MODEL` is available as input, link the simulation directly to
+the applicable molecule concept, crystal concept, or both.
+
+Relations:
 
 ```text
 ATOMISTIC_MODEL → UNCLASSIFIED_SIMULATION
+MOLECULE_CONCEPT → UNCLASSIFIED_SIMULATION
+CRYSTAL_CONCEPT → UNCLASSIFIED_SIMULATION
 ```
 
 Optional, if the unclassified simulation derives from another simulation:
@@ -1576,7 +1583,7 @@ comments: text
 ## Required linked content
 
 ```text
-parent: ATOMISTIC_MODEL[], if applicable
+parents: ATOMISTIC_MODEL[], MOLECULE_CONCEPT[], and/or CRYSTAL_CONCEPT[], if applicable
 children: ATOMISTIC_MODEL[], if produced
 executables: EXECUTABLE[], if known
 ELN_PREVIEW: image dataset
