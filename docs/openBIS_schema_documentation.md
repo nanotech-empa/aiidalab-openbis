@@ -32,6 +32,7 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Balance](#balance)
     * [Balance Settings](#balance-settings)
     * [By Hand](#by-hand)
+    * [By Hand Settings](#by-hand-settings)
     * [⚙️ Calibration & Optimization](#%EF%B8%8F-calibration--optimization)
     * [Chamber](#chamber)
     * [🧼 Cleaning](#-cleaning)
@@ -67,6 +68,8 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Fishing](#fishing)
     * [Gas Bottle](#gas-bottle)
     * [Geometry Optimisation](#geometry-optimisation)
+    * [Glassware](#glassware)
+    * [Glassware Settings](#glassware-settings)
     * [Grant](#grant)
     * [Group](#group)
     * [Hot Plate](#hot-plate)
@@ -84,9 +87,9 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Minimum Energy Potential](#minimum-energy-potential)
     * [Molecule](#molecule)
     * [Organisation](#organisation)
+    * [📝 Other](#-other)
     * [Oxygen Plasma](#oxygen-plasma)
     * [Oxygen Plasma Settings](#oxygen-plasma-settings)
-    * [📝 Other](#-other)
     * [PBN Stage](#pbn-stage)
     * [PBN Stage Settings](#pbn-stage-settings)
     * [PDOS](#pdos)
@@ -99,6 +102,7 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Process](#process)
     * [Process Step](#process-step)
     * [Publication](#publication)
+    * [Raw Crystal](#raw-crystal)
     * [Result](#result)
     * [Rinse](#rinse)
     * [Room](#room)
@@ -161,7 +165,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `growth_method` | Growth/Fabrication Method | Growth/Fabrication method | VARCHAR | False | False | False | |
-| `synthesised_by` | Synthesised by | Synthesised by | VARCHAR | False | False | False |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
 | `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |  |
 
@@ -203,8 +207,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
 | `slot_number` | Slot number | Slot number | INTEGER | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}`
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}`
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -289,7 +293,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `model` | Model | Model | VARCHAR | False | False | False |
 | `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}`
 | `fabrication_method` | Fabrication method | Fabrication method | VARCHAR | False | False | False |
 | `fabrication_date` | Fabrication date | Fabrication date | DATE | False | False | False |
 | `resonance_frequency_hz` | Resonance frequency [Hz] | Resonance frequency [Hz] | REAL | False | False | False | |
@@ -298,7 +302,7 @@ By mapping the detailed relationships between physical materials, hardware state
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}`
 
 ### Aiida Node
 * **Code:** `AIIDA_NODE`
@@ -334,8 +338,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}`
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}`
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -437,8 +441,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
-| `person` | Person | Person | OBJECT (All) | False | False | False |
-| `affiliations` | Affiliation(s) | Affiliation(s) | OBJECT (All) | False | True | False |
+| `person` | Person | Person | OBJECT (PERSON) | False | False | False |
+| `affiliations` | Affiliation(s) | Affiliation(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}`
 
 ### 🔥 Bakeout
 * **Code:** `BAKEOUT_LOGENTRY`
@@ -490,18 +494,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `weight_g` | Weight [g] | Weight [g] | REAL | False | False | False |
 
-### By Hand
-* **Code:** `BY_HAND`
-* **Generated code prefix:** `HAND`
-* **Semantic Annotation:**
-* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
-
-#### Section: General information
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-
 ### Band Structure
 * **Code:** `BAND_STRUCTURE`
 * **Generated code prefix:** `BAND`
@@ -523,6 +515,30 @@ By mapping the detailed relationships between physical materials, hardware state
 | `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
 | `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
 | `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
+### By Hand
+* **Code:** `BY_HAND`
+* **Generated code prefix:** `HAND`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+
+### By Hand Settings
+* **Code:** `BY_HAND_SETTINGS`
+* **Generated code prefix:** `BHST`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
 
 ### ⚙️ Calibration & Optimization
 * **Code:** `CALIBRATION_OPTIMIZATION_LOGENTRY`
@@ -559,8 +575,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}`
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}`
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### 🧼 Cleaning
@@ -648,8 +664,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### Cooldown
@@ -708,8 +724,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -760,6 +776,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `face` | Face | Face | VARCHAR | False | False | False |
 | `material` | Material | Material | VARCHAR | False | False | False |
 | `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
+| `multing_temperature_k` | Multing temperature [K] | Multing temperature [K] | REAL | False | False | False |
 | `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
 | `length_mm` | Length [mm] | Length [mm] | REAL | False | False | False |
 | `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |
@@ -773,9 +790,9 @@ By mapping the detailed relationships between physical materials, hardware state
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
 | `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -881,6 +898,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
 | `electrochemical_cell` | Electrochemical Cell | Electrochemical Cell | OBJECT (ELECTROCHEMICAL_CELL) | False | False | False |
 | `electrochemical_cell_settings` | Electrochemical Cell Settings | Electrochemical Cell Settings | OBJECT (ELECTROCHEMICAL_CELL_SETTINGS) | False | False | False |
+| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
+| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
 
 ### Deposition
 * **Code:** `DEPOSITION`
@@ -915,13 +934,13 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
 | `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}`
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
 | `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
 
 ### Dewar
@@ -1008,7 +1027,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 
 #### Section: Settings
 
@@ -1048,7 +1067,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 
 #### Section: Settings
 
@@ -1094,8 +1113,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### ⚠️ Errors & Problems
@@ -1163,7 +1182,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 
 ### Fishing
 * **Code:** `FISHING`
@@ -1195,11 +1214,11 @@ By mapping the detailed relationships between physical materials, hardware state
 | `chemical_formula` | Chemical Formula | Chemical Formula | VARCHAR | False | False | False |
 | `amount_mg` | Amount [mg] | Amount [mg] | VARCHAR | False | False | False |
 | `amount_ml` | Amount [ml] | Amount [ml] | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
 | `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -1228,6 +1247,32 @@ By mapping the detailed relationships between physical materials, hardware state
 | `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
 | `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
 | `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+
+### Glassware
+* **Code:** `GLASSWARE`
+* **Generated code prefix:** `GLAS`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
+
+### Glassware Settings
+* **Code:** `GLASSWARE_SETTINGS`
+* **Generated code prefix:** `GLST`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
 
 ### Grant
 * **Code:** `GRANT`
@@ -1263,7 +1308,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
-| `organisation` | Organisation | Organisation | OBJECT (All) | False | False | False |
+| `organisation` | Organisation | Organisation | OBJECT (ORGANISATION) | False | False | False |
 
 ### Hot Plate
 * **Code:** `HOT_PLATE`
@@ -1277,7 +1322,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -1317,8 +1362,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |
 
 
@@ -1340,25 +1385,25 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |
 
 #### Section: Components
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `pumps` | Pump(s) | Pump(s) | OBJECT (All) | False | True | False |
-| `gauges` | Gauge(s) | Gauge(s) | OBJECT (All) | False | True | False |
-| `vacuum_chambers` | Vacuum chamber(s) | Vacuum chamber(s) | OBJECT (All) | False | True | False |
-| `ports_valves` | Port(s)/Valve(s) | Port(s)/Valve(s) | OBJECT (All) | False | True | False |
-| `preparation_tools` | Preparation tool(s) | Preparation tool(s) | OBJECT (All) | False | True | False |
-| `analysers` | Analyser(s) | Analyser(s) | OBJECT (All) | False | True | False |
-| `mechanical_components` | Mechanical component(s) | Mechanical component(s) | OBJECT (All) | False | True | False |
-| `stm_components` | STM component(s) | STM component(s) | OBJECT (All) | False | True | False |
-| `control_data_acquisition` | Control and data acquisition component(s) | Control and data acquisition component(s) | OBJECT (All) | False | True | False |
-| `temperature_environment_control` | Temperature and environment control component(s) | Temperature and environment control component(s) | OBJECT (All) | False | False | False |
-| `auxiliary_components` | Auxiliary component(s) | Auxiliary component(s) | OBJECT (All) | False | True | False |
+| `pumps` | Pump(s) | Pump(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'TURBO_PUMP, ION_PUMP, SCROLL_PUMP'}` |
+| `gauges` | Gauge(s) | Gauge(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'ION_GAUGE, THYRACONT'}` |
+| `vacuum_chambers` | Vacuum chamber(s) | Vacuum chamber(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'CHAMBER'}` |
+| `ports_valves` | Port(s)/Valve(s) | Port(s)/Valve(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'VALVE'}` |
+| `preparation_tools` | Preparation tool(s) | Preparation tool(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': '6_FOLD_EVAPORATOR, DC_EVAPORATOR, CRYOSTAT, COMPONENT, PBN_STAGE, VALVE, SPUTTER_GUN'}` |
+| `analysers` | Analyser(s) | Analyser(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'ANALYSER'}`
+| `mechanical_components` | Mechanical component(s) | Mechanical component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'COMPONENT'}` |
+| `stm_components` | STM component(s) | STM component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'STM_TIP, COMPONENT, ELECTRONICS'}` |
+| `control_data_acquisition` | Control and data acquisition component(s) | Control and data acquisition component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'SPM_CONTROLLER'}` |
+| `temperature_environment_control` | Temperature and environment control component(s) | Temperature and environment control component(s) | OBJECT (All) | False | False | False | | `{'object_subtypes': 'CRYOSTAT, COMPONENT'}` |
+| `auxiliary_components` | Auxiliary component(s) | Auxiliary component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'COMPONENT, ANALYSER, ELECTRONICS'}` |
 
 #### Section: Materials
 
@@ -1366,14 +1411,14 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `substances` | Substance(s) | Substance(s) | OBJECT (SUBSTANCE) | False | True | False |
 | `crystals` | Crystal(s) | Crystal(s) | OBJECT (CRYSTAL) | False | True | False |
-| `wafer_samples` | Wafer sample(s) | Wafer sample(s) | OBJECT (All) | False | True | False |
+| `wafer_samples` | Wafer sample(s) | Wafer sample(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': '2D_LAYER_MATERIAL, WAFER_SUBSTRATE'}` |
 
 #### Section: Accessories
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `tip_sensors` | Tip sensor(s) | Tip sensor(s) | OBJECT (All) | False | True | False |
-| `consumables` | Consumable(s) | Consumable(s) | OBJECT (All) | False | True | False |
+| `tip_sensors` | Tip sensor(s) | Tip sensor(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'STM_TIP, AFM_SENSOR'}` |
+| `consumables` | Consumable(s) | Consumable(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'GAS_BOTTLE'}` |
 
 ### Ion Gauge
 * **Code:** `ION_GAUGE`
@@ -1394,8 +1439,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -1443,8 +1488,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### Light Irradiation
@@ -1527,6 +1572,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `measurement_folder_path` | Measurement Folder Path | Measurement Folder Path | VARCHAR | False | False | False |
 
+
 ### Mechanical Pressing
 * **Code:** `MECHANICAL_PRESSING`
 * **Generated code prefix:** `MEPR`
@@ -1542,6 +1588,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `duration` | Duration | Duration | VARCHAR | False | False | False |
 | `stamp` | Stamp | Stamp | OBJECT (SAMPLE) | False | False | False |
+| `by_hand` | By hand | By hand | OBJECT (BY_HAND) | False | False | False |
+| `by_hand_settings` | By hand settings | By hand settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
 
 ### Minimum Energy Potential
 * **Code:** `MINIMUM_ENERGY_POTENTIAL`
@@ -1627,7 +1675,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -1668,8 +1716,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -1732,11 +1780,10 @@ By mapping the detailed relationships between physical materials, hardware state
 | `email` | Email | Email | VARCHAR | False | False | False |
 | `work_phone` | Work Phone | Work Phone | VARCHAR | False | False | False |
 | `work_status` | Work Status | Work Status | CONTROLLEDVOCABULARY (WORKSTATUSENUM) | False | False | False |
-| `office` | Office | Office | OBJECT (All) | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `office` | Office | Office | OBJECT (ROOM) | False | False | False |
+| `job_title` | Job Title | Job Title | VARCHAR | False | False | False |
+| `affiliations` | Affiliation(s) | Affiliation(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `nanotech_surfaces_subgroup` | nanotech@surfaces subgroup | nanotech@surfaces subgroup | CONTROLLEDVOCABULARY (NANOTECHSURFACESSUBGROUPENUM) | False | False | False |
 
 ### Pipette
 * **Code:** `PIPETTE`
@@ -1859,7 +1906,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `actions` | Actions | Actions | OBJECT (All) | False | True | False |
+| `actions` | Actions | Actions | OBJECT (All) | False | True | False | | `{'object_subtypes': 'ACTION, ANNEALING, COOLDOWN, DELAMINATION, DEPOSITION, DILUTION, DOSING, DROPCAST_COATING, ETCHING, FISHING, MECHANICAL_PRESSING, PLASMA, RINSE, SOAKING, SPIN_COATING, SPUTTERING'}` |
+
 
 ### Publication
 * **Code:** `PUBLICATION`
@@ -1882,6 +1930,20 @@ By mapping the detailed relationships between physical materials, hardware state
 | `abstract` | Abstract | Abstract | MULTILINE_VARCHAR | False | False | False |
 | `year` | Year | Year | INTEGER | False | False | False |
 | `dataset_url` | Dataset URL | Dataset URL | HYPERLINK | False | False | False |
+
+### Raw Crystal
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `material` | Material | Material | VARCHAR | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### Result
 * **Code:** `RESULT`
@@ -1917,8 +1979,9 @@ By mapping the detailed relationships between physical materials, hardware state
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |
-| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |
+| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
+| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
+| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
 
 ### Room
 * **Code:** `ROOM`
@@ -1958,8 +2021,9 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `object_status` | Object Status | Object Status | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+
 
 ### Scroll Pump
 * **Code:** `SCROLL_PUMP`
@@ -1980,8 +2044,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### Soaking
@@ -2039,8 +2103,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -2107,8 +2171,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### Sputter Gun
@@ -2130,8 +2194,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -2196,12 +2260,11 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `material` | Material | Material | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
 | `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `assembled_by` | Assembled by | Assembled by | OBJECT (All) | False | False | False |
+| `assembled_by` | Assembled by | Synthesised by | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
 | `assembled_date` | Assembled date | Assembled date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### STM Simulation
@@ -2252,10 +2315,10 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `model` | Model | Model | VARCHAR | False | False | False |
 | `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `fabrication_method` | Fabrication method | Fabrication method | VARCHAR | False | False | False |
 | `fabrication_date` | Fabrication date | Fabrication date | DATE | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
@@ -2284,8 +2347,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
 | `studied_by` | Studied by | Studied by | OBJECT (PERSON) | False | True | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}`
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
 | `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
@@ -2293,14 +2356,15 @@ By mapping the detailed relationships between physical materials, hardware state
 #### Section: Chemical properties
 
 | `evaporation_temperatures` | Evaporation temperatures | Evaporation temperatures | XML | False | False | False | | `{'custom_widget': 'Spreadsheet'}`
-| `purity` | Purity | Purity | REAL | False | False | False |
+| `purity` | Purity (%) | Purity (%), e.g. 99, >99, 80-90, ~90 | VARCHAR | False | False | False |
+| `concentration_percentage` | Concentration (%) | Concentration (%) | VARCHAR | False | False | False |
 | `substance_type` | Substance type | Substance type | VARCHAR | False | False | False |
 
 #### Section: Storage
 
 | `amount_mg` | Amount [mg] | Amount [mg] | REAL | False | False | False |
 | `amount_ml` | Amount [ml] | Amount [ml] | REAL | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
 | `storage_field` | Storage Field | Storage Field | VARCHAR | False | False | False |
 
@@ -2323,7 +2387,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -2346,8 +2410,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ### Unclassified Simulation
@@ -2383,7 +2447,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -2426,8 +2490,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -2502,8 +2566,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
 | `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -2532,10 +2596,10 @@ By mapping the detailed relationships between physical materials, hardware state
 | `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
 | `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
 | `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -2553,16 +2617,16 @@ By mapping the detailed relationships between physical materials, hardware state
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `material` | Material | Material | VARCHAR | False | False | False |
-| `purity` | Purity (%) | Purity (%) | REAL | False | False | False |
+| `purity` | Purity (%) | Purity (%), e.g. 99, >99, 80-90, ~90 | VARCHAR | False | False | False |
 | `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
 | `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
 | `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
 | `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
 | `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -2775,6 +2839,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | FRIDGE | Fridge |
 | NO_OXYGEN | No Oxygen |
 | POISONOUS | Poisonous | Poisonous
+| TIGHTLY_CLOSED | Tightly Closed | Tightly Closed
 
 ### Work Status
 * **Code:** `WORKSTATUSENUM`
