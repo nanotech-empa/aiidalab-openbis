@@ -35,6 +35,7 @@ Controlled vocabulary:
 
 ```text
 DFT
+DFTB
 TB
 MFH-TB
 DMRG
@@ -45,32 +46,85 @@ MLPotential
 other
 ```
 
-## Global method modifiers
-
-Controlled vocabulary:
+The three method fields have different roles:
 
 ```text
-hybrid
-vdW
-DFT+U
-spin_collinear
-spin_orbit
-spin_non_collinear
+method_family: broad controlled category
+method_label: family-scoped method or model name
+method_modifiers: zero or more compatible method qualifiers
 ```
 
-`method_modifiers` is a multi-value field.
+`method_label` must be validated against `method_family`. For example, `PBE` is valid for `DFT`, but not for `TB`. Method-specific parameter files, basis sets, pseudopotentials, active spaces, trained-model versions, and similar detailed inputs remain in the provenance bundle or AiiDA archive.
+
+### Candidate method labels by family
+
+This is a curated vocabulary for review. Each family also permits `other`; the supplied value should then be recorded verbatim.
+
+| `method_family` | Candidate `method_label` values |
+| :--- | :--- |
+| `DFT` | `LDA`, `PZ81`, `PW92`, `PBE`, `PBEsol`, `revPBE`, `RPBE`, `PW91`, `BLYP`, `TPSS`, `revTPSS`, `SCAN`, `r2SCAN`, `M06-L`, `PBE0`, `HSE03`, `HSE06`, `B3LYP`, `TPSSh`, `M06-2X`, `CAM-B3LYP`, `wB97X`, `wB97X-D`, `B2PLYP`, `r2SCAN-3c`, `PBEh-3c`, `B97-3c`, `other` |
+| `DFTB` | `DFTB0`, `DFTB1`, `SCC-DFTB` (`DFTB2`), `DFTB3`, `LC-DFTB`, `TD-DFTB`, `GFN0-xTB`, `GFN1-xTB`, `GFN2-xTB`, `IPEA-xTB`, `other` |
+| `TB` | `Slater-Koster TB`, `empirical TB`, `extended Huckel`, `Wannier TB`, `NRL-TB`, `second-moment TB`, `other` |
+| `MFH-TB` | `mean-field Hubbard`, `extended Hubbard`, `PPP`, `Kane-Mele-Hubbard`, `other` |
+| `DMRG` | `DMRG`, `iDMRG`, `tDMRG`, `finite-temperature DMRG`, `DMRG-SCF`, `DMRG-CASPT2`, `DMRG-NEVPT2`, `other` |
+| `CAS` | `CASCI`, `RASCI`, `GASCI`, `other` |
+| `CASSCF` | `CASSCF`, `SA-CASSCF`, `RASSCF`, `GASSCF`, `DMRG-SCF`, `other` |
+| `ForceField` | `AMBER`, `CHARMM`, `GROMOS`, `OPLS-AA`, `GAFF`, `UFF`, `MMFF`, `COMPASS`, `DREIDING`, `MARTINI`, `EAM`, `MEAM`, `Finnis-Sinclair`, `Stillinger-Weber`, `Tersoff`, `REBO`, `AIREBO`, `EDIP`, `COMB`, `ReaxFF`, `other` |
+| `MLPotential` | `Behler-Parrinello`, `GAP`, `SNAP`, `MTP`, `ACE`, `POD`, `ANI`, `DeepPot`, `SchNet`, `PaiNN`, `NequIP`, `Allegro`, `MACE`, `CHGNet`, `M3GNet`, `ALIGNN-FF`, `other` |
+| `other` | Free-text method label |
+
+Several important families do not fit the current vocabulary and should be considered separately: Hartree-Fock, semi-empirical quantum chemistry (`AM1`, `PM3`, `PM6`, `PM7`, `OM2`), Moller-Plesset perturbation theory, coupled cluster, general configuration interaction, multireference perturbation theory (`CASPT2`, `NEVPT2`), `GW`/`BSE`, and quantum Monte Carlo.
+
+Reference lists: [Libxc functionals](https://libxc.gitlab.io/functionals/), [DFTB+ documentation](https://www.dftbplus.org/documentation.html), [xTB methods](https://xtb-docs.readthedocs.io/en/latest/basics.html), [OpenMolcas methods](https://molcas.gitlab.io/OpenMolcas/sphinx/users.guide/programs/rasscf.html), [block2 DMRG methods](https://block2.readthedocs.io/en/latest/), [GROMACS force fields](https://manual.gromacs.org/current/user-guide/force-fields.html), [LAMMPS interaction models](https://docs.lammps.org/pair_style.html), [NequIP](https://nequip.readthedocs.io/en/latest/), and [MACE models](https://mace-docs.readthedocs.io/en/latest/guide/foundation_models.html).
+
+## Global method modifiers
+
+`method_modifiers` is a multi-value field. Values are family-scoped rather than universally valid.
+
+| Compatible family | Candidate modifier values |
+| :--- | :--- |
+| `DFT` | `hybrid`, `range_separated`, `double_hybrid`, `DFT+U`, `D2`, `D3`, `D3(BJ)`, `D4`, `TS`, `MBD`, `vdW-DF`, `vdW-DF2`, `rVV10`, `spin_collinear`, `spin_non_collinear`, `spin_orbit` |
+| `DFTB` | `SCC`, `third_order`, `DFTB+U`, `long_range_corrected`, `D3`, `D4`, `spin_collinear`, `spin_non_collinear`, `spin_orbit` |
+| `TB` | `orthogonal`, `non_orthogonal`, `spin_collinear`, `spin_non_collinear`, `spin_orbit` |
+| `MFH-TB` | `restricted`, `unrestricted`, `spin_collinear`, `spin_non_collinear`, `spin_orbit` |
+| `DMRG` | `finite_system`, `infinite_system`, `time_dependent`, `finite_temperature`, `spin_adapted`, `state_averaged`, `spin_orbit` |
+| `CAS`, `CASSCF` | `state_specific`, `state_averaged`, `restricted_active_space`, `generalized_active_space`, `spin_orbit` |
+| `ForceField` | `all_atom`, `united_atom`, `coarse_grained`, `reactive`, `polarizable` |
+| `MLPotential` | `equivariant`, `message_passing`, `local`, `long_range`, `charge_aware`, `foundation_model` |
+| `other` | Free-text modifier |
 
 Examples:
 
 ```text
-[]
-["vdW"]
-["hybrid", "vdW"]
-["hybrid", "spin_orbit"]
-["DFT+U", "spin_collinear"]
+method_family: DFT
+method_label: PBE
+method_modifiers: [D3, spin_collinear]
+
+method_family: DFT
+method_label: PBE0
+method_modifiers: [hybrid]
+
+method_family: TB
+method_label: Wannier TB
+method_modifiers: [spin_orbit]
 ```
 
-`spin_collinear` and `spin_non_collinear` should not be used together.
+`spin_collinear` and `spin_non_collinear` are mutually exclusive. A specific correction belongs in `method_modifiers`; for example, use `method_label: PBE` with modifier `D3`, not `method_label: PBE-D3`.
+
+### Allowed families by simulation object
+
+| Simulation object | Allowed `method_family` values |
+| :--- | :--- |
+| `ENERGY_CALCULATION` | `DFT`, `DFTB`, `TB`, `MFH-TB`, `DMRG`, `CAS`, `CASSCF`, `ForceField`, `MLPotential` |
+| `GEOMETRY_OPTIMIZATION` | `DFT`, `DFTB`, `CASSCF`, `ForceField`, `MLPotential` |
+| `BAND_STRUCTURE` | `DFT`, `TB`, `MFH-TB` |
+| `CHARGE_ANALYSIS` | `DFT`, `TB`, `MFH-TB`, `CAS`, `CASSCF` |
+| `DOS` | `DFT`, `TB`, `MFH-TB` |
+| `REACTION_BARRIER` | `DFT`, `DFTB`, `CASSCF`, `ForceField`, `MLPotential` |
+| `SPM` | `DFT`, `TB`, `MFH-TB`, `DMRG`, `CASSCF` |
+| `VIBRATIONAL_SPECTROSCOPY` | `DFT`, `DFTB`, `ForceField`, `MLPotential` |
+| `MOLECULAR_DYNAMICS` | `DFT`, `DFTB`, `ForceField`, `MLPotential` |
+| `UNCLASSIFIED_SIMULATION` | Any global method family |
 
 ---
 
@@ -166,18 +220,19 @@ tar.gz or zip with relevant input/output files
 name: string
 method_family: enum
 method_modifiers: enum[]
-charge: float
-total_energy: quantity (Hartree)
+charge: float (atomic units)
+total_energy: float (Hartree)
 converged: boolean
 ```
 
 ## Optional properties
 
 ```text
+method_label: string
 spin_multiplicity: integer
-total_magnetization: quantity (Bohr magnetons)
-fermi_energy: quantity (eV) [] list
-electronic_gap: quantity (eV) [] list
+total_magnetization: float (Bohr magnetons)
+fermi_energy: float[] (eV)
+electronic_gap: float[] (eV)
 comments: text
 ```
 
@@ -304,24 +359,25 @@ tar.gz or zip with relevant input/output files
 name: string
 method_family: enum
 method_modifiers: enum[]
-charge: number
+charge: float (atomic units)
 constrained: boolean
 cell_optimization: boolean
-final_energy: quantity [Hartree]
+final_energy: float (Hartree)
 converged: boolean
 ```
 
 ## Optional properties
 
 ```text
+method_label: string
 constraints_description: text
 cell_constraints: string
-final_max_force: quantity [Hartree/bohr]
+final_max_force: float (Hartree/bohr)
 number_of_steps: integer
 spin_multiplicity: integer
-total_magnetization: quantity [Bohr magnetons]
-fermi_energy: quantity [eV] [] list
-electronic_gap: quantity [eV] [] list
+total_magnetization: float (Bohr magnetons)
+fermi_energy: float[] (eV)
+electronic_gap: float[] (eV)
 comments: text
 ```
 
@@ -441,18 +497,18 @@ tar.gz or zip with relevant input/output files
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
-band_gap: quantity
+charge: float (atomic units)
+electronic_gap: float[] (eV)
 converged: boolean
 ```
 
 ## Optional properties
 
 ```text
-fermi_energy: quantity
+method_label: string
+fermi_energy: float[] (eV)
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization: float (Bohr magnetons)
 k_path: string
 electronic_gap_type: enum
 comments: text
@@ -595,8 +651,7 @@ tar.gz or zip with relevant input/output files, including a file containing the 
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
+charge: float (atomic units)
 charge_analysis_method: string
 converged: boolean
 ```
@@ -604,10 +659,11 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 spin_multiplicity: integer
-total_magnetization: quantity
-fermi_energy: quantity
-electronic_gap: quantity
+total_magnetization: float (Bohr magnetons)
+fermi_energy: float[] (eV)
+electronic_gap: float[] (eV)
 comments: text
 ```
 
@@ -746,8 +802,7 @@ tar.gz or zip with relevant input/output files, including a file containing the 
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
+charge: float (atomic units)
 PDOS: boolean
 converged: boolean
 ```
@@ -761,12 +816,13 @@ projection_description: text
 ## Optional properties
 
 ```text
-fermi_energy: quantity
-energy_min: quantity
-energy_max: quantity
+method_label: string
+fermi_energy: float[] (eV)
+energy_min: float (eV)
+energy_max: float (eV)
 spin_multiplicity: integer
-total_magnetization: quantity
-electronic_gap: quantity
+total_magnetization: float (Bohr magnetons)
+electronic_gap: float[] (eV)
 comments: text
 ```
 
@@ -906,21 +962,21 @@ tar.gz or zip with relevant input/output files, including a file containing the 
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
+charge: float (atomic units)
 path_method: enum
-forward_barrier: quantity
+forward_barrier: float (eV)
 converged: boolean
 ```
 
 ## Optional properties
 
 ```text
-backward_barrier: quantity
+method_label: string
+backward_barrier: float (eV)
 number_of_images: integer
 reaction_coordinate_description: text
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization: float (Bohr magnetons)
 comments: text
 ```
 
@@ -983,6 +1039,8 @@ Simulation that computes a scanning probe microscopy observable for an `ATOMISTI
 DFT
 TB
 MFH-TB
+DMRG
+CASSCF
 ```
 
 ## Parent objects
@@ -1059,8 +1117,7 @@ tar.gz or zip with relevant input/output files, including the simulated SPM imag
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
+charge: float (atomic units)
 spm_mode: enum
 converged: boolean
 ```
@@ -1068,14 +1125,15 @@ converged: boolean
 ## Optional properties
 
 ```text
-bias_voltage: quantity
-height: quantity
-isovalue: quantity
+method_label: string
+bias_voltage: float
+height: float
+isovalue: float
 tip_model: string
 scan_area: string
 image_mode: string
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1202,8 +1260,7 @@ tar.gz or zip with relevant input/output files, including vibrational frequencie
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
+charge: float (atomic units)
 vibrational_mode: enum
 converged: boolean
 ```
@@ -1211,8 +1268,9 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1364,23 +1422,24 @@ tar.gz or zip with relevant input/output files, including the trajectory or traj
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
-charge: number
-time_step: quantity
-total_time: quantity
+charge: float (atomic units)
+time_step: float (fs)
+total_time: float (ns)
+number_of_steps: integer
 completed: boolean
 ```
 
 ## Optional properties
 
 ```text
+method_label: string
 ensemble: enum
-temperature: quantity
-pressure: quantity
+temperature: float
+pressure: float
 thermostat: string
 barostat: string
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1571,9 +1630,9 @@ converged: boolean
 method_family: enum
 method_modifiers: enum[]
 method_label: string
-charge: number
+charge: float (atomic units)
 main_result_description: text
-main_result_value: quantity
+main_result_value: float
 comments: text
 ```
 
@@ -1606,4 +1665,3 @@ stdout/stderr
 raw numerical arrays
 large intermediate files
 ```
-
