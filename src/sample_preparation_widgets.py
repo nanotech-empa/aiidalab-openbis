@@ -21,11 +21,16 @@ OPENBIS_OBJECT_TYPES, OPENBIS_OBJECT_CODES = (
     INTERFACE_CONFIG_INFO["object_types_codes"],
 )
 MATERIALS_TYPES = INTERFACE_CONFIG_INFO["slabs_types"]
-OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
+OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
+    "Collections"
+]["Paths"]
 INSTRUMENTS_COMPONENTS = {}
 INSTRUMENTS_ACTIONS = {}
 
-processes_project = "/LAB205_METHODS/PROCESSES"
+OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects"][
+    "Paths"
+]
+processes_project = OPENBIS_PROJECTS_PATHS.get("Process")
 
 if not os.path.exists("logs"):
     os.mkdir("logs")

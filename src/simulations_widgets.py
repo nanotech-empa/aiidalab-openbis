@@ -11,10 +11,12 @@ import contextlib
 
 string_io = io.StringIO()
 
-MATERIALS_CONCEPTS_TYPES = utils.read_json("metadata/materials_concepts_types.json")
-SIMULATION_TYPES = utils.read_json("metadata/simulation_types.json")
-OPENBIS_OBJECT_TYPES = utils.read_json("metadata/object_types.json")
-WORKCHAIN_VIEWERS = utils.read_json("metadata/workchain_viewers.json")
+MATERIALS_CONCEPTS_TYPES = utils.read_json("config/openbis_config.json")[
+    "OpenBIS Materials Concepts Types"
+]
+SIMULATION_TYPES = utils.read_json("config/openbis_config.json")["Simulations"]["Types"]
+OPENBIS_OBJECT_TYPES = utils.read_json("config/openbis_config.json")["OpenBIS Types"]
+WORKCHAIN_VIEWERS = utils.read_json("config/openbis_config.json")["Workchain Viewers"]
 
 
 class ImportSimulationsWidget(ipw.VBox):
