@@ -916,6 +916,8 @@ By mapping the detailed relationships between physical materials, hardware state
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `duration` | Duration | Duration | VARCHAR | False | False | False |
 | `substance` | Substance | Substance | OBJECT (SUBSTANCE) | False | False | False |
+| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
+| `by_hand_settings` | By Hand Settings | By Hand | OBJECT (BY_HAND_SETTINGS) | False | False | False |
 | `6_fold_evaporator` | 6-Fold Evaporator | 6-Fold Evaporator | OBJECT (6_FOLD_EVAPORATOR) | False | False | False |
 | `6_fold_evaporator_settings` | 6-Fold Evaporator Settings | 6-Fold Evaporator Settings | OBJECT (6_FOLD_EVAPORATOR_SETTINGS) | False | False |False |
 | `dc_evaporator` | DC Evaporator | DC Evaporator | OBJECT (DC_EVAPORATOR) | False | False | False |
