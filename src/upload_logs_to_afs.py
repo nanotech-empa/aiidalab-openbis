@@ -8,9 +8,15 @@ CONFIG_FILENAME = "/home/jovyan/apps/aiidalab-openbis/config/config.json"
 CONFIG = utils.read_json(CONFIG_FILENAME)
 OPENBIS_SESSION, SESSION_DATA = utils.connect_openbis_aiida()
 
-TARGET_SAMPLE_ID = "20260402094947708-6476"
+OPENBIS_AFS_CONFIG = utils.read_json(
+    "/home/jovyan/apps/aiidalab-openbis/config/openbis_config.json"
+)["AFS"]
+TARGET_SAMPLE_ID = OPENBIS_AFS_CONFIG.get("target_sample_id")
+UPLOAD_INTERVAL_SECONDS = OPENBIS_AFS_CONFIG.get(
+    "upload_interval_seconds", 300
+)  # Upload every 5 minutes
+
 LOG_FILE_PATH = "/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log"
-UPLOAD_INTERVAL_SECONDS = 300  # Upload every 5 minutes
 
 if not os.path.exists("logs"):
     os.mkdir("logs")

@@ -16,12 +16,17 @@ OPENBIS_OBJECT_TYPES, _ = (
 MATERIALS_CONCEPTS_TYPES = INTERFACE_CONFIG_INFO["slabs_concepts_types"]
 INSTRUMENTS_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
 
-SIMULATION_TYPES = utils.read_json("metadata/simulation_types.json")
-OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
+SIMULATION_TYPES = utils.read_json("config/openbis_config.json")["Simulations"]["Types"]
+OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
+    "Collections"
+]["Paths"]
 
-institutions_project = "/LAB205_ADMINISTRATIVE/ORGANISATIONS"
-people_project = "/LAB205_ADMINISTRATIVE/PEOPLE"
-locations_project = "/LAB205_ADMINISTRATIVE/LOCATIONS"
+OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects"][
+    "Paths"
+]
+institutions_project = OPENBIS_PROJECTS_PATHS.get("Institution")
+people_project = OPENBIS_PROJECTS_PATHS.get("Person")
+locations_project = OPENBIS_PROJECTS_PATHS.get("Location")
 
 
 class AtomModelWidget(ipw.VBox):
