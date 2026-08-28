@@ -11,7 +11,7 @@ import os
 import logging
 import pathlib
 from traitlets import TraitError
-import custom_widgets as cw
+from . import custom_widgets as cw
 from bs4 import BeautifulSoup
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
