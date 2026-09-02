@@ -1,0 +1,118 @@
+{
+    "AFS": {
+        "target_sample_id": "/LAB205_METHODS/PROCESSES/AFS_Sample",
+        "upload_interval_seconds": 300
+    },
+    "Projects": {
+        "Paths": {
+            "Process": "/LAB205_METHODS/PROCESSES",
+            "Institution": "/LAB205_ADMINISTRATIVE/ORGANISATIONS",
+            "Person": "/LAB205_ADMINISTRATIVE/PEOPLE",
+            "Location": "/LAB205_ADMINISTRATIVE/LOCATIONS"
+        }
+    },
+    "Collections": {
+        "Paths": {
+            "Atomistic Model": "/LAB205_MATERIALS/ATOMISTIC_MODELS/ATOMISTIC_MODEL_COLLECTION",
+            "AiiDA Node": "/LAB205_MATERIALS/AIIDA_NODES/AIIDA_NODE_COLLECTION",
+            "Precursor Molecule": "/LAB205_MATERIALS/MOLECULES/PRECURSOR_COLLECTION",
+            "Precursor Substance": "/LAB205_MATERIALS/MOLECULES/PRECURSOR_COLLECTION",
+            "Reaction Product": "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+            "Reaction Product Concept": "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+            "Sample": "/LAB205_MATERIALS/SAMPLES/SAMPLE_COLLECTION",
+            "Instrument": "/LAB205_EQUIPMENT/ILOG/INSTRUMENT_COLLECTION",
+            "Settings": "/LAB205_EQUIPMENT/ILOG/ILOG_SETTING_COLLECTION",
+            "Chemical": "/LAB205_MATERIALS/RAW_MATERIALS/CHEMICAL_COLLECTION",
+            "Gas Bottles": "/LAB205_MATERIALS/RAW_MATERIALS/GAS_BOTTLE_COLLECTION",
+            "Open Source Code": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/OPEN_SOURCE_SOFTWARE_COLLECTION"
+        }
+    },
+    "Simulations": {
+        "Types": {
+            "Geometry optimisation": "GEOMETRY_OPTIMISATION",
+            "Band structure": "BAND_STRUCTURE",
+            "PDOS": "PDOS",
+            "Vibrational spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
+            "Unclassified simulation": "UNCLASSIFIED_SIMULATION",
+            "STM simulation": "STM_SIMULATION"
+        }
+    },
+    "Workchain Viewers": {
+        "QeAppWorkChain": "/apps/quantum-espresso/qe.ipynb",
+        "Cp2kGeoOptWorkChain": "/apps/surfaces/view_geometry_optimization.ipynb",
+        "Cp2kStmWorkChain": "/apps/surfaces/view_stm.ipynb"
+    },
+    "OpenBIS Types": {
+        "Process": "PROCESS",
+        "Process Step": "PROCESS_STEP",
+        "Measurement Session": "MEASUREMENT_SESSION",
+        "Atomistic Model": "ATOMISTIC_MODEL",
+        "Aiida Node": "AIIDA_NODE",
+        "Band Structure": "BAND_STRUCTURE",
+        "Geometry Optimisation": "GEOMETRY_OPTIMISATION",
+        "PDOS": "PDOS",
+        "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
+        "Unclassified Simulation": "UNCLASSIFIED_SIMULATION",
+        "Code": "CODE",
+        "Molecule": "MOLECULE",
+        "Reaction Product Concept": "REACTION_PRODUCT_CONCEPT",
+        "Reaction Product": "REACTION_PRODUCT",
+        "Analysis": "ANALYSIS",
+        "Sample": "SAMPLE",
+        "Preparation": "PREPARATION",
+        "Annealing": "ANNEALING",
+        "Coating": "COATING",
+        "Cooldown": "COOLDOWN",
+        "Deposition": "DEPOSITION",
+        "Dosing": "DOSING",
+        "Delamination": "DELAMINATION",
+        "Etching": "ETCHING",
+        "Field Emission": "FIELD_EMISSION",
+        "Fishing": "FISHING",
+        "Light Irradiation": "LIGHT_IRRADIATION",
+        "Mechanical Pressing": "MECHANICAL_PRESSING",
+        "Rinse": "RINSE",
+        "Sputtering": "SPUTTERING",
+        "Substance": "SUBSTANCE",
+        "Instrument": "INSTRUMENT",
+        "Instrument STM": "INSTRUMENT.STM",
+        "6-Fold Evaporator": "6_FOLD_EVAPORATOR",
+        "6-Fold Evaporator Settings": "6_FOLD_EVAPORATOR_SETTINGS",
+        "DC Evaporator": "DC_EVAPORATOR",
+        "DC Evaporator Settings": "DC_EVAPORATOR_SETTINGS",
+        "PBN Stage": "PBN_STAGE",
+        "PBN Stage Settings": "PBN_STAGE_SETTINGS",
+        "Ion Gauge": "ION_GAUGE",
+        "Ion Gauge Settings": "ION_GAUGE_SETTINGS",
+        "Analyser": "ANALYSER",
+        "Analyser Settings": "ANALYSER_SETTINGS",
+        "Cryostat": "CRYOSTAT",
+        "Cryostat Settings": "CRYOSTAT_SETTINGS",
+        "Sputter Gun": "SPUTTER_GUN",
+        "Sputter Gun Settings": "SPUTTER_GUN_SETTINGS",
+        "Result": "RESULT",
+        "Current": "CURRENT_OBSERVABLE",
+        "Elemental Composition": "ELEMENTAL_COMPOSITION_OBSERVABLE",
+        "Pressure": "PRESSURE_OBSERVABLE",
+        "Voltage": "VOLTAGE_OBSERVABLE",
+        "Temperature": "TEMPERATURE_OBSERVABLE",
+        "Resistance": "RESISTANCE_OBSERVABLE",
+        "Inductance": "INDUCTANCE_OBSERVABLE",
+        "pH Value": "PH_VALUE_OBSERVABLE",
+        "Speed": "SPEED_OBSERVABLE",
+        "Force": "FORCE_OBSERVABLE",
+        "Flux": "FLUX_OBSERVABLE",
+        "Observable": "OBSERVABLE",
+        "AiiDA Node": "AIIDA_NODE",
+        "Draft": "DRAFT",
+        "STM Simulation": "STM_SIMULATION",
+        "Gas Bottle": "GAS_BOTTLE",
+        "Valve": "VALVE",
+        "Valve Settings": "VALVE_SETTINGS"
+    },
+    "OpenBIS Materials Concepts Types": {
+        "Crystal concept": "CRYSTAL_CONCEPT",
+        "2D layer material": "2D_LAYER_MATERIAL",
+        "Wafer substrate": "WAFER_SUBSTRATE"
+    }
+}

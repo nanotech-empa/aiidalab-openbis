@@ -12,6 +12,7 @@ from IPython.display import display, Javascript
 from functools import lru_cache
 
 string_io = io.StringIO()
+ELN_CONFIG = Path.home() / ".aiidalab" / "aiidalab-eln-config.json"
 
 # OpenBIS-AiiDAlab functions
 
@@ -162,16 +163,18 @@ def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
 
 def connect_openbis_aiida(eln_url=None):
     try:
-        eln_config = Path.home() / ".aiidalab" / "aiidalab-eln-config.json"
-        eln_config.parent.mkdir(
+        ELN_CONFIG.parent.mkdir(
             parents=True, exist_ok=True
         )  # making sure that the folder exists.
-        config = read_json(eln_config)
+        config = read_json(ELN_CONFIG)
         if not eln_url:
             eln_url = config["default"]
         eln_token = config[eln_url]["token"]
         openbis_session, session_data = connect_openbis(eln_url, eln_token)
     except KeyError:
+        eln_token = ""
+        openbis_session, session_data = None, None
+    except FileNotFoundError:
         eln_token = ""
         openbis_session, session_data = None, None
     return openbis_session, session_data

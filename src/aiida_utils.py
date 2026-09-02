@@ -14,8 +14,10 @@ import random
 from . import utils
 import logging
 
-OPENBIS_COLLECTIONS_PATHS = utils.read_json("metadata/collection_paths.json")
-OPENBIS_OBJECT_TYPES = utils.read_json("metadata/object_types.json")
+OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
+    "Collections"
+]["Paths"]
+OPENBIS_OBJECT_TYPES = utils.read_json("config/openbis_config.json")["OpenBIS Types"]
 OPENBIS_SESSION, SESSION_DATA = utils.connect_openbis_aiida()
 
 
