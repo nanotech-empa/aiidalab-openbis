@@ -49,7 +49,6 @@ By mapping the detailed relationships between physical materials, hardware state
     * [DC Evaporator](#dc-evaporator)
     * [DC Evaporator Settings](#dc-evaporator-settings)
     * [💨 Degasing](#-degasing)
-    * [Delamination](#delamination)
     * [Deposition](#deposition)
     * [Device Substrate](#device-substrate)
     * [Dewar](#dewar)
@@ -62,7 +61,6 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Electrochemical Cell Settings](#electrochemical-cell-settings)
     * [Electronics](#electronics)
     * [⚠️ Errors & Problems](#%EF%B8%8F-errors--problems)
-    * [Etching](#etching)
     * [Field Emission](#field-emission)
     * [Filament](#filament)
     * [Fishing](#fishing)
@@ -88,15 +86,12 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Molecule](#molecule)
     * [Organisation](#organisation)
     * [📝 Other](#-other)
-    * [Oxygen Plasma](#oxygen-plasma)
-    * [Oxygen Plasma Settings](#oxygen-plasma-settings)
     * [PBN Stage](#pbn-stage)
     * [PBN Stage Settings](#pbn-stage-settings)
     * [PDOS](#pdos)
     * [Person](#person)
     * [Pipette](#pipette)
     * [Pipette Settings](#pipette-settings)
-    * [Plasma](#plasma)
     * [Potential Energy Calculation](#potential-energy-calculation)
     * [Preparation](#preparation)
     * [Process](#process)
@@ -109,10 +104,10 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Sample](#sample)
     * [Scroll Pump](#scroll-pump)
     * [Soaking](#soaking)
+    * [Solution](#solution)
     * [Software](#software)
     * [Spin Coater](#spin-coater)
     * [Spin Coater Settings](#spin-coater-settings)
-    * [Spin Coating](#spin-coating)
     * [SPM Controller](#spm-controller)
     * [Sputter Gun](#sputter-gun)
     * [Sputter Gun Settings](#sputter-gun-settings)
@@ -599,7 +594,7 @@ By mapping the detailed relationships between physical materials, hardware state
 * **Code:** `COATING`
 * **Generated code prefix:** `COAT`
 * **Semantic Annotation:**
-* **Metadata:** `{'icon': '🧥', 'type': 'action'}`
+* **Metadata:** `{'icon': '💧', 'type': 'action'}`
 
 #### Section:
 
@@ -609,8 +604,11 @@ By mapping the detailed relationships between physical materials, hardware state
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |
-| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |
+| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
+| `pipette` | Pipette | Pipette | OBJECT (PIPETTE) | False | False | False |
+| `pipette_settings` | Pipette settings | Pipette settings | OBJECT (PIPETTE_SETTINGS) | False | False | False |
+| `spin_coater` | Spin Coater | Spin Coater | OBJECT (SPIN_COATER) | False | False | False |
+| `spin_coater_settings` | Spin Coater Settings | Spin Coater Settings | OBJECT (SPIN_COATER_SETTINGS) | False | False | False |
 
 ### Code
 * **Code:** `CODE`
@@ -881,26 +879,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `duration` | Duration | Duration | REAL | False | False | False |
 | `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
 
-### Delamination
-* **Code:** `DELAMINATION`
-* **Generated code prefix:** `DELA`
-* **Semantic Annotation:**
-* **Metadata:** `{'icon': '🧩', 'type': 'action'}`
-
-#### Section:
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
-| `electrochemical_cell` | Electrochemical Cell | Electrochemical Cell | OBJECT (ELECTROCHEMICAL_CELL) | False | False | False |
-| `electrochemical_cell_settings` | Electrochemical Cell Settings | Electrochemical Cell Settings | OBJECT (ELECTROCHEMICAL_CELL_SETTINGS) | False | False | False |
-| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
-| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
-
 ### Deposition
 * **Code:** `DEPOSITION`
 * **Generated code prefix:** `DEPO`
@@ -998,23 +976,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `draft_type` | Draft type | Draft type | CONTROLLEDVOCABULARY (DRAFTTYPEENUM) | False | False | False |
-
-### Dropcast-Coating
-* **Code:** `DROPCAST_COATING`
-* **Generated code prefix:** `DPCT`
-* **Semantic Annotation:**
-* **Metadata:** `{'icon': '💧', 'type': 'action'}`
-
-#### Section:
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
-| `pipette` | Pipette | Pipette | OBJECT (PIPETTE) | False | False | False |
-| `pipette_settings` | Pipette settings | Pipette settings | OBJECT (PIPETTE_SETTINGS) | False | False | False |
 
 ### E-beam Heater
 * **Code:** `E_BEAM_HEATER`
@@ -1134,26 +1095,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
-
-### Etching
-* **Code:** `ETCHING`
-* **Generated code prefix:** `ETCH`
-* **Semantic Annotation:**
-* **Metadata:** `{'icon': '📌', 'type': 'action'}`
-
-#### Section:
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
-| `vacuum_oven` | Vacuum Oven | Vacuum Oven | OBJECT (VACUUM_OVEN) | False | False | False |
-| `vacuum_oven_settings` | Vacuum Oven Settings | Vacuum Oven Settings | OBJECT (VACUUM_OVEN_SETTINGS) | False | False | False |
-| `hot_plate` | Hot Plate | Hot Plate | OBJECT (HOT_PLATE) | False | False | False |
-| `hot_plate_settings` | Hot Plate Settings | Hot Plate Settings | OBJECT (HOT_PLATE_SETTINGS) | False | False | False |
 
 ### Field Emission
 * **Code:** `FIELD_EMISSION`
@@ -1665,40 +1606,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
 
-### Oxygen Plasma
-* **Code:** `OXYGEN_PLASMA`
-* **Generated code prefix:** `OXPL`
-* **Semantic Annotation:**
-* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
-
-#### Section: General information
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM'}` |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-
-#### Section: Settings
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `power_w` | Power [W] | Power [W] | REAL | False | False | False |
-
-### Oxygen Plasma Settings
-* **Code:** `OXYGEN_PLASMA_SETTINGS`
-* **Generated code prefix:** `OXPS`
-* **Semantic Annotation:**
-* **Metadata:**
-
-#### Section: General information
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `power_w` | Power [W] | Power [W] | REAL | False | False | False |
-
 ### PBN Stage
 * **Code:** `PBN_STAGE`
 * **Generated code prefix:** `PBNS`
@@ -1819,22 +1726,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
-
-### Plasma
-* **Code:** `PLASMA`
-* **Generated code prefix:** `PLSM`
-* **Semantic Annotation:**
-* **Metadata:** `{'icon': '⚡', 'type': 'action'}`
-
-#### Section:
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `oxygen_plasma` | Oxygen Plasma | Oxygen Plasma | OBJECT (OXYGEN_PLASMA) | False | False | False |
-| `oxygen_plasma_settings` | Oxygen Plasma Settings | Oxygen Plasma Settings | OBJECT (OXYGEN_PLASMA_SETTINGS) | False | False | False |
 
 ### Potential Energy Calculation
 * **Code:** `POTENTIAL_ENERGY_CALCULATION`
@@ -2069,6 +1960,10 @@ By mapping the detailed relationships between physical materials, hardware state
 | `vacuum_oven_settings` | Vacuum Oven Settings | Vacuum Oven Settings | OBJECT (VACUUM_OVEN_SETTINGS) | False | False | False |
 | `hot_plate` | Hot Plate | Hot Plate | OBJECT (HOT_PLATE) | False | False | False |
 | `hot_plate_settings` | Hot Plate Settings | Hot Plate Settings | OBJECT (HOT_PLATE_SETTINGS) | False | False | False |
+| `electrochemical_cell` | Electrochemical Cell | Electrochemical Cell | OBJECT (ELECTROCHEMICAL_CELL) | False | False | False |
+| `electrochemical_cell_settings` | Electrochemical Cell Settings | Electrochemical Cell Settings | OBJECT (ELECTROCHEMICAL_CELL_SETTINGS) | False | False | False |
+| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
+| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
 
 ### Software
 * **Code:** `SOFTWARE`
@@ -2085,6 +1980,24 @@ By mapping the detailed relationships between physical materials, hardware state
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `version` | Version | Version | VARCHAR | False | False | False |
 | `url` | URL | URL | VARCHAR | False | False | False |
+
+### Solution
+* **Code:** `SOLUTION`
+* **Generated code prefix:** `SLTN`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section:
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `substances` | Substances | Substances | OBJECT (SUBSTANCE) | False | True | False | | |
+| `solution_elements` | Solution Elements | Solution Elements | XML | False | False | False | | `{'custom_widget': 'Spreadsheet'}` |
+| `final_concentration_mol_l` | Final Concentration [mol/L] | Final Concentration [mol/L] | REAL | False | False | False |
+| `final_concentration_percentage` | Final Concentration [%] | Final Concentration [%] | REAL | False | False | False |
 
 ### Spin Coater
 * **Code:** `SPIN_COATER`
@@ -2135,24 +2048,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `deceleration_rpm_sec` | Deceleration [RPM/sec] | Deceleration [RPM/sec] | REAL | False | False | False |
 | `custom_acceleration` | Custom acceleration | Custom acceleration | VARCHAR | False | False | False |
 | `custom_deceleration` | Custom deceleration | Custom deceleration | VARCHAR | False | False | False |
-
-### Spin Coating
-* **Code:** `SPIN_COATING`
-* **Generated code prefix:** `SPNC`
-* **Semantic Annotation:**
-* **Metadata:** `{'icon': '🌀', 'type': 'action'}`
-
-#### Section:
-
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `spin_coater` | Spin Coater | Spin Coater | OBJECT (SPIN_COATER) | False | False | False |
-| `spin_coater_settings` | Spin Coater Settings | Spin Coater Settings | OBJECT (SPIN_COATER_SETTINGS) | False | False | False |
-| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
 
 ### SPM Controller
 * **Code:** `SPM_CONTROLLER`
