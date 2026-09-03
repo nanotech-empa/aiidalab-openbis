@@ -1,15 +1,16 @@
-from collections import defaultdict
-import json
-from pathlib import Path
-from pybis import Openbis
-import yaml
-import datetime
-import os
-import ipywidgets as ipw
-import io
 import contextlib
-from IPython.display import display, Javascript
+import datetime
+import io
+import json
+import os
+from collections import defaultdict
 from functools import lru_cache
+from pathlib import Path
+
+import ipywidgets as ipw
+import yaml
+from IPython.display import Javascript, display
+from pybis import Openbis
 
 string_io = io.StringIO()
 ELN_CONFIG = Path.home() / ".aiidalab" / "aiidalab-eln-config.json"
@@ -129,17 +130,28 @@ def find_first_atomistic_model(openbis_session, openbis_object, openbis_type):
 
 def find_openbis_simulations(ob_session, root_obj, simulation_types):
     simulation_objects = set()
-    stack = [root_obj]  # start with the root object
+    visited = set()
+    stack = [root_obj]
 
     while stack:
-        current_obj = stack.pop()  # get the next object to process
-        children = current_obj.children
-        if children is not None:
-            for child_ident in children:
-                child_object = get_openbis_object(ob_session, sample_ident=child_ident)
-                if child_object.type in simulation_types.values():
-                    simulation_objects.add(child_object)
-                stack.append(child_object)
+        current_obj = stack.pop()
+        current_id = str(
+            getattr(current_obj, "permId", None)
+            or getattr(current_obj, "identifier", id(current_obj))
+        )
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+
+        for child_ident in current_obj.children or []:
+            child_object = get_openbis_object(
+                ob_session,
+                sample_ident=child_ident,
+            )
+            child_type = str(getattr(child_object.type, "code", child_object.type))
+            if child_type in simulation_types.values():
+                simulation_objects.add(child_object)
+            stack.append(child_object)
 
     return simulation_objects
 

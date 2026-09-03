@@ -5,6 +5,11 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
+import time
+from pathlib import Path
+from urllib.parse import quote
 
 import ipywidgets as ipw
 import pandas as pd
@@ -29,6 +34,8 @@ OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
 WORKCHAIN_VIEWERS = utils.read_json("config/openbis_config.json")["Workchain Viewers"]
 
 _CREATE_NEW = "__create_new_openbis_object__"
+_DOWNLOAD_ROOT = Path(__file__).resolve().parent.parent / "temp_dataset_download"
+_DOWNLOAD_LIFETIME_SECONDS = 600
 
 
 class ImportSimulationsWidget(ipw.VBox):
@@ -129,12 +136,20 @@ class ImportSimulationsWidget(ipw.VBox):
         )
 
         self.import_simulations_button = ipw.Button(
-            tooltip="Import simulations",
+            description="Import into AiiDA",
+            tooltip="Import the AiiDA archives linked to the selected simulations",
             icon="download",
-            layout=ipw.Layout(width="100px", height="50px"),
+            layout=ipw.Layout(width="180px", height="50px"),
+        )
+        self.download_simulation_data_button = ipw.Button(
+            description="Download data",
+            tooltip="Download datasets from selected simulations without an AiiDA archive",
+            icon="download",
+            layout=ipw.Layout(width="180px", height="50px"),
         )
 
         self.import_simulations_message_html = ipw.HTML()
+        self.download_simulation_data_message_html = ipw.HTML()
 
         # Increase search button icon size
         increase_search_button = ipw.HTML(
@@ -153,6 +168,7 @@ class ImportSimulationsWidget(ipw.VBox):
         self.add_reacprod_concept_button.on_click(self.add_reacprod_concept)
         self.search_button.on_click(self.search_simulations)
         self.import_simulations_button.on_click(self.import_aiida_nodes)
+        self.download_simulation_data_button.on_click(self.download_simulation_data)
 
         self.children = [
             self.select_molecules_title,
@@ -168,8 +184,64 @@ class ImportSimulationsWidget(ipw.VBox):
             self.search_logical_operator_hbox,
             increase_search_button,
             self.found_simulations_hbox,
-            self.import_simulations_button,
+            ipw.HBox(
+                [
+                    self.import_simulations_button,
+                    self.download_simulation_data_button,
+                ]
+            ),
             self.import_simulations_message_html,
+            self.download_simulation_data_message_html,
+        ]
+
+    @staticmethod
+    def _simulation_label(simulation):
+        name = simulation.props.get("name") or simulation.permId
+        type_code = getattr(simulation.type, "code", simulation.type)
+        availability = (
+            "AiiDA archive" if simulation.props.get("aiida_node") else "data only"
+        )
+        return f"{name} - {type_code} ({simulation.permId}) " f"[{availability}]"
+
+    @classmethod
+    def _simulation_options(cls, simulations):
+        return [
+            (cls._simulation_label(simulation), str(simulation.permId))
+            for simulation in sorted(
+                simulations,
+                key=lambda item: (
+                    cls._simulation_label(item).lower(),
+                    str(item.permId),
+                ),
+            )
+        ]
+
+    @staticmethod
+    def _partition_simulations_by_archive(simulations):
+        archive_simulations = {}
+        data_only_simulations = []
+        for simulation in simulations:
+            archive_id = simulation.props.get("aiida_node")
+            if archive_id:
+                archive_simulations.setdefault(str(archive_id), []).append(simulation)
+            else:
+                data_only_simulations.append(simulation)
+        return archive_simulations, data_only_simulations
+
+    @staticmethod
+    def _simulation_names(simulations):
+        return ", ".join(
+            html.escape(str(simulation.props.get("name") or simulation.permId))
+            for simulation in simulations
+        )
+
+    def _selected_simulation_objects(self):
+        return [
+            utils.get_openbis_object(
+                self.openbis_session,
+                sample_ident=simulation_permid,
+            )
+            for simulation_permid in self.found_simulations_select_multiple.value
         ]
 
     def search_simulations(self, b):
@@ -192,9 +264,7 @@ class ImportSimulationsWidget(ipw.VBox):
         simulation_permid_set = set()
         logical_operator = self.search_logical_operator_dropdown.value
 
-        if (
-            logical_operator == "OR"
-        ):  # In OR, all the simulations found are added to the list
+        if logical_operator == "OR":
             for parent in parents_permid_list:
                 parent_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=parent
@@ -202,12 +272,11 @@ class ImportSimulationsWidget(ipw.VBox):
                 simulation_objects_children = utils.find_openbis_simulations(
                     self.openbis_session, parent_object, SIMULATION_EXPORT_TYPES
                 )
-
-                for simulation_object in simulation_objects_children:
-                    simulation_permid = simulation_object.permId
-                    simulation_permid_set.add(simulation_permid)
-
-        else:  # In AND, only the simulations that appear in all selected materials are added to the list
+                simulation_permid_set.update(
+                    str(simulation_object.permId)
+                    for simulation_object in simulation_objects_children
+                )
+        else:
             for idx, parent in enumerate(parents_permid_list):
                 parent_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=parent
@@ -215,95 +284,251 @@ class ImportSimulationsWidget(ipw.VBox):
                 simulation_objects_children = utils.find_openbis_simulations(
                     self.openbis_session, parent_object, SIMULATION_EXPORT_TYPES
                 )
-
-                parent_simulation_permid_list = []
-                for simulation_object in simulation_objects_children:
-                    simulation_permid = simulation_object.permId
-                    parent_simulation_permid_list.append(simulation_permid)
-
+                parent_simulation_permids = {
+                    str(simulation_object.permId)
+                    for simulation_object in simulation_objects_children
+                }
                 if idx == 0:
-                    simulation_permid_set = set(parent_simulation_permid_list)
+                    simulation_permid_set = parent_simulation_permids
                 else:
-                    simulation_permid_set.intersection_update(
-                        parent_simulation_permid_list
-                    )
+                    simulation_permid_set.intersection_update(parent_simulation_permids)
 
-        simulation_permid_list = list(simulation_permid_set)
-        aiida_node_permid_list = []
-        for simulation_permid in simulation_permid_list:
-            simulation_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=simulation_permid
+        simulations = [
+            utils.get_openbis_object(
+                self.openbis_session,
+                sample_ident=simulation_permid,
             )
-            simulation_aiida_node = simulation_object.props["aiida_node"]
-            aiida_node_permid_list.append(simulation_aiida_node)
+            for simulation_permid in simulation_permid_set
+        ]
+        self.found_simulations_select_multiple.options = self._simulation_options(
+            simulations
+        )
+        self.import_simulations_message_html.value = ""
+        self.download_simulation_data_message_html.value = ""
 
-        simulation_aiida_node_list = []
-        for idx, simulation_permid in enumerate(simulation_permid_list):
-            simulation_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=simulation_permid
+    @staticmethod
+    def _find_aiida_archive_dataset(aiida_node_object):
+        archive_files = []
+        for dataset in aiida_node_object.get_datasets() or []:
+            for filename in dataset.file_list or []:
+                if str(filename).lower().endswith(".aiida"):
+                    archive_files.append((dataset, str(filename)))
+
+        if not archive_files:
+            raise ValueError("The linked AIIDA_NODE has no .aiida archive dataset.")
+        if len(archive_files) > 1:
+            raise ValueError(
+                "The linked AIIDA_NODE has more than one .aiida archive file."
             )
-            simulation_info = f"{simulation_object.props['name']} - {simulation_object.type.code} ({simulation_object.permId})"
-            aiida_node_permid = aiida_node_permid_list[idx]
-            simulation_aiida_node_list.append([simulation_info, aiida_node_permid])
+        return archive_files[0]
 
-        self.found_simulations_select_multiple.options = simulation_aiida_node_list
+    @staticmethod
+    def _downloaded_dataset_path(destination, dataset, filename):
+        expected_path = Path(destination) / str(dataset.permId) / filename
+        if expected_path.is_file():
+            return expected_path
+
+        candidates = [
+            path
+            for path in Path(destination).rglob(Path(filename).name)
+            if path.is_file()
+        ]
+        if len(candidates) != 1:
+            raise FileNotFoundError(
+                f"Could not locate downloaded openBIS file {filename}."
+            )
+        return candidates[0]
+
+    def _import_aiida_archive(self, aiida_node_permid):
+        aiida_node_object = utils.get_openbis_object(
+            self.openbis_session,
+            sample_ident=aiida_node_permid,
+        )
+        dataset, filename = self._find_aiida_archive_dataset(aiida_node_object)
+
+        with tempfile.TemporaryDirectory(
+            prefix="aiidalab-openbis-import-"
+        ) as destination:
+            dataset.download(files=[filename], destination=destination)
+            archive_path = self._downloaded_dataset_path(
+                destination,
+                dataset,
+                filename,
+            )
+            result = subprocess.run(
+                ["verdi", "archive", "import", str(archive_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                message = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(message or "AiiDA archive import failed.")
+
+        workchain_uuid = aiida_node_object.props.get("wfms_uuid")
+        if not workchain_uuid:
+            raise ValueError("The linked AIIDA_NODE has no workflow UUID.")
+        return orm.load_node(workchain_uuid)
+
+    @classmethod
+    def _import_success_message(cls, simulations, workchain):
+        simulation_names = cls._simulation_names(simulations)
+        viewer_link = WORKCHAIN_VIEWERS.get(workchain.process_label)
+        if viewer_link:
+            notebook_link = f"{viewer_link}?pk={workchain.pk}"
+            return (
+                f'<a href="{html.escape(notebook_link, quote=True)}">'
+                f"Imported AiiDA archive for {simulation_names}.</a>"
+            )
+        return (
+            f"Imported AiiDA archive for {simulation_names}. "
+            f"No viewer is configured for {html.escape(workchain.process_label)}."
+        )
 
     def import_aiida_nodes(self, b):
-        selected_simulations = self.found_simulations_select_multiple.value
-        selected_labels = [
-            label
-            for label, value in self.found_simulations_select_multiple.options
-            if value in selected_simulations
+        selected_simulations = self._selected_simulation_objects()
+        if not selected_simulations:
+            self.import_simulations_message_html.value = (
+                "<span style='color:#b00020'>Select at least one simulation.</span>"
+            )
+            return
+
+        archives, data_only = self._partition_simulations_by_archive(
+            selected_simulations
+        )
+        messages = []
+        for archive_id, simulations in archives.items():
+            try:
+                workchain = self._import_aiida_archive(archive_id)
+            except Exception as error:  # noqa: BLE001 - surface import errors in UI
+                messages.append(
+                    "<span style='color:#b00020'>Could not import the AiiDA "
+                    f"archive for {self._simulation_names(simulations)}: "
+                    f"{html.escape(str(error))}</span>"
+                )
+            else:
+                messages.append(self._import_success_message(simulations, workchain))
+
+        if data_only:
+            messages.append(
+                f"{self._simulation_names(data_only)} "
+                "has no linked AiiDA archive and was not imported. "
+                "Use Download data instead."
+            )
+
+        self.import_simulations_message_html.value = "<br>".join(messages)
+
+    @staticmethod
+    def _dataset_type_code(dataset):
+        return str(getattr(dataset.type, "code", dataset.type))
+
+    @classmethod
+    def _downloadable_datasets(cls, simulation):
+        return [
+            dataset
+            for dataset in simulation.get_datasets() or []
+            if cls._dataset_type_code(dataset) != "ELN_PREVIEW"
         ]
 
-        selected_simulations_messages = ""
-        for idx, aiida_node_permid in enumerate(selected_simulations):
-            selected_label = selected_labels[idx]
+    @classmethod
+    def _prepare_data_download(cls, simulations, download_root=None):
+        root = Path(download_root or _DOWNLOAD_ROOT)
+        root.mkdir(parents=True, exist_ok=True)
+        destination = Path(
+            tempfile.mkdtemp(
+                prefix="openbis-simulation-data-",
+                dir=str(root),
+            )
+        )
 
-            if aiida_node_permid:
-                aiida_node_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=aiida_node_permid
+        try:
+            downloaded_datasets = set()
+            for simulation in simulations:
+                for dataset in cls._downloadable_datasets(simulation):
+                    dataset_id = str(dataset.permId)
+                    if dataset_id in downloaded_datasets:
+                        continue
+                    dataset.download(destination=str(destination))
+                    downloaded_datasets.add(dataset_id)
+
+            downloaded_files = sorted(
+                path for path in destination.rglob("*") if path.is_file()
+            )
+            if not downloaded_files:
+                raise ValueError(
+                    "The selected data-only simulations have no downloadable "
+                    "non-preview datasets."
                 )
-                object_datasets = aiida_node_object.get_datasets()
+        except Exception:
+            shutil.rmtree(destination, ignore_errors=True)
+            raise
 
-                for dataset in object_datasets:
-                    dataset_filenames = dataset.file_list
-                    is_aiida_file = False
-                    if len(dataset_filenames) == 1:
-                        for filename in dataset_filenames:
-                            if ".aiida" in filename:
-                                is_aiida_file = True
+        return destination, downloaded_files
 
-                    if is_aiida_file:
-                        dataset.download(destination="aiida_nodes")
-                        aiida_node_filename = dataset.file_list[0]
-                        aiida_node_filepath = (
-                            f"aiida_nodes/{dataset.permId}/{aiida_node_filename}"
-                        )
-                        command = ["verdi", "archive", "import", aiida_node_filepath]
+    @staticmethod
+    def _remove_download_after_delay(path, delay_seconds):
+        time.sleep(delay_seconds)
+        shutil.rmtree(path, ignore_errors=True)
 
-                        # Execute the command
-                        result = subprocess.run(command, capture_output=True, text=True)
-                        if result.returncode != 0:
-                            print(f"An error occurred: {result.stderr}")
-                        else:
-                            workchain = orm.load_node(
-                                aiida_node_object.props["wfms_uuid"]
-                            )
-                            workchain_viewer_link = WORKCHAIN_VIEWERS[
-                                workchain.process_label
-                            ]
-                            notebook_link = f"{workchain_viewer_link}?pk={workchain.pk}"
+    @classmethod
+    def _schedule_download_cleanup(cls, path):
+        threading.Thread(
+            target=cls._remove_download_after_delay,
+            args=(path, _DOWNLOAD_LIFETIME_SECONDS),
+            daemon=True,
+        ).start()
 
-                            simulation_message = f'<a href="{notebook_link}">Workchain {selected_label} successfully imported.</a>\n'
-                            selected_simulations_messages += simulation_message
+    def download_simulation_data(self, b):
+        selected_simulations = self._selected_simulation_objects()
+        if not selected_simulations:
+            self.download_simulation_data_message_html.value = (
+                "<span style='color:#b00020'>Select at least one simulation.</span>"
+            )
+            return
 
-                        shutil.rmtree(f"aiida_nodes/{dataset.permId}/")
-            else:
-                simulation_message = f"Workchain {selected_label} cannot be imported because it was done manually.\n"
-                selected_simulations_messages += simulation_message
+        archives, data_only = self._partition_simulations_by_archive(
+            selected_simulations
+        )
+        if not data_only:
+            self.download_simulation_data_message_html.value = (
+                "The selected simulations link AiiDA archives. "
+                "Use Import into AiiDA instead."
+            )
+            return
 
-        self.import_simulations_message_html.value = selected_simulations_messages
+        try:
+            download_directory, downloaded_files = self._prepare_data_download(
+                data_only
+            )
+            links = []
+            for downloaded_file in downloaded_files:
+                relative_path = downloaded_file.relative_to(Path.home())
+                href = f"/files/{quote(relative_path.as_posix(), safe='/')}"
+                label = downloaded_file.relative_to(download_directory).as_posix()
+                links.append(
+                    f'<a href="{html.escape(href, quote=True)}" '
+                    f'download="{html.escape(downloaded_file.name, quote=True)}">'
+                    f"{html.escape(label)}</a>"
+                )
+        except Exception as error:  # noqa: BLE001 - surface download errors in UI
+            self.download_simulation_data_message_html.value = (
+                "<span style='color:#b00020'>Could not prepare the simulation "
+                f"data download: {html.escape(str(error))}</span>"
+            )
+            return
+
+        message = (
+            f"Download data for {self._simulation_names(data_only)}: "
+            f"{', '.join(links)}. "
+            "These temporary links expire after 10 minutes."
+        )
+        if archives:
+            message += (
+                " Simulations with linked AiiDA archives were not included; "
+                "use Import into AiiDA for those."
+            )
+        self.download_simulation_data_message_html.value = message
+        self._schedule_download_cleanup(download_directory)
 
     def load_material_type_widgets(self, change):
         if self.material_type_dropdown.value == "-1":
