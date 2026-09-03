@@ -42,11 +42,16 @@ The exporter resolves provenance in three steps:
    CODE, COMPUTER, executable path, plugin entry point, full label, and inferred
    version recorded as provenance.
 
-If more than one equally specific object matches, export stops. Missing or
-ambiguous CODE and COMPUTER records must be corrected in openBIS before retrying.
-A missing EXECUTABLE is displayed for review and requires explicit confirmation
-before it is created. This preflight finishes before any AiiDA archive or
-simulation object is uploaded.
+If more than one equally specific object matches, automatic resolution stops.
+When automatic matching fails, the export widget allows the user to select an
+existing CODE or COMPUTER explicitly, or create a new one in the appropriate
+collection. New COMPUTER objects require an ORGANISATION location. Exact-name
+duplicates are refused.
+
+A missing EXECUTABLE can likewise be mapped to an existing object or explicitly
+confirmed for creation. User selections are keyed by AiiDA UUID, and newly
+created EXECUTABLE objects record those UUIDs for automatic reuse. This preflight
+finishes before any AiiDA archive or simulation object is uploaded.
 
 ## Global method families
 

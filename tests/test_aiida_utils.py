@@ -298,6 +298,124 @@ def test_code_matching_is_strictly_label_based(monkeypatch, aiida_utils):
         aiida_utils._ensure_executables(object(), object())
 
 
+def test_manual_code_and_computer_selection_override_failed_name_match(
+    monkeypatch, aiida_utils
+):
+    computer = SimpleNamespace(
+        uuid="computer-uuid",
+        label="unmatched-computer",
+        description="",
+    )
+    code = SimpleNamespace(
+        uuid="code-uuid",
+        label="pw-7.4",
+        full_label="pw-7.4@localhost",
+        description="Quantum ESPRESSO pw.x",
+        filepath_executable="/opt/qe/bin/pw.x",
+        default_calc_job_plugin="quantumespresso.pw",
+        computer=computer,
+    )
+    software = FakeOpenbisObject("CODE", {"name": "Quantum ESPRESSO"})
+    openbis_computer = FakeOpenbisObject("COMPUTER", {"name": "MacBook Pro 7723"})
+    objects = {
+        "CODE": [software],
+        "COMPUTER": [openbis_computer],
+        "EXECUTABLE": [],
+    }
+    monkeypatch.setattr(aiida_utils, "_workchain_codes", lambda _workchain: [code])
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "get_openbis_objects",
+        lambda _session, type: objects[type],
+    )
+
+    with pytest.raises(aiida_utils.MissingExecutablesError) as error:
+        aiida_utils._ensure_executables(
+            object(),
+            object(),
+            provenance_overrides={
+                "Code": {"code-uuid": software.permId},
+                "Computer": {
+                    "computer-uuid": openbis_computer.permId,
+                },
+            },
+        )
+
+    assert error.value.requirements[0]["code_name"] == "Quantum ESPRESSO"
+
+
+def test_manual_executable_selection_bypasses_name_matching(monkeypatch, aiida_utils):
+    computer = SimpleNamespace(
+        uuid="computer-uuid",
+        label="unmatched-computer",
+        description="",
+    )
+    code = SimpleNamespace(
+        uuid="code-uuid",
+        label="unmatched-code",
+        full_label="unmatched-code@unmatched-computer",
+        description="",
+        filepath_executable="/opt/code",
+        default_calc_job_plugin="custom.code",
+        computer=computer,
+    )
+    executable = FakeOpenbisObject("EXECUTABLE", {"name": "Existing executable"})
+    objects = {"CODE": [], "COMPUTER": [], "EXECUTABLE": [executable]}
+    monkeypatch.setattr(aiida_utils, "_workchain_codes", lambda _workchain: [code])
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "get_openbis_objects",
+        lambda _session, type: objects[type],
+    )
+
+    resolved = aiida_utils._ensure_executables(
+        object(),
+        object(),
+        provenance_overrides={
+            "Executable": {"code-uuid": executable.permId},
+        },
+    )
+
+    assert resolved == [executable.permId]
+
+
+def test_failed_match_exposes_manual_resolution_context(monkeypatch, aiida_utils):
+    computer = SimpleNamespace(
+        uuid="computer-uuid",
+        label="localhost",
+        description="Empa MacBook Pro 7723",
+    )
+    code = SimpleNamespace(
+        uuid="code-uuid",
+        label="cubehandler",
+        full_label="cubehandler@localhost",
+        description="cubehandler from https://example.org/cubehandler",
+        filepath_executable="/opt/cubehandler",
+        default_calc_job_plugin="nanotech_empa.cubehandler",
+        computer=computer,
+    )
+    software = FakeOpenbisObject("CODE", {"name": "CP2K"})
+    objects = {
+        "CODE": [software],
+        "COMPUTER": [FakeOpenbisObject("COMPUTER", {"name": "MacBook Pro 7723"})],
+        "EXECUTABLE": [],
+    }
+    monkeypatch.setattr(aiida_utils, "_workchain_codes", lambda _workchain: [code])
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "get_openbis_objects",
+        lambda _session, type: objects[type],
+    )
+
+    with pytest.raises(aiida_utils.OpenbisNameMatchError) as error:
+        aiida_utils._ensure_executables(object(), object())
+
+    assert error.value.object_kind == "Code"
+    assert error.value.aiida_uuid == "code-uuid"
+    assert error.value.aiida_label == "cubehandler"
+    assert error.value.openbis_options == ((software.permId, "CP2K"),)
+
+
 def test_name_matching_prefers_label_then_longest_name(aiida_utils):
     generic = FakeOpenbisObject("COMPUTER", {"name": "Daint"})
     specific = FakeOpenbisObject("COMPUTER", {"name": "daint@ALPS"})
@@ -345,9 +463,15 @@ def test_export_workchain_preflights_before_archive(monkeypatch, aiida_utils):
         "properties": {},
     }
 
-    def stop_at_preflight(_session, pending, create_missing=False):
+    def stop_at_preflight(
+        _session,
+        pending,
+        create_missing=False,
+        provenance_overrides=None,
+    ):
         assert pending == [workchain]
         assert create_missing is False
+        assert provenance_overrides is None
         raise aiida_utils.MissingExecutablesError([requirement])
 
     archives = []
@@ -364,6 +488,53 @@ def test_export_workchain_preflights_before_archive(monkeypatch, aiida_utils):
         aiida_utils.export_workchain(object(), "/PROJECT/EXPERIMENT", workchain.uuid)
 
     assert archives == []
+
+
+def test_export_workchain_passes_preflight_executables_to_exporter(
+    monkeypatch, aiida_utils
+):
+    workchain = SimpleNamespace(
+        uuid="workchain-uuid",
+        pk=123,
+        process_label="Cp2kGeoOptWorkChain",
+        is_finished_ok=True,
+    )
+    resolved = {"code-uuid": "executable-permid"}
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _uuid: workchain)
+    monkeypatch.setattr(
+        aiida_utils,
+        "get_all_preceding_main_workchains",
+        lambda _uuid: [workchain.uuid],
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "get_uuids_from_oBIS",
+        lambda _session: {"wc_uuids": [], "structure_uuids": []},
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "_ensure_executables_for_workchains",
+        lambda *_args, **_kwargs: resolved,
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "create_and_export_AiiDA_archive",
+        lambda *_args: SimpleNamespace(permId="archive-permid"),
+    )
+    exporter_calls = []
+
+    def run_exporter(*args):
+        exporter_calls.append(args)
+        return "exported"
+
+    monkeypatch.setattr(aiida_utils, "_run_exporter", run_exporter)
+
+    result = aiida_utils.export_workchain(
+        object(), "/PROJECT/EXPERIMENT", workchain.uuid
+    )
+
+    assert result == "exported"
+    assert exporter_calls[0][-1] is resolved
 
 
 @pytest.mark.parametrize("include_cell_optimization", [False, True])

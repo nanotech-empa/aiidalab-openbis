@@ -2,6 +2,7 @@ import contextlib
 import html
 import io
 import json
+import re
 import shutil
 import subprocess
 
@@ -22,7 +23,12 @@ SIMULATION_EXPORT_TYPES = utils.read_json("config/openbis_config.json")[
     "Simulation Export Types"
 ]
 OPENBIS_OBJECT_TYPES = utils.read_json("config/openbis_config.json")["OpenBIS Types"]
+OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
+    "Collections"
+]["Paths"]
 WORKCHAIN_VIEWERS = utils.read_json("config/openbis_config.json")["Workchain Viewers"]
+
+_CREATE_NEW = "__create_new_openbis_object__"
 
 
 class ImportSimulationsWidget(ipw.VBox):
@@ -483,6 +489,13 @@ class ExportSimulationsWidget(ipw.VBox):
     def __init__(self, openbis_session):
         super().__init__()
         self.openbis_session = openbis_session
+        self._provenance_overrides = {
+            "Code": {},
+            "Computer": {},
+            "Executable": {},
+        }
+        self._pending_reference_resolution = None
+        self._executable_selection_widgets = {}
 
         self.select_experiment_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 20px;'>Select experiment</span>"
@@ -510,6 +523,8 @@ class ExportSimulationsWidget(ipw.VBox):
             layout=ipw.Layout(width="100px", height="50px"),
         )
 
+        self.provenance_resolution_box = ipw.VBox()
+        self.executable_resolution_box = ipw.VBox()
         self.executable_confirmation_message = ipw.HTML()
         self.create_missing_executables_checkbox = ipw.Checkbox(
             value=False,
@@ -542,6 +557,8 @@ class ExportSimulationsWidget(ipw.VBox):
             self.used_aiida_checkbox,
             self.simulation_details_vbox,
             increase_search_button,
+            self.provenance_resolution_box,
+            self.executable_resolution_box,
             self.executable_confirmation_message,
             self.create_missing_executables_checkbox,
             self.save_simulations_button,
@@ -550,6 +567,272 @@ class ExportSimulationsWidget(ipw.VBox):
     def load_simulations_details_widgets(self, change):
         used_aiida = self.used_aiida_checkbox.value
         self.simulation_details_vbox.load_widgets(used_aiida)
+
+    @staticmethod
+    def _resolution_options(openbis_options, create_label):
+        options = [("Select an existing object...", "")]
+        options.extend(
+            (f"{name} ({permid})", permid)
+            for permid, name in sorted(
+                openbis_options, key=lambda item: (item[1].lower(), item[0])
+            )
+        )
+        options.append((create_label, _CREATE_NEW))
+        return options
+
+    def _show_reference_resolution(self, error):
+        kind = error.object_kind
+        selector = ipw.Dropdown(
+            options=self._resolution_options(
+                error.openbis_options, f"Create a new {kind.upper()}..."
+            ),
+            description=f"{kind}:",
+            layout=ipw.Layout(width="95%"),
+        )
+        name = ipw.Text(
+            value=error.aiida_label,
+            description="Name:",
+            layout=ipw.Layout(width="95%"),
+        )
+        description = ipw.Textarea(
+            value=error.aiida_description,
+            description="Description:",
+            layout=ipw.Layout(width="95%"),
+        )
+        status = ipw.HTML()
+
+        fields = [name, description]
+        collection = None
+        url = None
+        location = None
+        if kind == "Code":
+            url_match = re.search(r"https?://[^\s]+", error.aiida_description)
+            suggested_url = url_match.group(0).rstrip(".,);") if url_match else ""
+            url = ipw.Text(
+                value=suggested_url,
+                description="URL:",
+                layout=ipw.Layout(width="95%"),
+            )
+            collection = ipw.Dropdown(
+                options=[
+                    ("Custom/open software", OPENBIS_COLLECTIONS_PATHS["Custom Code"]),
+                    (
+                        "Proprietary software",
+                        OPENBIS_COLLECTIONS_PATHS["Proprietary Code"],
+                    ),
+                ],
+                description="Collection:",
+                layout=ipw.Layout(width="95%"),
+            )
+            fields.extend([url, collection])
+        else:
+            organisations = list(
+                utils.get_openbis_objects(self.openbis_session, type="ORGANISATION")
+                or []
+            )
+            organisation_options = [("Select a location...", "")]
+            organisation_options.extend(
+                (
+                    (
+                        f"{aiida_utils._openbis_property(obj, 'name')} "
+                        f"({obj.permId})"
+                    ),
+                    obj.permId,
+                )
+                for obj in sorted(
+                    organisations,
+                    key=lambda obj: str(
+                        aiida_utils._openbis_property(obj, "name") or ""
+                    ).lower(),
+                )
+            )
+            location = ipw.Dropdown(
+                options=organisation_options,
+                description="Location:",
+                layout=ipw.Layout(width="95%"),
+            )
+            fields.append(location)
+
+        new_fields = ipw.VBox(
+            fields,
+            layout=ipw.Layout(display="none"),
+        )
+
+        def toggle_new_fields(change):
+            new_fields.layout.display = "" if change["new"] == _CREATE_NEW else "none"
+
+        selector.observe(toggle_new_fields, names="value")
+        self._pending_reference_resolution = {
+            "kind": kind,
+            "aiida_uuid": error.aiida_uuid,
+            "selector": selector,
+            "name": name,
+            "description": description,
+            "url": url,
+            "collection": collection,
+            "location": location,
+            "new_fields": new_fields,
+            "status": status,
+        }
+        self.provenance_resolution_box.children = [
+            ipw.HTML(
+                "<p><b>Resolve AiiDA provenance before export</b></p>"
+                f"<p>{html.escape(str(error))}</p>"
+                "<p>Select the intended existing object, or create it below. "
+                "Then click Save again.</p>"
+            ),
+            selector,
+            new_fields,
+            status,
+        ]
+        self.executable_resolution_box.children = []
+        self.executable_confirmation_message.value = ""
+        self.create_missing_executables_checkbox.value = False
+        self.create_missing_executables_checkbox.layout.display = "none"
+
+    def _apply_pending_reference_resolution(self):
+        pending = self._pending_reference_resolution
+        if pending is None:
+            return True
+
+        selected = pending["selector"].value
+        if not selected:
+            pending["status"].value = (
+                "<p style='color:#b00020'>Select an existing object or "
+                "choose Create new.</p>"
+            )
+            return False
+
+        kind = pending["kind"]
+        if selected == _CREATE_NEW:
+            name = pending["name"].value.strip()
+            if not name:
+                pending["status"].value = (
+                    "<p style='color:#b00020'>Name is required.</p>"
+                )
+                return False
+            existing_objects = list(
+                utils.get_openbis_objects(
+                    self.openbis_session,
+                    type=OPENBIS_OBJECT_TYPES[kind],
+                )
+                or []
+            )
+            duplicate = next(
+                (
+                    obj
+                    for obj in existing_objects
+                    if aiida_utils._normalize_object_name(
+                        aiida_utils._openbis_property(obj, "name")
+                    )
+                    == aiida_utils._normalize_object_name(name)
+                ),
+                None,
+            )
+            if duplicate is not None:
+                pending["status"].value = (
+                    "<p style='color:#b00020'>An openBIS "
+                    f"{kind.upper()} named {html.escape(name)} already exists "
+                    f"({duplicate.permId}). Select it from the existing-object "
+                    "list instead.</p>"
+                )
+                return False
+
+            properties = {
+                "name": name,
+                "description": pending["description"].value.strip(),
+            }
+            if kind == "Code":
+                url = pending["url"].value.strip()
+                if url:
+                    properties["url"] = url
+                collection = pending["collection"].value
+            else:
+                location = pending["location"].value
+                if not location:
+                    pending["status"].value = (
+                        "<p style='color:#b00020'>A computer location is "
+                        "required.</p>"
+                    )
+                    return False
+                properties["location"] = location
+                collection = OPENBIS_COLLECTIONS_PATHS["Computer"]
+
+            try:
+                selected_object = utils.create_openbis_object(
+                    self.openbis_session,
+                    type=OPENBIS_OBJECT_TYPES[kind],
+                    props=properties,
+                    collection=collection,
+                )
+            except Exception as error:  # noqa: BLE001 - surface pyBIS errors in UI
+                pending["status"].value = (
+                    "<p style='color:#b00020'>Could not create the openBIS "
+                    f"{kind.upper()}: {html.escape(str(error))}</p>"
+                )
+                return False
+            selected = selected_object.permId
+
+        self._provenance_overrides[kind][pending["aiida_uuid"]] = selected
+        self._pending_reference_resolution = None
+        self.provenance_resolution_box.children = []
+        return True
+
+    def _show_missing_executables(self, error):
+        rows = []
+        selectors = {}
+        for requirement in error.requirements:
+            details = (
+                f"{requirement['full_label']} -> "
+                f"{requirement['code_name']} on "
+                f"{requirement['computer_name']}; "
+                f"path {requirement['executable_path']}; "
+                f"plugin {requirement['plugin']}"
+            )
+            selector = ipw.Dropdown(
+                options=[
+                    ("Create a new EXECUTABLE", _CREATE_NEW),
+                    *[
+                        (f"{name} ({permid})", permid)
+                        for permid, name in sorted(
+                            requirement["executable_options"],
+                            key=lambda item: (item[1].lower(), item[0]),
+                        )
+                    ],
+                ],
+                value=_CREATE_NEW,
+                description="Executable:",
+                layout=ipw.Layout(width="95%"),
+            )
+            selectors[requirement["aiida_code_uuid"]] = selector
+            rows.extend([ipw.HTML(f"<p>{html.escape(details)}</p>"), selector])
+
+        self._executable_selection_widgets = selectors
+        self.executable_resolution_box.children = rows
+        self.executable_confirmation_message.value = (
+            "<p><b>Resolve missing executable records.</b> Select an existing "
+            "EXECUTABLE where appropriate. For entries left as Create new, "
+            "check the confirmation box and click Save again. Nothing has "
+            "been exported yet.</p>"
+        )
+        self.create_missing_executables_checkbox.value = False
+        self.create_missing_executables_checkbox.layout.display = ""
+
+    def _apply_executable_selections(self):
+        for aiida_code_uuid, selector in self._executable_selection_widgets.items():
+            if selector.value != _CREATE_NEW:
+                self._provenance_overrides["Executable"][
+                    aiida_code_uuid
+                ] = selector.value
+
+    def _clear_resolution_controls(self):
+        self._pending_reference_resolution = None
+        self._executable_selection_widgets = {}
+        self.provenance_resolution_box.children = []
+        self.executable_resolution_box.children = []
+        self.executable_confirmation_message.value = ""
+        self.create_missing_executables_checkbox.value = False
+        self.create_missing_executables_checkbox.layout.display = "none"
 
     def export_simulation_to_openbis(self, b):
         selected_experiment_id = self.select_experiment_widget.experiment_dropdown.value
@@ -605,6 +888,9 @@ class ExportSimulationsWidget(ipw.VBox):
                     atom_model_parents = (
                         selected_slab + selected_molecules_ids + selected_reac_prods_ids
                     )
+                    if not self._apply_pending_reference_resolution():
+                        return
+                    self._apply_executable_selections()
                     try:
                         last_export = aiida_utils.export_workchain(
                             self.openbis_session,
@@ -613,42 +899,25 @@ class ExportSimulationsWidget(ipw.VBox):
                             create_missing_executables=(
                                 self.create_missing_executables_checkbox.value
                             ),
+                            provenance_overrides=self._provenance_overrides,
                         )
                     except aiida_utils.MissingExecutablesError as error:
-                        items = []
-                        for requirement in error.requirements:
-                            details = (
-                                f"{requirement['full_label']} -> "
-                                f"{requirement['code_name']} on "
-                                f"{requirement['computer_name']}; "
-                                f"path {requirement['executable_path']}; "
-                                f"plugin {requirement['plugin']}"
-                            )
-                            items.append(f"<li>{html.escape(details)}</li>")
-                        self.executable_confirmation_message.value = (
-                            "<p><b>Missing openBIS executable records:</b></p>"
-                            f"<ul>{''.join(items)}</ul>"
-                            "<p>Review the mappings, check the confirmation box, "
-                            "and click Save again. Nothing has been exported yet.</p>"
-                        )
-                        self.create_missing_executables_checkbox.value = False
-                        self.create_missing_executables_checkbox.layout.display = ""
+                        self._show_missing_executables(error)
+                        return
+                    except aiida_utils.OpenbisNameMatchError as error:
+                        self._show_reference_resolution(error)
                         return
                     except aiida_utils.ExecutableResolutionError as error:
                         self.executable_confirmation_message.value = (
                             "<p style='color:#b00020'><b>Cannot map AiiDA provenance "
                             f"to openBIS:</b> {html.escape(str(error))}</p>"
-                            "<p>Create or correct the matching CODE/COMPUTER record "
-                            "in openBIS, or add its name to the AiiDA description, "
-                            "then retry. Nothing has been exported.</p>"
+                            "<p>Nothing has been exported.</p>"
                         )
                         self.create_missing_executables_checkbox.value = False
                         self.create_missing_executables_checkbox.layout.display = "none"
                         return
 
-                    self.executable_confirmation_message.value = ""
-                    self.create_missing_executables_checkbox.value = False
-                    self.create_missing_executables_checkbox.layout.display = "none"
+                    self._clear_resolution_controls()
 
                     if last_export:
                         for exported_object in aiida_utils.normalize_exported_objects(

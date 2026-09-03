@@ -692,6 +692,48 @@ def _find_object_by_comment(objects, comment):
     return None
 
 
+def _find_object_by_permid(objects, permid):
+    for openbis_object in objects:
+        if str(openbis_object.permId) == str(permid):
+            return openbis_object
+    return None
+
+
+def _openbis_object_options(objects):
+    return tuple(
+        (
+            str(openbis_object.permId),
+            str(_openbis_property(openbis_object, "name") or openbis_object.permId),
+        )
+        for openbis_object in objects
+    )
+
+
+def _selected_openbis_object(objects, provenance_overrides, object_kind, aiida_uuid):
+    if not provenance_overrides:
+        return None
+    selected_permid = provenance_overrides.get(object_kind, {}).get(str(aiida_uuid))
+    if not selected_permid:
+        return None
+    selected = _find_object_by_permid(objects, selected_permid)
+    if selected is None:
+        raise ExecutableResolutionError(
+            f"Selected openBIS {object_kind} object {selected_permid} no longer exists."
+        )
+    return selected
+
+
+def _add_resolution_context(
+    error, object_kind, aiida_uuid, aiida_label, aiida_description, objects
+):
+    error.object_kind = object_kind
+    error.aiida_uuid = str(aiida_uuid)
+    error.aiida_label = str(aiida_label or "")
+    error.aiida_description = str(aiida_description or "")
+    error.openbis_options = _openbis_object_options(objects)
+    return error
+
+
 def _normalize_object_name(value):
     """Normalize an AiiDA/openBIS name for punctuation-insensitive matching."""
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
@@ -796,12 +838,20 @@ def _object_reference_id(value):
     return str(value or "")
 
 
-def _find_executable(executable_objects, aiida_code, software, computer):
-    code_uuid_comment = _aiida_uuid_comment("Code", aiida_code.uuid)
-    executable = _find_object_by_comment(executable_objects, code_uuid_comment)
-    if executable is not None:
-        return executable
+def _openbis_executable_options(executable_objects):
+    options = []
+    for executable in executable_objects:
+        name = str(_openbis_property(executable, "name") or executable.permId)
+        code = _object_reference_id(_openbis_property(executable, "code"))
+        computer = _object_reference_id(_openbis_property(executable, "computer"))
+        details = (
+            f"{name}; CODE {code or 'unlinked'}; COMPUTER {computer or 'unlinked'}"
+        )
+        options.append((str(executable.permId), details))
+    return tuple(options)
 
+
+def _find_executable(executable_objects, aiida_code, software, computer):
     normalized_label = _normalize_object_name(aiida_code.label)
     signature_matches = []
     for candidate in executable_objects:
@@ -849,7 +899,10 @@ def _unique_workchain_codes(workchains):
 
 
 def _ensure_executables_for_workchains(
-    openbis_session, workchains: Iterable, create_missing=False
+    openbis_session,
+    workchains: Iterable,
+    create_missing=False,
+    provenance_overrides=None,
 ):
     """Resolve workflow executables, optionally creating confirmed missing ones."""
     code_type = OPENBIS_OBJECT_TYPES["Code"]
@@ -867,17 +920,69 @@ def _ensure_executables_for_workchains(
         utils.get_openbis_objects(openbis_session, type=executable_type) or []
     )
 
-    executable_ids = []
+    resolved = {}
     missing = []
     for aiida_code in _unique_workchain_codes(workchains):
-        software = _match_named_openbis_object(aiida_code.label, code_objects, "Code")
-        computer = aiida_code.computer
-        computer_object = _match_named_openbis_object(
-            computer.label,
-            computer_objects,
-            "Computer",
-            additional_names=(computer.description,),
+        aiida_code_uuid = str(aiida_code.uuid)
+        executable = _selected_openbis_object(
+            executable_objects,
+            provenance_overrides,
+            "Executable",
+            aiida_code_uuid,
         )
+        if executable is None:
+            executable = _find_object_by_comment(
+                executable_objects,
+                _aiida_uuid_comment("Code", aiida_code.uuid),
+            )
+        if executable is not None:
+            resolved[aiida_code_uuid] = executable.permId
+            continue
+
+        software = _selected_openbis_object(
+            code_objects, provenance_overrides, "Code", aiida_code_uuid
+        )
+        if software is None:
+            try:
+                software = _match_named_openbis_object(
+                    aiida_code.label, code_objects, "Code"
+                )
+            except OpenbisNameMatchError as error:
+                raise _add_resolution_context(
+                    error,
+                    "Code",
+                    aiida_code_uuid,
+                    aiida_code.label,
+                    aiida_code.description,
+                    code_objects,
+                )
+
+        computer = aiida_code.computer
+        computer_uuid = str(computer.uuid)
+        computer_object = _selected_openbis_object(
+            computer_objects,
+            provenance_overrides,
+            "Computer",
+            computer_uuid,
+        )
+        if computer_object is None:
+            try:
+                computer_object = _match_named_openbis_object(
+                    computer.label,
+                    computer_objects,
+                    "Computer",
+                    additional_names=(computer.description,),
+                )
+            except OpenbisNameMatchError as error:
+                raise _add_resolution_context(
+                    error,
+                    "Computer",
+                    computer_uuid,
+                    computer.label,
+                    computer.description,
+                    computer_objects,
+                )
+
         executable = _find_executable(
             executable_objects, aiida_code, software, computer_object
         )
@@ -891,19 +996,23 @@ def _ensure_executables_for_workchains(
             }
             missing.append(
                 {
+                    "aiida_code_uuid": aiida_code_uuid,
                     "full_label": aiida_code.full_label,
                     "code_name": _openbis_property(software, "name") or "",
-                    "computer_name": _openbis_property(computer_object, "name") or "",
+                    "computer_name": (_openbis_property(computer_object, "name") or ""),
                     "version": _aiida_code_version(aiida_code),
                     "executable_path": aiida_code.filepath_executable,
                     "plugin": str(
                         getattr(aiida_code, "default_calc_job_plugin", "") or ""
                     ),
+                    "executable_options": _openbis_executable_options(
+                        executable_objects
+                    ),
                     "properties": properties,
                 }
             )
             continue
-        executable_ids.append(executable.permId)
+        resolved[aiida_code_uuid] = executable.permId
 
     if missing and not create_missing:
         raise MissingExecutablesError(missing)
@@ -915,17 +1024,26 @@ def _ensure_executables_for_workchains(
             props=requirement["properties"],
             collection=executable_collection,
         )
-        executable_objects.append(executable)
-        executable_ids.append(executable.permId)
+        resolved[requirement["aiida_code_uuid"]] = executable.permId
 
-    return executable_ids
+    return resolved
 
 
-def _ensure_executables(openbis_session, workchain, create_missing=False):
+def _ensure_executables(
+    openbis_session,
+    workchain,
+    create_missing=False,
+    provenance_overrides=None,
+):
     """Resolve a workflow's executables without silently creating records."""
-    return _ensure_executables_for_workchains(
-        openbis_session, [workchain], create_missing=create_missing
+    codes = _workchain_codes(workchain)
+    resolved = _ensure_executables_for_workchains(
+        openbis_session,
+        [workchain],
+        create_missing=create_missing,
+        provenance_overrides=provenance_overrides,
     )
+    return [resolved[str(code.uuid)] for code in codes]
 
 
 def _find_nanoribbon_calculations(workchain):
@@ -1276,11 +1394,17 @@ def _create_band_and_dos_objects(
 
 
 def NanoribbonWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
 ):
     """Export a nanoribbon workflow using the simplified simulation schema."""
     workchain = orm.load_node(workchain_uuid)
-    executable_ids = _ensure_executables(openbis_session, workchain)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
     calculations = _find_nanoribbon_calculations(workchain)
     cell_opt = calculations["cell_opt2"]
     scf = calculations["scf"]
@@ -1358,10 +1482,16 @@ def NanoribbonWorkChain_export(
 
 
 def PwRelaxWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
 ):
     workchain = orm.load_node(workchain_uuid)
-    executable_ids = _ensure_executables(openbis_session, workchain)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
     input_parameters = workchain.inputs.base.pw.parameters.get_dict()
     output_parameters = workchain.outputs.output_parameters.get_dict()
     dft_parameters = get_dft_parameters_qe(workchain.inputs.base, output_parameters)
@@ -1412,10 +1542,16 @@ def PwRelaxWorkChain_export(
 
 
 def BandsWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
 ):
     workchain = orm.load_node(workchain_uuid)
-    executable_ids = _ensure_executables(openbis_session, workchain)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
     try:
         root_in = workchain.inputs.bands
         root_out = workchain.outputs.bands
@@ -1443,10 +1579,16 @@ def BandsWorkChain_export(
 
 
 def PdosWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
 ):
     workchain = orm.load_node(workchain_uuid)
-    executable_ids = _ensure_executables(openbis_session, workchain)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
     output_parameters = workchain.outputs.nscf.output_parameters.get_dict()
     dft_parameters = get_dft_parameters_qe(workchain.inputs.scf, output_parameters)
     structure_object = structure_to_atomistic_model(
@@ -1484,10 +1626,16 @@ def PdosWorkChain_export(
 
 
 def VibroWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
 ):
     workchain = orm.load_node(workchain_uuid)
-    executable_ids = _ensure_executables(openbis_session, workchain)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
     pw_base = next(
         (
             node
@@ -1533,10 +1681,16 @@ def _cp2k_output_parameters(workchain):
 
 
 def Cp2kGeoOptWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
 ):
     workchain = orm.load_node(workchain_uuid)
-    executable_ids = _ensure_executables(openbis_session, workchain)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
     system_parameters = workchain.inputs.sys_params.get_dict()
     dft_parameters = get_dft_parameters_cp2k(
         workchain.inputs.code.description, workchain.inputs.dft_params.get_dict()
@@ -1595,10 +1749,16 @@ def Cp2kGeoOptWorkChain_export(
 
 
 def Cp2kStmWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
 ):
     workchain = orm.load_node(workchain_uuid)
-    executable_ids = _ensure_executables(openbis_session, workchain)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
     dft_parameters = get_dft_parameters_cp2k(
         workchain.inputs.spm_code.description, workchain.inputs.dft_params.get_dict()
     )
@@ -1641,14 +1801,19 @@ def _run_exporter(
     workchain,
     structure_uuids,
     aiida_archive,
+    resolved_executables,
 ):
     exporter = workchain_exporters[workchain.process_label]
+    executable_ids = [
+        resolved_executables[str(code.uuid)] for code in _workchain_codes(workchain)
+    ]
     return exporter(
         openbis_session,
         experiment_id,
         workchain.uuid,
         structure_uuids,
         aiida_archive.permId,
+        executable_ids=executable_ids,
     )
 
 
@@ -1657,6 +1822,7 @@ def export_workchain(
     experiment_id,
     workchain_uuid,
     create_missing_executables=False,
+    provenance_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     workchains_to_export = get_all_preceding_main_workchains(workchain.uuid)
@@ -1673,10 +1839,11 @@ def export_workchain(
         pending_workchains.append(main_workchain)
 
     # Resolve every name before creating any archive or simulation object.
-    _ensure_executables_for_workchains(
+    resolved_executables = _ensure_executables_for_workchains(
         openbis_session,
         pending_workchains,
         create_missing=create_missing_executables,
+        provenance_overrides=provenance_overrides,
     )
 
     for main_workchain in pending_workchains:
@@ -1692,6 +1859,7 @@ def export_workchain(
                 main_workchain,
                 simulation_uuids_openbis["structure_uuids"],
                 aiida_archive,
+                resolved_executables,
             )
             simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)
             continue
@@ -1706,6 +1874,7 @@ def export_workchain(
                 child,
                 simulation_uuids_openbis["structure_uuids"],
                 aiida_archive,
+                resolved_executables,
             )
             simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)
 
