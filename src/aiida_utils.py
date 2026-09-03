@@ -1,23 +1,30 @@
-from aiida.common.links import LinkType
-import tempfile
+import json
+import logging
 import os
+import random
+import re
 import subprocess
-from aiida import orm
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
+
 import numpy as np
-from ase import Atoms
-import json
-from ase.io.jsonio import encode
+from aiida import orm
 from aiida.common.exceptions import NotExistentAttributeError
-import random
+from aiida.common.links import LinkType
+from ase import Atoms
+from ase.io.jsonio import encode
+from ase.units import Bohr, Hartree
+
 from . import utils
-import logging
 
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
     "Collections"
 ]["Paths"]
 OPENBIS_OBJECT_TYPES = utils.read_json("config/openbis_config.json")["OpenBIS Types"]
+OPENBIS_SIMULATION_TYPES = utils.read_json("config/openbis_config.json")[
+    "Simulation Export Types"
+]
 OPENBIS_SESSION, SESSION_DATA = utils.connect_openbis_aiida()
 
 
@@ -381,34 +388,36 @@ def get_dft_parameters_qe(inputs, outputs):
     bugs for not exposing some of the outputs will be fixed
     """
 
-    parameters = {}
-    parameters["xc_functional"] = outputs["dft_exchange_correlation"]
-    parameters["plus_u"] = outputs["lda_plus_u_calculation"]
-    parameters["spin_orbit_coupling"] = outputs["spin_orbit_calculation"]
-    parameters["uks"] = outputs["lsda"]
-    parameters["charge"] = float(inputs.pw.parameters["SYSTEM"]["tot_charge"])
-    parameters["vdw_corr"] = inputs.pw.parameters["SYSTEM"].get("vdw_corr", "")
-
-    return parameters
+    system = inputs.pw.parameters.get_dict().get("SYSTEM", {})
+    return {
+        "xc_functional": outputs.get("dft_exchange_correlation", "unknown"),
+        "plus_u": bool(outputs.get("lda_plus_u_calculation", False)),
+        "spin_orbit_coupling": bool(outputs.get("spin_orbit_calculation", False)),
+        "non_collinear": bool(outputs.get("non_colinear_calculation", False)),
+        "uks": bool(outputs.get("lsda", False)),
+        "charge": float(system.get("tot_charge", 0.0)),
+        "vdw_corr": system.get("vdw_corr", ""),
+    }
 
 
 def get_dft_parameters_cp2k(code_description, dft_para):
     """Retrieves from CP2K workchains teh parameters to define the DFT object. Very preliminary"""
 
-    parameters = {}
-    parameters["xc_functional"] = "PBE"
-    parameters["plus_u"] = False
-    parameters["spin_orbit_coupling"] = False
-    parameters["uks"] = dft_para.get("uks", False)
-    parameters["charge"] = dft_para.get("charge", 0)
-    parameters["vdw_corr"] = dft_para.get("vdw", "")
+    return {
+        "xc_functional": dft_para.get("xc_functional", dft_para.get("xc", "PBE")),
+        "plus_u": bool(dft_para.get("plus_u", False)),
+        "spin_orbit_coupling": bool(dft_para.get("spin_orbit_coupling", False)),
+        "non_collinear": bool(dft_para.get("non_collinear", False)),
+        "uks": bool(dft_para.get("uks", False)),
+        "charge": float(dft_para.get("charge", 0.0)),
+        "vdw_corr": dft_para.get("vdw", ""),
+        "hfx_fraction": float(dft_para.get("hfx_fraction", 0.0)),
+    }
 
-    return parameters
 
-
-def geo_to_png(ase_geo):
-    ase_geo.write("ase_geo.png")
-    return "ase_geo.png"
+def geo_to_png(ase_geo, filename="ase_geo.png"):
+    ase_geo.write(filename)
+    return filename
 
 
 def guess_dimensionality(
@@ -598,146 +607,685 @@ def create_obis_object(obtype=None, parameters=None):
 
 
 def create_and_export_AiiDA_archive(openbis_session, uuid):
-    """Create archive.aiida as temporary file, with nodes only from a MAIN workchain.
-    To be sent to AiiDA_nodes object"""
-
-    # Define the output file path
-    output_file = "archive.aiida"
-
-    # Define the command, converting the integer `pk` to a string
-    command = [
-        "verdi",
-        "archive",
-        "create",
-        output_file,
-        "--no-call-calc-backward",
-        "--no-call-work-backward",
-        "--no-create-backward",
-        "-N",
-        uuid,
-    ]
-
+    """Create and upload the AiiDA archive for a main workchain."""
     aiida_node_type = OPENBIS_OBJECT_TYPES["AiiDA Node"]
-
-    try:
-        # Execute the command
-        result = subprocess.run(command, capture_output=True, text=True)
-
-        # Check for errors
+    with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-archive-") as dirname:
+        output_file = Path(dirname) / "archive.aiida"
+        command = [
+            "verdi",
+            "archive",
+            "create",
+            str(output_file),
+            "--no-call-calc-backward",
+            "--no-call-work-backward",
+            "--no-create-backward",
+            "-N",
+            str(uuid),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
         if result.returncode != 0:
-            logging.info(f"An error occurred: {result.stderr}")
-        else:
-            # Capture the absolute path to the created file
-            created_file_path = Path(output_file).resolve()
-
-            # Create the AiiDA_nodes object in openBIS
-            object_props = {"wfms_uuid": uuid, "comments": ""}
-            obobject = utils.create_openbis_object(
-                openbis_session,
-                type=aiida_node_type,
-                props=object_props,
-                collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+            raise RuntimeError(
+                f"Could not create the AiiDA archive for {uuid}: {result.stderr.strip()}"
             )
 
-            utils.create_openbis_dataset(
-                openbis_session,
-                type="RAW_DATA",
-                sample=obobject,
-                files=[created_file_path],
-            )
+        openbis_object = utils.create_openbis_object(
+            openbis_session,
+            type=aiida_node_type,
+            props={"wfms_uuid": str(uuid), "comments": ""},
+            collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+        )
+        utils.create_openbis_dataset(
+            openbis_session,
+            type="RAW_DATA",
+            sample=openbis_object,
+            files=[output_file],
+        )
+        return openbis_object
 
-    finally:
-        # Ensure the file is deleted
-        file_to_delete = Path(output_file)
-        if file_to_delete.exists():
-            file_to_delete.unlink()  # Delete the file
-            logging.info(f"File {file_to_delete} has been deleted.")
-        else:
-            logging.info(f"File {file_to_delete} does not exist, nothing to delete.")
-    return obobject
+
+def normalize_exported_objects(export):
+    """Return exporter results as a tuple of non-null openBIS objects."""
+    if export is None:
+        return ()
+    if isinstance(export, (list, tuple)):
+        return tuple(obj for obj in export if obj is not None)
+    return (export,)
+
+
+_CODE_METADATA = {
+    "quantumespresso": {
+        "name": "Quantum ESPRESSO",
+        "url": "https://www.quantum-espresso.org/",
+    },
+    "cp2k": {"name": "CP2K", "url": "https://www.cp2k.org/"},
+    "nanotech_empa": {
+        "name": "cp2k-spm-tools",
+        "url": "https://github.com/nanotech-empa/cp2k-spm-tools",
+    },
+}
+
+
+def _aiida_uuid_comment(kind, uuid):
+    return f"AiiDA {kind} UUID: {uuid}"
+
+
+def _find_object_by_comment(objects, comment):
+    for openbis_object in objects:
+        if comment in str(openbis_object.props.get("comments", "")):
+            return openbis_object
+    return None
+
+
+def _software_properties(aiida_code):
+    plugin = str(getattr(aiida_code, "default_calc_job_plugin", "") or "")
+    plugin_family = plugin.split(".", 1)[0]
+    metadata = _CODE_METADATA.get(plugin_family, {})
+    properties = {
+        "name": metadata.get("name", plugin_family or aiida_code.label),
+    }
+    description = str(getattr(aiida_code, "description", "") or "")
+    version_match = re.search(r"\((?:v)?([0-9]+(?:\.[0-9]+)+)\)", description)
+    if version_match is None:
+        version_match = re.search(
+            r"[-_]v?([0-9]+(?:\.[0-9]+)+)$", str(aiida_code.label)
+        )
+    if version_match is not None:
+        properties["version"] = version_match.group(1)
+    if metadata.get("url"):
+        properties["url"] = metadata["url"]
+    if description and not metadata:
+        properties["description"] = description
+    return properties
+
+
+def _workchain_codes(workchain):
+    codes = {}
+    for node in workchain.called_descendants:
+        if not isinstance(node, orm.CalcJobNode):
+            continue
+        try:
+            code = node.inputs.code
+        except (AttributeError, NotExistentAttributeError):
+            continue
+        codes[str(code.uuid)] = code
+    return sorted(codes.values(), key=lambda code: code.full_label)
+
+
+def _ensure_executables(openbis_session, workchain):
+    """Create/reuse CODE, COMPUTER and EXECUTABLE objects for a workflow."""
+    code_type = OPENBIS_OBJECT_TYPES["Code"]
+    computer_type = OPENBIS_OBJECT_TYPES["Computer"]
+    executable_type = OPENBIS_OBJECT_TYPES["Executable"]
+    collection = OPENBIS_COLLECTIONS_PATHS["Open Source Code"]
+
+    code_objects = list(
+        utils.get_openbis_objects(openbis_session, type=code_type) or []
+    )
+    computer_objects = list(
+        utils.get_openbis_objects(openbis_session, type=computer_type) or []
+    )
+    executable_objects = list(
+        utils.get_openbis_objects(openbis_session, type=executable_type) or []
+    )
+    software_by_identity = {
+        (
+            str(obj.props.get("name", "")),
+            str(obj.props.get("version", "")),
+        ): obj
+        for obj in code_objects
+    }
+
+    executable_ids = []
+    for aiida_code in _workchain_codes(workchain):
+        software_properties = _software_properties(aiida_code)
+        software_identity = (
+            software_properties["name"],
+            software_properties.get("version", ""),
+        )
+        software = software_by_identity.get(software_identity)
+        if software is None:
+            software = utils.create_openbis_object(
+                openbis_session,
+                type=code_type,
+                props=software_properties,
+                collection=collection,
+            )
+            software_by_identity[software_identity] = software
+            code_objects.append(software)
+
+        computer = aiida_code.computer
+        computer_comment = _aiida_uuid_comment("Computer", computer.uuid)
+        computer_object = _find_object_by_comment(computer_objects, computer_comment)
+        if computer_object is None:
+            computer_properties = {
+                "name": computer.label,
+                "comments": computer_comment,
+            }
+            if computer.description:
+                computer_properties["description"] = computer.description
+            hostname = str(computer.hostname or "")
+            if hostname and hostname not in {"localhost", "127.0.0.1"}:
+                computer_properties["url"] = f"ssh://{hostname}"
+            computer_object = utils.create_openbis_object(
+                openbis_session,
+                type=computer_type,
+                props=computer_properties,
+                collection=collection,
+            )
+            computer_objects.append(computer_object)
+
+        executable_comment = _aiida_uuid_comment("Code", aiida_code.uuid)
+        executable = _find_object_by_comment(executable_objects, executable_comment)
+        if executable is None:
+            executable_properties = {
+                "name": aiida_code.label,
+                "description": (
+                    f"{aiida_code.full_label}: {aiida_code.filepath_executable}"
+                ),
+                "comments": executable_comment,
+                "code": software.permId,
+                "computer": computer_object.permId,
+            }
+            executable = utils.create_openbis_object(
+                openbis_session,
+                type=executable_type,
+                props=executable_properties,
+                collection=collection,
+            )
+            executable_objects.append(executable)
+        executable_ids.append(executable.permId)
+
+    return executable_ids
+
+
+def _find_nanoribbon_calculations(workchain):
+    """Find the calculations needed to export a NanoribbonWorkChain."""
+    calculations = {
+        "cell_opt2": None,
+        "scf": None,
+        "bands": None,
+        "export_pdos": None,
+    }
+    for node in workchain.called_descendants:
+        if node.label in calculations and calculations[node.label] is None:
+            calculations[node.label] = node
+
+    missing = [
+        label
+        for label in ("scf", "bands", "export_pdos")
+        if calculations[label] is None
+    ]
+    if missing:
+        raise ValueError(
+            f"Cannot export NanoribbonWorkChain {workchain.uuid}: missing required "
+            f"calculation(s): {', '.join(missing)}."
+        )
+    return calculations
+
+
+def _get_optional_output(outputs, label):
+    """Return an optional AiiDA output without leaking namespace exceptions."""
+    try:
+        return getattr(outputs, label)
+    except (AttributeError, NotExistentAttributeError):
+        return None
+
+
+def _quantity(value, unit):
+    return {"value": float(value), "unit": unit}
+
+
+def _energy_in_hartree(output_parameters):
+    """Return the final energy using the unit required by the openBIS schema."""
+    if "energy" in output_parameters:
+        value = output_parameters["energy"]
+        unit = str(output_parameters.get("energy_units", "eV")).strip().lower()
+    else:
+        motion = output_parameters.get("motion_step_info", {})
+        energies = motion.get("energy_au", [])
+        if not energies:
+            raise ValueError("The workflow output does not contain a final energy.")
+        value = energies[-1]
+        unit = "a.u."
+
+    if unit in {"ha", "hartree", "a.u.", "au", "atomic units"}:
+        value_hartree = value
+    elif unit in {"ev", "electronvolt", "electronvolts"}:
+        value_hartree = float(value) / Hartree
+    elif unit in {"ry", "rydberg", "rydbergs"}:
+        value_hartree = float(value) / 2.0
+    else:
+        raise ValueError(f"Unsupported energy unit for openBIS export: {unit!r}.")
+    return _quantity(value_hartree, "Hartree")
+
+
+def _method_modifiers(dft_parameters):
+    modifiers = []
+    xc = str(dft_parameters.get("xc_functional", "")).upper()
+    if float(dft_parameters.get("hfx_fraction", 0.0)) > 0.0 or any(
+        label in xc for label in ("PBE0", "HSE", "B3LYP", "HYBRID")
+    ):
+        modifiers.append("hybrid")
+    vdw = str(dft_parameters.get("vdw_corr", "")).strip().lower()
+    if vdw not in {"", "0", "false", "no", "none"}:
+        modifiers.append("vdW")
+    if dft_parameters.get("plus_u"):
+        modifiers.append("DFT+U")
+    if dft_parameters.get("spin_orbit_coupling"):
+        modifiers.append("spin_orbit")
+    if dft_parameters.get("non_collinear"):
+        modifiers.append("spin_non_collinear")
+    elif dft_parameters.get("uks"):
+        modifiers.append("spin_collinear")
+    return modifiers
+
+
+def _workchain_name(workchain, prefix):
+    description = getattr(workchain, "description", "")
+    if not description:
+        caller = getattr(workchain, "caller", None)
+        description = getattr(caller, "description", "") if caller else ""
+    suffix = description[:80] if description else str(workchain.uuid)[:8]
+    return f"{prefix} - {suffix}"
+
+
+def _simulation_properties(
+    workchain,
+    prefix,
+    dft_parameters,
+    aiida_node_id,
+    method_label=True,
+    executable_ids=None,
+):
+    properties = {
+        "name": _workchain_name(workchain, prefix),
+        "method_family": "DFT",
+        "method_modifiers": _method_modifiers(dft_parameters),
+        "charge": float(dft_parameters.get("charge", 0.0)),
+        "converged": bool(getattr(workchain, "is_finished_ok", True)),
+        "aiida_node": aiida_node_id,
+    }
+    if method_label:
+        properties["method_label"] = str(dft_parameters.get("xc_functional", "unknown"))
+    if executable_ids is not None:
+        properties["executables"] = list(executable_ids)
+    multiplicity = dft_parameters.get("multiplicity")
+    if multiplicity is not None:
+        properties["spin_multiplicity"] = int(multiplicity)
+    return properties
+
+
+def _fermi_energy(output_parameters):
+    value = output_parameters.get("fermi_energy")
+    if value is None:
+        return None
+    return _quantity(value, "eV")
+
+
+def _attach_parent(openbis_object, parent):
+    openbis_object.add_parents(parent)
+    utils.update_openbis_object(openbis_object)
+
+
+def _upload_preview(openbis_session, openbis_object, renderer, stem):
+    with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-preview-") as dirname:
+        path = Path(dirname) / f"{stem}.png"
+        renderer(path)
+        if not path.is_file():
+            raise RuntimeError(f"Preview renderer did not create {path.name}.")
+        utils.create_openbis_dataset(
+            openbis_session,
+            type="ELN_PREVIEW",
+            sample=openbis_object,
+            files=[path],
+        )
+
+
+def _render_structure_preview(structure, path):
+    geo_to_png(structure.get_ase(), path)
+
+
+def _render_bands_preview(bands_node, path, fermi_energy=None):
+    from matplotlib.figure import Figure
+
+    bands = np.asarray(bands_node.get_bands(), dtype=float)
+    if bands.ndim == 2:
+        bands = bands[np.newaxis, ...]
+    if bands.ndim != 3:
+        raise ValueError(f"Unsupported band array shape: {bands.shape}.")
+
+    figure = Figure(figsize=(7, 4.5), constrained_layout=True)
+    axis = figure.subplots()
+    for spin_bands in bands:
+        axis.plot(np.arange(spin_bands.shape[0]), spin_bands, color="C0", lw=0.8)
+    if fermi_energy is not None:
+        axis.axhline(float(fermi_energy), color="black", ls="--", lw=0.8)
+    axis.set_xlabel("k-point index")
+    axis.set_ylabel(f"Energy ({getattr(bands_node, 'units', 'eV')})")
+    axis.set_title("Electronic band structure")
+    figure.savefig(path, dpi=160)
+
+
+def _render_xy_preview(xy_node, path, title, x_label=None, y_label=None):
+    from matplotlib.figure import Figure
+
+    x_name, x_values, x_unit = xy_node.get_x()
+    curves = xy_node.get_y()
+    figure = Figure(figsize=(7, 4.5), constrained_layout=True)
+    axis = figure.subplots()
+    for curve_name, values, _unit in curves:
+        axis.plot(np.asarray(x_values), np.asarray(values), label=curve_name)
+    axis.set_xlabel(x_label or f"{x_name} ({x_unit})")
+    axis.set_ylabel(y_label or "Intensity")
+    axis.set_title(title)
+    if len(curves) > 1:
+        axis.legend(fontsize="small")
+    figure.savefig(path, dpi=160)
+
+
+def _render_spm_preview(workchain, path):
+    from matplotlib.figure import Figure
+
+    stm_calculation = None
+    for node in workchain.called_descendants:
+        label = str(getattr(node, "label", "")).lower()
+        process_label = str(getattr(node, "process_label", "")).lower()
+        if label == "stm" or "stm" in process_label:
+            retrieved = _get_optional_output(node.outputs, "retrieved")
+            if retrieved is not None:
+                stm_calculation = node
+                break
+    if stm_calculation is None:
+        raise ValueError("The STM workflow does not contain a retrieved stm.npz file.")
+
+    retrieved = stm_calculation.outputs.retrieved
+    with retrieved.base.repository.open("stm.npz", mode="rb") as handle:
+        archive = np.load(handle, allow_pickle=True)
+        series_info = archive["stm_series_info"]
+        series_data = archive["stm_series_data"]
+        general_info = archive["stm_general_info"].item()
+
+        index = 0
+        for candidate, info in enumerate(series_info):
+            info = info.item() if hasattr(info, "item") else info
+            if str(info.get("type", "")).lower().endswith("stm"):
+                index = candidate
+                break
+        image = np.asarray(series_data[index])
+        while image.ndim > 2:
+            image = image[-1]
+        x_values = np.asarray(general_info.get("x_arr", np.arange(image.shape[-1])))
+        y_values = np.asarray(general_info.get("y_arr", np.arange(image.shape[-2])))
+
+    figure = Figure(figsize=(6, 5), constrained_layout=True)
+    axis = figure.subplots()
+    plotted = axis.imshow(
+        image,
+        origin="lower",
+        aspect="auto",
+        extent=[
+            x_values.min() * Bohr,
+            x_values.max() * Bohr,
+            y_values.min() * Bohr,
+            y_values.max() * Bohr,
+        ],
+        cmap="viridis",
+    )
+    axis.set_xlabel("x (Å)")
+    axis.set_ylabel("y (Å)")
+    axis.set_title("Representative STM map")
+    figure.colorbar(plotted, ax=axis)
+    figure.savefig(path, dpi=160)
+
+
+def _create_simulation_object(
+    openbis_session,
+    experiment_id,
+    object_type,
+    properties,
+    parents,
+    renderer,
+    preview_stem,
+):
+    openbis_object = utils.create_openbis_object(
+        openbis_session,
+        type=object_type,
+        props=properties,
+        collection=experiment_id,
+    )
+    for parent in parents:
+        openbis_object.add_parents(parent)
+    if parents:
+        utils.update_openbis_object(openbis_object)
+    _upload_preview(openbis_session, openbis_object, renderer, preview_stem)
+    return openbis_object
+
+
+def _qe_dft_from_calculation(calculation):
+    outputs = calculation.outputs.output_parameters.get_dict()
+    system = calculation.inputs.parameters.get_dict().get("SYSTEM", {})
+    return {
+        "xc_functional": outputs.get("dft_exchange_correlation", "unknown"),
+        "plus_u": bool(outputs.get("lda_plus_u_calculation", False)),
+        "spin_orbit_coupling": bool(outputs.get("spin_orbit_calculation", False)),
+        "non_collinear": bool(outputs.get("non_colinear_calculation", False)),
+        "uks": bool(outputs.get("lsda", False)),
+        "charge": float(system.get("tot_charge", 0.0)),
+        "vdw_corr": system.get("vdw_corr", ""),
+    }
+
+
+def _create_band_and_dos_objects(
+    openbis_session,
+    experiment_id,
+    workchain,
+    dft_parameters,
+    output_parameters,
+    bands_node,
+    dos_node,
+    structure_object,
+    aiida_node_id,
+    executable_ids,
+):
+    electron_count = output_parameters.get("number_of_electrons")
+    if electron_count is None:
+        raise ValueError("The workflow output does not contain number_of_electrons.")
+    _, gap, _, _ = find_bandgap(bands_node.uuid, number_electrons=electron_count)
+    band_properties = _simulation_properties(
+        workchain,
+        "Bands",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    band_properties["band_gap"] = _quantity(0.0 if gap is None else gap, "eV")
+    fermi = _fermi_energy(output_parameters)
+    if fermi is not None:
+        band_properties["fermi_energy"] = fermi
+
+    bands_object = _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["Band Structure"],
+        band_properties,
+        [structure_object],
+        lambda path: _render_bands_preview(
+            bands_node, path, output_parameters.get("fermi_energy")
+        ),
+        "band_structure",
+    )
+
+    dos_properties = _simulation_properties(
+        workchain,
+        "PDOS",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    dos_properties.update(
+        {
+            "pdos": True,
+            "projection_description": (
+                "Orbital-projected density of states generated from the AiiDA "
+                "workflow. Full arrays are stored in the linked AiiDA archive."
+            ),
+        }
+    )
+    if fermi is not None:
+        dos_properties["fermi_energy"] = fermi
+    dos_object = _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["DOS"],
+        dos_properties,
+        [structure_object],
+        lambda path: _render_xy_preview(dos_node, path, "Projected density of states"),
+        "pdos",
+    )
+    return bands_object, dos_object
+
+
+def NanoribbonWorkChain_export(
+    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+):
+    """Export a nanoribbon workflow using the simplified simulation schema."""
+    workchain = orm.load_node(workchain_uuid)
+    executable_ids = _ensure_executables(openbis_session, workchain)
+    calculations = _find_nanoribbon_calculations(workchain)
+    cell_opt = calculations["cell_opt2"]
+    scf = calculations["scf"]
+    bands = calculations["bands"]
+    export_pdos = calculations["export_pdos"]
+
+    output_parameters = scf.outputs.output_parameters.get_dict()
+    dft_parameters = _qe_dft_from_calculation(scf)
+    final_structure = (
+        cell_opt.outputs.output_structure
+        if cell_opt is not None
+        else workchain.inputs.structure
+    )
+    structure_object = structure_to_atomistic_model(
+        openbis_session, final_structure.uuid, uuids
+    )
+    dos_node = _get_optional_output(export_pdos.outputs, "Dos")
+    if dos_node is None:
+        raise ValueError("The export_pdos calculation does not contain a Dos output.")
+
+    bands_object, dos_object = _create_band_and_dos_objects(
+        openbis_session,
+        experiment_id,
+        workchain,
+        dft_parameters,
+        output_parameters,
+        bands.outputs.output_band,
+        dos_node,
+        structure_object,
+        aiida_node_id,
+        executable_ids,
+    )
+
+    geometry_object = None
+    if cell_opt is not None:
+        cell_output = cell_opt.outputs.output_parameters.get_dict()
+        properties = _simulation_properties(
+            workchain,
+            "Geometry optimization",
+            dft_parameters,
+            aiida_node_id,
+            method_label=False,
+            executable_ids=executable_ids,
+        )
+        properties.update(
+            {
+                "constrained": False,
+                "cell_optimization": True,
+                "final_energy": _energy_in_hartree(cell_output),
+            }
+        )
+        cell_dofree = (
+            cell_opt.inputs.parameters.get_dict().get("CELL", {}).get("cell_dofree")
+        )
+        if cell_dofree:
+            properties["cell_constraints"] = str(cell_dofree)
+        input_structure_object = structure_to_atomistic_model(
+            openbis_session, workchain.inputs.structure.uuid, uuids
+        )
+        geometry_object = _create_simulation_object(
+            openbis_session,
+            experiment_id,
+            OPENBIS_SIMULATION_TYPES["Geometry Optimization"],
+            properties,
+            [input_structure_object],
+            lambda path: _render_structure_preview(final_structure, path),
+            "optimized_geometry",
+        )
+        structure_object.add_parents(geometry_object)
+        utils.update_openbis_object(structure_object)
+        geometry_object.add_children(structure_object)
+        utils.update_openbis_object(geometry_object)
+
+    return geometry_object, bands_object, dos_object
 
 
 def PwRelaxWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids
-):  # is SUB of QeAppWorkChain
+    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+):
     workchain = orm.load_node(workchain_uuid)
-    pw_input_parameters = workchain.inputs.base.pw.parameters.get_dict()
-    output_parameters_dict = workchain.outputs.output_parameters.get_dict()
+    executable_ids = _ensure_executables(openbis_session, workchain)
+    input_parameters = workchain.inputs.base.pw.parameters.get_dict()
+    output_parameters = workchain.outputs.output_parameters.get_dict()
+    dft_parameters = get_dft_parameters_qe(workchain.inputs.base, output_parameters)
+    control = input_parameters.get("CONTROL", {})
+    calculation = str(control.get("calculation", "relax")).lower()
+    cell_optimization = calculation == "vc-relax"
 
-    dft_object_parameters = get_dft_parameters_qe(
-        workchain.inputs.base, output_parameters_dict
+    properties = _simulation_properties(
+        workchain,
+        "Geometry optimization",
+        dft_parameters,
+        aiida_node_id,
+        method_label=False,
+        executable_ids=executable_ids,
     )
-
-    force_conv_threshold_json = json.dumps(
-        {"value": pw_input_parameters["CONTROL"]["forc_conv_thr"], "unit": "eV/Bohr**3"}
+    properties.update(
+        {
+            "constrained": False,
+            "cell_optimization": cell_optimization,
+            "final_energy": _energy_in_hartree(output_parameters),
+        }
     )
+    cell_constraints = input_parameters.get("CELL", {}).get("cell_dofree")
+    if cell_constraints:
+        properties["cell_constraints"] = str(cell_constraints)
 
-    geo_opt_type = OPENBIS_OBJECT_TYPES["Geometry Optimisation"]
-
-    geoopt_object_parameters = {
-        "wfms_uuid": workchain_uuid,
-        "level_theory_method": "dft",
-        "level_theory_parameters": json.dumps(
-            dft_object_parameters
-        ),  # link/incorporate DFT object
-        "force_convergence_threshold": force_conv_threshold_json,
-        "constrained": False,
-        "output_parameters": json.dumps(
-            get_qe_output_parameters(workchain.outputs.output_parameters.get_dict())
-        ),
-        "input_parameters": json.dumps(
-            get_qe_input_parameters(workchain.outputs.output_parameters.get_dict())
-        ),
-    }
-
-    geoopt_object_parameters["cell_opt_constraints"] = pw_input_parameters.get(
-        "CELL", {}
-    ).get("cell_dofree", "")
-    if geoopt_object_parameters["cell_opt_constraints"] != "":
-        geoopt_object_parameters["cell_optimised"] = (
-            geoopt_object_parameters["cell_opt_constraints"] != ""
-        )
-
-    if workchain.caller.description:
-        workchain_name = workchain.caller.description[:30]
-        geoopt_object_parameters["name"] = f"GeoOpt - {workchain_name}"
-
-    # create oBIS GEO_OPT object
-    geoopt_obobject = utils.create_openbis_object(
-        openbis_session,
-        type=geo_opt_type,
-        props=geoopt_object_parameters,
-        collection=experiment_id,
+    input_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
     )
-
-    geoopt_obobject = set_simulation_codes(
-        openbis_session, geoopt_obobject, workchain_uuid
-    )
-
-    # if missing create oBIS object and obtain uuid
-    input_structure = workchain.inputs.structure
-    input_structure = structure_to_atomistic_model(
-        openbis_session, input_structure.uuid, uuids
-    )
-    geoopt_obobject.add_parents(input_structure)
-    utils.update_openbis_object(geoopt_obobject)
-
-    # if missing create oBIS object and obtain uuid
     output_structure = workchain.outputs.output_structure
-    output_structure = structure_to_atomistic_model(
+    geometry_object = _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["Geometry Optimization"],
+        properties,
+        [input_object],
+        lambda path: _render_structure_preview(output_structure, path),
+        "optimized_geometry",
+    )
+    output_object = structure_to_atomistic_model(
         openbis_session, output_structure.uuid, uuids
     )
-    output_structure.add_parents(geoopt_obobject)
-    utils.update_openbis_object(output_structure)
-    geoopt_obobject.add_children(output_structure)
-
-    return geoopt_obobject
+    output_object.add_parents(geometry_object)
+    utils.update_openbis_object(output_object)
+    geometry_object.add_children(output_object)
+    utils.update_openbis_object(geometry_object)
+    return geometry_object
 
 
 def BandsWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids
-):  # is SUB of QeAppWorkChain
+    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+):
     workchain = orm.load_node(workchain_uuid)
+    executable_ids = _ensure_executables(openbis_session, workchain)
     try:
         root_in = workchain.inputs.bands
         root_out = workchain.outputs.bands
@@ -745,462 +1293,209 @@ def BandsWorkChain_export(
         root_in = workchain.inputs.bands_projwfc
         root_out = workchain.outputs.bands_projwfc
 
-    dft_object_parameters = get_dft_parameters_qe(
-        root_in.bands, root_out.scf_parameters.get_dict()
+    output_parameters = root_out.scf_parameters.get_dict()
+    dft_parameters = get_dft_parameters_qe(root_in.bands, output_parameters)
+    structure_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
     )
-
-    bands_type = OPENBIS_OBJECT_TYPES["Band Structure"]
-
-    output_parameters = get_qe_output_parameters(root_out.scf_parameters.get_dict())
-    input_parameters = get_qe_input_parameters(root_out.scf_parameters.get_dict())
-    dictionary = {
-        "wfms_uuid": workchain_uuid,
-        "level_theory_method": "dft",
-        "level_theory_parameters": json.dumps(
-            dft_object_parameters
-        ),  # link/incorporate DFT object
-        "output_parameters": json.dumps(output_parameters),
-        "input_parameters": json.dumps(input_parameters),
-        "band_gap": find_bandgap(
-            root_out.band_structure.uuid,
-            number_electrons=output_parameters["number_of_electrons"],
-        )[1],
-    }
-
-    if workchain.caller.description:
-        workchain_name = workchain.caller.description[:30]
-        dictionary["name"] = f"BANDS - {workchain_name}"
-
-    # Create BANDSTRUCURE object
-    bands_obobject = utils.create_openbis_object(
-        openbis_session, type=bands_type, props=dictionary, collection=experiment_id
-    )
-
-    bands_obobject = set_simulation_codes(
-        openbis_session, bands_obobject, workchain_uuid
-    )
-
-    # Create datasets in openbis and like them to the openBIS object
-    pdos_json = aiida_data_to_json(root_out.projwfc.Dos.uuid)
-    pbands_json = aiida_data_to_json(root_out.projwfc.bands.uuid)
-    projections_json = aiida_data_to_json(root_out.projwfc.projections.uuid)
-    band_structure_json = aiida_data_to_json(root_out.band_structure.uuid)
-    utils.write_json(pdos_json, "pdos_json.json")
-    utils.write_json(pbands_json, "pbands_json.json")
-    utils.write_json(projections_json, "projections_json.json")
-    utils.write_json(band_structure_json, "band_structure_json.json")
-
-    utils.create_openbis_dataset(
+    return _create_band_and_dos_objects(
         openbis_session,
-        type="RAW_DATA",
-        sample=bands_obobject,
-        files=[
-            "pdos_json.json",
-            "pbands_json.json",
-            "projections_json.json",
-            "band_structure_json.json",
-        ],
+        experiment_id,
+        workchain,
+        dft_parameters,
+        output_parameters,
+        root_out.band_structure,
+        root_out.projwfc.Dos,
+        structure_object,
+        aiida_node_id,
+        executable_ids,
     )
-
-    os.remove("pdos_json.json")
-    os.remove("pbands_json.json")
-    os.remove("projections_json.json")
-    os.remove("band_structure_json.json")
-
-    input_structure = workchain.inputs.structure
-    # if missing create oBIS object and obtain uuid
-    input_structure = structure_to_atomistic_model(
-        openbis_session, input_structure.uuid, uuids
-    )
-    bands_obobject.add_parents(input_structure)
-    utils.update_openbis_object(bands_obobject)
-
-    return bands_obobject
 
 
 def PdosWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids
-):  # is SUB of QeAppWorkChain
+    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+):
     workchain = orm.load_node(workchain_uuid)
-    root_in = workchain.inputs
-    root_out = workchain.outputs
-
-    dft_object_parameters = get_dft_parameters_qe(
-        root_in.scf, root_out.nscf.output_parameters.get_dict()
+    executable_ids = _ensure_executables(openbis_session, workchain)
+    output_parameters = workchain.outputs.nscf.output_parameters.get_dict()
+    dft_parameters = get_dft_parameters_qe(workchain.inputs.scf, output_parameters)
+    structure_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
     )
-
-    pdos_type = OPENBIS_OBJECT_TYPES["PDOS"]
-
-    dictionary = {
-        "wfms_uuid": workchain_uuid,
-        "level_theory_method": "dft",
-        "level_theory_parameters": json.dumps(
-            dft_object_parameters
-        ),  # link/incorporate DFT object
-        "output_parameters": json.dumps(
-            get_qe_output_parameters(root_out.nscf.output_parameters.get_dict())
-        ),
-        "input_parameters": json.dumps(
-            get_qe_input_parameters(root_out.nscf.output_parameters.get_dict())
-        ),
-    }
-
-    if workchain.caller.description:
-        workchain_name = workchain.caller.description[:30]
-        dictionary["name"] = f"PDOS - {workchain_name}"
-
-    # Create PDOS object
-    pdos_obobject = utils.create_openbis_object(
-        openbis_session, type=pdos_type, props=dictionary, collection=experiment_id
+    properties = _simulation_properties(
+        workchain,
+        "PDOS",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
     )
-
-    pdos_obobject = set_simulation_codes(openbis_session, pdos_obobject, workchain_uuid)
-
-    # Create datasets in openbis and like them to the openBIS object
-    dos_json = aiida_data_to_json(workchain.outputs.dos.output_dos.uuid)
-    pdos_json = aiida_data_to_json(workchain.outputs.projwfc.Dos.uuid)
-    utils.write_json(dos_json, "dos_json.json")
-    utils.write_json(pdos_json, "pdos_json.json")
-
-    utils.create_openbis_dataset(
+    properties.update(
+        {
+            "pdos": True,
+            "projection_description": (
+                "Orbital-projected density of states generated by projwfc.x. "
+                "Full arrays are stored in the linked AiiDA archive."
+            ),
+        }
+    )
+    fermi = _fermi_energy(output_parameters)
+    if fermi is not None:
+        properties["fermi_energy"] = fermi
+    pdos_node = workchain.outputs.projwfc.Dos
+    return _create_simulation_object(
         openbis_session,
-        type="RAW_DATA",
-        sample=pdos_obobject,
-        files=["pdos_json.json", "dos_json.json"],
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["DOS"],
+        properties,
+        [structure_object],
+        lambda path: _render_xy_preview(pdos_node, path, "Projected density of states"),
+        "pdos",
     )
-
-    os.remove("pdos_json.json")
-    os.remove("dos_json.json")
-
-    # if missing create oBIS object and obtain uuid
-    input_structure = workchain.inputs.structure
-    input_structure = structure_to_atomistic_model(
-        openbis_session, input_structure.uuid, uuids
-    )
-    pdos_obobject.add_parents(input_structure)
-    utils.update_openbis_object(pdos_obobject)
-
-    return pdos_obobject
 
 
 def VibroWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids
-):  # is SUB of QeAppWorkChain
-    # outputs are not exported so we look for a PwBaseWorkChain
+    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+):
     workchain = orm.load_node(workchain_uuid)
-    for wkc in workchain.called_descendants:
-        if wkc.process_label == "PwBaseWorkChain":
-            root_in = wkc.inputs
-            root_out = wkc.outputs
-            break
-
-    dft_object_parameters = get_dft_parameters_qe(
-        root_in, root_out.output_parameters.get_dict()
+    executable_ids = _ensure_executables(openbis_session, workchain)
+    pw_base = next(
+        (
+            node
+            for node in workchain.called_descendants
+            if node.process_label == "PwBaseWorkChain"
+        ),
+        None,
     )
-
-    vibro_spec_type = OPENBIS_OBJECT_TYPES["Vibrational Spectroscopy"]
-
-    dictionary = {
-        "wfms_uuid": workchain_uuid,
-        "level_theory_method": "dft",
-        "level_theory_parameters": json.dumps(
-            dft_object_parameters
-        ),  # link/incorporate DFT object
-    }
-
-    if workchain.caller.description:
-        workchain_name = workchain.caller.description[:30]
-        dictionary["name"] = f"VibroSpec - {workchain_name}"
-
-    # Create VIBSPEC object
-    vibro_spec_obobject = utils.create_openbis_object(
+    if pw_base is None:
+        raise ValueError("The vibrational workflow does not contain a PwBaseWorkChain.")
+    output_parameters = pw_base.outputs.output_parameters.get_dict()
+    dft_parameters = get_dft_parameters_qe(pw_base.inputs, output_parameters)
+    properties = _simulation_properties(
+        workchain,
+        "Vibrational spectroscopy",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    properties["vibrational_mode"] = "Phonons"
+    structure_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
+    )
+    phonon_pdos = workchain.outputs.phonon_pdos
+    return _create_simulation_object(
         openbis_session,
-        type=vibro_spec_type,
-        props=dictionary,
-        collection=experiment_id,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["Vibrational Spectroscopy"],
+        properties,
+        [structure_object],
+        lambda path: _render_xy_preview(
+            phonon_pdos, path, "Vibrational density of states"
+        ),
+        "vibrational_spectrum",
     )
 
-    vibro_spec_obobject = set_simulation_codes(
-        openbis_session, vibro_spec_obobject, workchain_uuid
-    )
 
-    # Create datasets in openbis and like them to the openBIS object
-    phonon_bands_json = aiida_data_to_json(workchain.outputs.phonon_bands.uuid)
-    phonon_pdos_json = aiida_data_to_json(workchain.outputs.phonon_pdos.uuid)
-    phonon_thermo_json = aiida_data_to_json(workchain.outputs.phonon_thermo.uuid)
-    utils.write_json(phonon_bands_json, "phonon_bands_json.json")
-    utils.write_json(phonon_pdos_json, "phonon_pdos_json.json")
-    utils.write_json(phonon_thermo_json, "phonon_thermo_json.json")
-
-    utils.create_openbis_dataset(
-        openbis_session,
-        type="RAW_DATA",
-        sample=vibro_spec_obobject,
-        files=[
-            "phonon_bands_json.json",
-            "phonon_pdos_json.json",
-            "phonon_thermo_json.json",
-        ],
-    )
-
-    os.remove("phonon_bands_json.json")
-    os.remove("phonon_pdos_json.json")
-    os.remove("phonon_thermo_json.json")
-
-    input_structure = workchain.inputs.structure
-    input_structure = structure_to_atomistic_model(
-        openbis_session, input_structure.uuid, uuids
-    )
-    vibro_spec_obobject.add_parents(input_structure)
-    utils.update_openbis_object(vibro_spec_obobject)
-
-    return vibro_spec_obobject
+def _cp2k_output_parameters(workchain):
+    output = _get_optional_output(workchain.outputs, "dft_output_parameters")
+    if output is None:
+        output = workchain.outputs.output_parameters
+    return output.get_dict()
 
 
 def Cp2kGeoOptWorkChain_export(
-    openbis_session, experiment_id, workchain_uuid, uuids
-):  # Can be both MAIN and SUB. Do not export in case is SUB
+    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+):
     workchain = orm.load_node(workchain_uuid)
-    sys_params = workchain.inputs.sys_params.get_dict()
-    dft_params = workchain.inputs.dft_params.get_dict()
-    code = workchain.inputs.code.description
-
-    properties = [
-        "energy",
-        "energy_scf",
-        "energy_units",
-        "bandgap_spin1_au",
-        "bandgap_spin2_au",
-    ]
-    if hasattr(workchain.outputs, "dft_output_parameters"):
-        all_output_parameters = workchain.outputs.dft_output_parameters.get_dict()
-    else:
-        all_output_parameters = workchain.outputs.output_parameters.get_dict()
-    output_parameters = {
-        key: all_output_parameters[key]
-        for key in properties
-        if key in all_output_parameters
-    }
-    step_info = {
-        key: values[-1]
-        for key, values in all_output_parameters["motion_step_info"].items()
-    }
-    output_parameters.update(step_info)
-
-    input_parameters = {}
-    try:
-        input_parameters = workchain.outputs.final_input_parameters.get_dict()
-    except NotExistentAttributeError:
-        pass
-    input_structure = workchain.inputs.structure
-
-    dft_object_parameters = get_dft_parameters_cp2k(code, dft_params)
-    if dft_object_parameters["vdw_corr"]:
-        dft_object_parameters["vdw_corr"] = "DFT-D3"
-
-    geo_opt_type = OPENBIS_OBJECT_TYPES["Geometry Optimisation"]
-
-    geoopt_object_parameters = {
-        "wfms_uuid": workchain_uuid,
-        "level_theory_method": "dft",
-        "level_theory_parameters": json.dumps(
-            dft_object_parameters
-        ),  # link/incorporate DFT object
-        "constrained": sys_params["constraints"] != "",
-        "output_parameters": json.dumps(output_parameters),
-        "input_parameters": json.dumps(input_parameters),
-    }
-
-    geoopt_object_parameters["cell_optimised"] = workchain.label == "CP2K_CellOpt"
-    if geoopt_object_parameters["cell_optimised"]:
-        geoopt_object_parameters["cell_opt_constraints"] = sys_params[
-            "cell_opt_constraint"
-        ]
-
-    if workchain.description:
-        workchain_name = workchain.description[:30]
-        geoopt_object_parameters["name"] = f"GeoOpt - {workchain_name}"
-
-    # create oBIS GEO_OPT object
-    geoopt_obobject = utils.create_openbis_object(
-        openbis_session,
-        type=geo_opt_type,
-        props=geoopt_object_parameters,
-        collection=experiment_id,
+    executable_ids = _ensure_executables(openbis_session, workchain)
+    system_parameters = workchain.inputs.sys_params.get_dict()
+    dft_parameters = get_dft_parameters_cp2k(
+        workchain.inputs.code.description, workchain.inputs.dft_params.get_dict()
     )
+    output_parameters = _cp2k_output_parameters(workchain)
+    motion = output_parameters.get("motion_step_info", {})
+    cell_optimization = workchain.label == "CP2K_CellOpt"
 
-    geoopt_obobject = set_simulation_codes(
-        openbis_session, geoopt_obobject, workchain_uuid
+    properties = _simulation_properties(
+        workchain,
+        "Geometry optimization",
+        dft_parameters,
+        aiida_node_id,
+        method_label=False,
+        executable_ids=executable_ids,
     )
-
-    # if missing create oBIS object and obtain uuid
-    input_structure = workchain.inputs.structure
-    input_structure = structure_to_atomistic_model(
-        openbis_session, input_structure.uuid, uuids
+    properties.update(
+        {
+            "constrained": bool(system_parameters.get("constraints")),
+            "cell_optimization": cell_optimization,
+            "final_energy": _energy_in_hartree(output_parameters),
+        }
     )
-    geoopt_obobject.add_parents(input_structure)
-    utils.update_openbis_object(geoopt_obobject)
+    if system_parameters.get("constraints"):
+        properties["constraints_description"] = str(system_parameters["constraints"])
+    if cell_optimization and system_parameters.get("cell_opt_constraint"):
+        properties["cell_constraints"] = str(system_parameters["cell_opt_constraint"])
+    if motion.get("max_grad_au"):
+        properties["final_max_force"] = _quantity(
+            motion["max_grad_au"][-1], "Hartree/bohr"
+        )
+    if motion.get("step"):
+        properties["number_of_steps"] = int(motion["step"][-1])
 
-    # if missing create oBIS object and obtain uuid
+    input_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
+    )
     output_structure = workchain.outputs.output_structure
-    output_structure = structure_to_atomistic_model(
+    geometry_object = _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["Geometry Optimization"],
+        properties,
+        [input_object],
+        lambda path: _render_structure_preview(output_structure, path),
+        "optimized_geometry",
+    )
+    output_object = structure_to_atomistic_model(
         openbis_session, output_structure.uuid, uuids
     )
-    output_structure.add_parents(geoopt_obobject)
-    utils.update_openbis_object(output_structure)
-
-    geoopt_obobject.add_children(output_structure)
-
-    # TBD output trajectory....
-    # output_trajectory = aiida_data_to_json(workchain.outputs.output_trajectory)
-
-    return geoopt_obobject
+    output_object.add_parents(geometry_object)
+    utils.update_openbis_object(output_object)
+    geometry_object.add_children(output_object)
+    utils.update_openbis_object(geometry_object)
+    return geometry_object
 
 
-def Cp2kStmWorkChain_export(openbis_session, experiment_id, workchain_uuid, uuids):
+def Cp2kStmWorkChain_export(
+    openbis_session, experiment_id, workchain_uuid, uuids, aiida_node_id
+):
     workchain = orm.load_node(workchain_uuid)
-    dft_params = workchain.inputs.dft_params.get_dict()
-    spm_params = workchain.inputs.spm_params.get_dict()
-    # cp2k_code = workchain.inputs.cp2k_code.description
-    spm_code = workchain.inputs.spm_code.description
-
-    properties = [
-        "energy",
-        "energy_scf",
-        "energy_units",
-        "bandgap_spin1_au",
-        "bandgap_spin2_au",
-    ]
-    if hasattr(workchain.outputs, "dft_output_parameters"):
-        all_output_parameters = workchain.outputs.dft_output_parameters.get_dict()
-    else:
-        all_output_parameters = workchain.outputs.output_parameters.get_dict()
-    output_parameters = {
-        key: all_output_parameters[key]
-        for key in properties
-        if key in all_output_parameters
-    }
-    step_info = {
-        key: values[-1]
-        for key, values in all_output_parameters["motion_step_info"].items()
-    }
-    output_parameters.update(step_info)
-
-    input_parameters = {}
-
-    dft_object_parameters = get_dft_parameters_cp2k(spm_code, dft_params)
-    if dft_object_parameters["vdw_corr"]:
-        dft_object_parameters["vdw_corr"] = "DFT-D3"
-
-    bias_voltages_json = [
-        json.dumps({"value": float(i), "unit": "unit:V"})
-        for i in spm_params["--energy_range"]
-    ]
-    isovalues_json = [
-        json.dumps({"value": float(i), "unit": "eV/Bohr**3"})
-        for i in spm_params["--isovalues"]
-    ]
-    heights_json = [
-        json.dumps({"value": float(i), "unit": "unit:ANGSTROM"})
-        for i in spm_params["--heights"]
-    ]
-
-    measurement_type = OPENBIS_OBJECT_TYPES["STM Simulation"]
-
-    dictionary = {
-        "wfms_uuid": workchain.uuid,
-        "level_theory_method": "dft",
-        "level_theory_parameters": json.dumps(
-            dft_object_parameters
-        ),  # link/incorporate DFT object
-        "bias_voltages": json.dumps(bias_voltages_json),
-        "isovalues": json.dumps(isovalues_json),
-        "heights": json.dumps(heights_json),
-        # TODO: Uncomment this as long as I reset openBIS schema
-        # "p_tip": spm_params["--p_tip_ratios"],
-        "output_parameters": json.dumps(output_parameters),
-        "input_parameters": json.dumps(input_parameters),
-    }
-
-    if workchain.description:
-        workchain_name = workchain.description[:30]
-        dictionary["name"] = f"STM - {workchain_name}"
-
-    dictionary["default_object_view"] = "IMAGING_GALLERY_VIEW"
-    # create oBIS 2D_MEASUREMENT object (how to knwo if it is 2D or 1D???)
-    obobject = utils.create_openbis_object(
+    executable_ids = _ensure_executables(openbis_session, workchain)
+    dft_parameters = get_dft_parameters_cp2k(
+        workchain.inputs.spm_code.description, workchain.inputs.dft_params.get_dict()
+    )
+    properties = _simulation_properties(
+        workchain,
+        "STM",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    properties["spm_mode"] = "STM"
+    structure_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
+    )
+    return _create_simulation_object(
         openbis_session,
-        type=measurement_type,
-        props=dictionary,
-        collection=experiment_id,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["SPM"],
+        properties,
+        [structure_object],
+        lambda path: _render_spm_preview(workchain, path),
+        "stm_map",
     )
-
-    obobject = set_simulation_codes(openbis_session, obobject, workchain_uuid)
-
-    workchain.base.extras.set(
-        "eln", {"url": OPENBIS_SESSION.url, "object_uuid": obobject.permId}
-    )
-
-    input_structure = workchain.inputs.structure
-    input_structure = structure_to_atomistic_model(
-        openbis_session, input_structure.uuid, uuids
-    )
-
-    obobject.add_parents(input_structure)
-    utils.update_openbis_object(obobject)
-
-    return obobject
-
-
-def set_simulation_codes(openbis_session, obis_object, workchain_uuid):
-    code_type = OPENBIS_OBJECT_TYPES["Code"]
-    openbis_codes_filepaths = {
-        code_object.props["filepath_executable"]: code_object
-        for code_object in utils.get_openbis_objects(openbis_session, type=code_type)
-    }
-    workchain_codes = get_codes_info(workchain_uuid)
-
-    simulations_codes = []
-    for code_info in workchain_codes:
-        code_filepath = code_info["filepath_executable"]
-        if code_filepath in openbis_codes_filepaths.keys():
-            code_object = openbis_codes_filepaths[code_filepath]
-        else:
-            code_object = utils.create_openbis_object(
-                openbis_session,
-                type=code_type,
-                props=code_info,
-                collection=OPENBIS_COLLECTIONS_PATHS["Open Source Code"],
-            )
-
-        simulations_codes.append(code_object.permId)
-
-    obis_object.props["codes"] = simulations_codes
-
-    return obis_object
-
-
-def get_codes_info(workchain_uuid):
-    codesinfo_list = []
-    workchain = orm.load_node(workchain_uuid)
-    codes = set(
-        [
-            node.inputs.code
-            for node in workchain.called_descendants
-            if isinstance(node, orm.CalcJobNode)
-        ]
-    )
-    for code in codes:
-        codesinfo = {
-            "name": code.filepath_executable.name,
-            "description": code.description,
-            "filepath_executable": code.filepath_executable.as_posix(),
-        }
-        codesinfo_list.append(codesinfo)
-    return codesinfo_list
 
 
 workchain_exporters = {
+    "NanoribbonWorkChain": NanoribbonWorkChain_export,
     "PwRelaxWorkChain": PwRelaxWorkChain_export,
     "BandsWorkChain": BandsWorkChain_export,
     "PdosWorkChain": PdosWorkChain_export,
@@ -1210,63 +1505,62 @@ workchain_exporters = {
 }
 
 
+def _run_exporter(
+    openbis_session,
+    experiment_id,
+    workchain,
+    structure_uuids,
+    aiida_archive,
+):
+    exporter = workchain_exporters[workchain.process_label]
+    return exporter(
+        openbis_session,
+        experiment_id,
+        workchain.uuid,
+        structure_uuids,
+        aiida_archive.permId,
+    )
+
+
 def export_workchain(openbis_session, experiment_id, workchain_uuid):
     workchain = orm.load_node(workchain_uuid)
     workchains_to_export = get_all_preceding_main_workchains(workchain.uuid)
     export = None
-    simulation_uuids_oBIS = get_uuids_from_oBIS(openbis_session)
+    simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)
 
-    # create individual oBIS objects
-    for main_wc_uuid in workchains_to_export:
-        main_wc = orm.load_node(main_wc_uuid)
+    for main_workchain_uuid in workchains_to_export:
+        main_workchain = orm.load_node(main_workchain_uuid)
+        if not main_workchain.is_finished_ok:
+            continue
+        if main_workchain_uuid in simulation_uuids_openbis["wc_uuids"]:
+            continue
 
-        if (
-            main_wc.is_finished_ok
-        ):  # if not we do not parse it but it will still be in the AiiDA archive
-            if main_wc_uuid not in simulation_uuids_oBIS["wc_uuids"]:
-                logging.info(f"dealing with main WC {main_wc.pk}")
+        logger.info("dealing with main WC %s", main_workchain.pk)
+        aiida_archive = create_and_export_AiiDA_archive(
+            openbis_session, main_workchain_uuid
+        )
+        if main_workchain.process_label in workchain_exporters:
+            export = _run_exporter(
+                openbis_session,
+                experiment_id,
+                main_workchain,
+                simulation_uuids_openbis["structure_uuids"],
+                aiida_archive,
+            )
+            simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)
+            continue
 
-                # create global .aiida for main_wc and AiiDA_nodes openBIS object with the archive as dataset
-                AiiDA_archive = create_and_export_AiiDA_archive(
-                    openbis_session, main_wc_uuid
-                )
-
-                if main_wc.process_label in workchain_exporters:
-                    # check if wc.uuid already in openBIS
-                    # if not in openbis create pertinent oBIS object and populate it
-                    export = workchain_exporters[main_wc.process_label](
-                        openbis_session,
-                        experiment_id,
-                        main_wc_uuid,
-                        simulation_uuids_oBIS["structure_uuids"],
-                    )
-                    export.props["aiida_node"] = AiiDA_archive.permId
-                    utils.update_openbis_object(export)
-
-                    # Update current status of openBIS simulations
-                    simulation_uuids_oBIS = get_uuids_from_oBIS(openbis_session)
-                else:
-                    logging.info(main_wc.process_label, " checking sub_workchains")
-                    # all workchains called by teh main workchain
-                    wc_tree = main_wc.called_descendants
-                    for wc in wc_tree:
-                        # we export only properties related workchains: geo_opt, bands,...
-                        if wc.process_label in workchain_exporters:
-                            # check if wc.uuid already in openBIS
-                            # if not in openbis create pertinent oBIS object and populate it
-                            export = workchain_exporters[wc.process_label](
-                                openbis_session,
-                                experiment_id,
-                                wc.uuid,
-                                simulation_uuids_oBIS["structure_uuids"],
-                            )
-
-                            export.props["aiida_node"] = AiiDA_archive.permId
-                            utils.update_openbis_object(export)
-
-                            # Update current status of openBIS simulations
-                            simulation_uuids_oBIS = get_uuids_from_oBIS(openbis_session)
-                        # else:
-                        #    print(wc.process_label,' should not be exported')
+        logger.info("%s checking sub_workchains", main_workchain.process_label)
+        for child in main_workchain.called_descendants:
+            if child.process_label not in workchain_exporters:
+                continue
+            export = _run_exporter(
+                openbis_session,
+                experiment_id,
+                child,
+                simulation_uuids_openbis["structure_uuids"],
+                aiida_archive,
+            )
+            simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)
 
     return export

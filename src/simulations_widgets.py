@@ -1,13 +1,15 @@
-import ipywidgets as ipw
-from . import utils, widgets, aiida_utils
-import subprocess
-from aiida import orm
-import shutil
-import pandas as pd
-import json
-from IPython.display import display, Javascript
-import io
 import contextlib
+import io
+import json
+import shutil
+import subprocess
+
+import ipywidgets as ipw
+import pandas as pd
+from aiida import orm
+from IPython.display import Javascript, display
+
+from . import aiida_utils, utils, widgets
 
 string_io = io.StringIO()
 
@@ -15,6 +17,9 @@ MATERIALS_CONCEPTS_TYPES = utils.read_json("config/openbis_config.json")[
     "OpenBIS Materials Concepts Types"
 ]
 SIMULATION_TYPES = utils.read_json("config/openbis_config.json")["Simulations"]["Types"]
+SIMULATION_EXPORT_TYPES = utils.read_json("config/openbis_config.json")[
+    "Simulation Export Types"
+]
 OPENBIS_OBJECT_TYPES = utils.read_json("config/openbis_config.json")["OpenBIS Types"]
 WORKCHAIN_VIEWERS = utils.read_json("config/openbis_config.json")["Workchain Viewers"]
 
@@ -177,7 +182,7 @@ class ImportSimulationsWidget(ipw.VBox):
                     self.openbis_session, sample_ident=parent
                 )
                 simulation_objects_children = utils.find_openbis_simulations(
-                    self.openbis_session, parent_object, SIMULATION_TYPES
+                    self.openbis_session, parent_object, SIMULATION_EXPORT_TYPES
                 )
 
                 for simulation_object in simulation_objects_children:
@@ -190,7 +195,7 @@ class ImportSimulationsWidget(ipw.VBox):
                     self.openbis_session, sample_ident=parent
                 )
                 simulation_objects_children = utils.find_openbis_simulations(
-                    self.openbis_session, parent_object, SIMULATION_TYPES
+                    self.openbis_session, parent_object, SIMULATION_EXPORT_TYPES
                 )
 
                 parent_simulation_permid_list = []
@@ -596,15 +601,18 @@ class ExportSimulationsWidget(ipw.VBox):
                     )
 
                     if last_export:
-                        first_atom_model = utils.find_first_atomistic_model(
-                            self.openbis_session,
-                            last_export,
-                            OPENBIS_OBJECT_TYPES["Atomistic Model"],
-                        )
+                        for exported_object in aiida_utils.normalize_exported_objects(
+                            last_export
+                        ):
+                            first_atom_model = utils.find_first_atomistic_model(
+                                self.openbis_session,
+                                exported_object,
+                                OPENBIS_OBJECT_TYPES["Atomistic Model"],
+                            )
 
-                        if len(first_atom_model.parents) == 0:
-                            first_atom_model.parents = atom_model_parents
-                            utils.update_openbis_object(first_atom_model)
+                            if len(first_atom_model.parents) == 0:
+                                first_atom_model.parents = atom_model_parents
+                                utils.update_openbis_object(first_atom_model)
                         display(Javascript(data="alert('Upload successful!')"))
                     else:
                         display(

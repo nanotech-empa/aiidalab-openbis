@@ -37,10 +37,23 @@
             "STM simulation": "STM_SIMULATION"
         }
     },
+    "Simulation Export Types": {
+        "Energy Calculation": "ENERGY_CALCULATION",
+        "Geometry Optimization": "GEOMETRY_OPTIMIZATION",
+        "Band Structure": "BAND_STRUCTURE",
+        "Charge Analysis": "CHARGE_ANALYSIS",
+        "DOS": "DOS",
+        "Reaction Barrier": "REACTION_BARRIER",
+        "SPM": "SPM",
+        "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
+        "Molecular Dynamics": "MOLECULAR_DYNAMICS",
+        "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
+    },
     "Workchain Viewers": {
         "QeAppWorkChain": "/apps/quantum-espresso/qe.ipynb",
         "Cp2kGeoOptWorkChain": "/apps/surfaces/view_geometry_optimization.ipynb",
-        "Cp2kStmWorkChain": "/apps/surfaces/view_stm.ipynb"
+        "Cp2kStmWorkChain": "/apps/surfaces/view_stm.ipynb",
+        "NanoribbonWorkChain": "/apps/nanoribbons/show.ipynb"
     },
     "OpenBIS Types": {
         "Process": "PROCESS",
@@ -54,6 +67,8 @@
         "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
         "Unclassified Simulation": "UNCLASSIFIED_SIMULATION",
         "Code": "CODE",
+        "Computer": "COMPUTER",
+        "Executable": "EXECUTABLE",
         "Molecule": "MOLECULE",
         "Reaction Product Concept": "REACTION_PRODUCT_CONCEPT",
         "Reaction Product": "REACTION_PRODUCT",
