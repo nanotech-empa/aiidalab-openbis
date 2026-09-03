@@ -919,7 +919,7 @@ def _fermi_energy(output_parameters):
     value = output_parameters.get("fermi_energy")
     if value is None:
         return None
-    return _quantity(value, "eV")
+    return [_quantity(value, "eV")]
 
 
 def _attach_parent(openbis_object, parent):
@@ -1213,7 +1213,7 @@ def NanoribbonWorkChain_export(
         geometry_object = _create_simulation_object(
             openbis_session,
             experiment_id,
-            OPENBIS_SIMULATION_TYPES["Geometry Optimization"],
+            OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
             properties,
             [input_structure_object],
             lambda path: _render_structure_preview(final_structure, path),
@@ -1265,7 +1265,7 @@ def PwRelaxWorkChain_export(
     geometry_object = _create_simulation_object(
         openbis_session,
         experiment_id,
-        OPENBIS_SIMULATION_TYPES["Geometry Optimization"],
+        OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
         properties,
         [input_object],
         lambda path: _render_structure_preview(output_structure, path),
@@ -1448,7 +1448,7 @@ def Cp2kGeoOptWorkChain_export(
     geometry_object = _create_simulation_object(
         openbis_session,
         experiment_id,
-        OPENBIS_SIMULATION_TYPES["Geometry Optimization"],
+        OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
         properties,
         [input_object],
         lambda path: _render_structure_preview(output_structure, path),
@@ -1486,7 +1486,7 @@ def Cp2kStmWorkChain_export(
     return _create_simulation_object(
         openbis_session,
         experiment_id,
-        OPENBIS_SIMULATION_TYPES["SPM"],
+        OPENBIS_SIMULATION_TYPES["SPM Simulation"],
         properties,
         [structure_object],
         lambda path: _render_spm_preview(workchain, path),

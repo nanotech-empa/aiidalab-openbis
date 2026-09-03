@@ -210,11 +210,11 @@ stdout/stderr
 
 ---
 
-# GEOMETRY_OPTIMIZATION
+# GEOMETRY_OPTIMISATION
 
 ## Object type
 
-`GEOMETRY_OPTIMIZATION`
+`GEOMETRY_OPTIMISATION`
 
 ## Definition
 
@@ -241,7 +241,7 @@ ATOMISTIC_MODEL
 Relation:
 
 ```text
-ATOMISTIC_MODEL → GEOMETRY_OPTIMIZATION
+ATOMISTIC_MODEL → GEOMETRY_OPTIMISATION
 ```
 
 ## Child objects
@@ -255,7 +255,7 @@ ATOMISTIC_MODEL
 Relation:
 
 ```text
-GEOMETRY_OPTIMIZATION → ATOMISTIC_MODEL
+GEOMETRY_OPTIMISATION → ATOMISTIC_MODEL
 ```
 
 The child `ATOMISTIC_MODEL` represents the optimized geometry.
@@ -967,11 +967,11 @@ all force arrays
 
 ---
 
-# SPM
+# SPM_SIMULATION
 
 ## Object type
 
-`SPM`
+`SPM_SIMULATION`
 
 ## Definition
 
@@ -996,7 +996,7 @@ ATOMISTIC_MODEL
 Relation:
 
 ```text
-ATOMISTIC_MODEL → SPM
+ATOMISTIC_MODEL → SPM_SIMULATION
 ```
 
 Optional, if the SPM simulation derives from a previous electronic-structure calculation:
@@ -1008,7 +1008,7 @@ ENERGY_CALCULATION
 Relation:
 
 ```text
-ENERGY_CALCULATION → SPM
+ENERGY_CALCULATION → SPM_SIMULATION
 ```
 
 ## Child objects
@@ -1295,13 +1295,13 @@ ATOMISTIC_MODEL → MOLECULAR_DYNAMICS
 Optional, if the MD starts from a previously optimized geometry:
 
 ```text
-GEOMETRY_OPTIMIZATION
+GEOMETRY_OPTIMISATION
 ```
 
 Relation:
 
 ```text
-GEOMETRY_OPTIMIZATION → MOLECULAR_DYNAMICS
+GEOMETRY_OPTIMISATION → MOLECULAR_DYNAMICS
 ```
 
 ## Child objects
@@ -1397,7 +1397,7 @@ other
 
 ```text
 parent: initial ATOMISTIC_MODEL
-optional parent: GEOMETRY_OPTIMIZATION
+optional parent: GEOMETRY_OPTIMISATION
 optional child: final or representative ATOMISTIC_MODEL
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
@@ -1443,12 +1443,12 @@ Use only when the simulation cannot be cleanly classified as:
 
 ```text
 ENERGY_CALCULATION
-GEOMETRY_OPTIMIZATION
+GEOMETRY_OPTIMISATION
 BAND_STRUCTURE
 CHARGE_ANALYSIS
 DOS
 REACTION_BARRIER
-SPM
+SPM_SIMULATION
 VIBRATIONAL_SPECTROSCOPY
 MOLECULAR_DYNAMICS
 ```
@@ -1492,12 +1492,12 @@ Optional, if the unclassified simulation derives from another simulation:
 
 ```text
 ENERGY_CALCULATION
-GEOMETRY_OPTIMIZATION
+GEOMETRY_OPTIMISATION
 BAND_STRUCTURE
 CHARGE_ANALYSIS
 DOS
 REACTION_BARRIER
-SPM
+SPM_SIMULATION
 VIBRATIONAL_SPECTROSCOPY
 MOLECULAR_DYNAMICS
 UNCLASSIFIED_SIMULATION

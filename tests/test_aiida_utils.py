@@ -187,6 +187,13 @@ def test_cp2k_method_uses_workflow_parameters(aiida_utils):
     assert aiida_utils._method_modifiers({"vdw_corr": "none"}) == []
 
 
+def test_fermi_energy_matches_multivalue_schema(aiida_utils):
+    assert aiida_utils._fermi_energy({"fermi_energy": -3.2}) == [
+        {"value": -3.2, "unit": "eV"}
+    ]
+    assert aiida_utils._fermi_energy({}) is None
+
+
 def test_executables_map_code_and_computer_once(monkeypatch, aiida_utils):
     computer = SimpleNamespace(
         uuid="computer-uuid",
@@ -282,7 +289,7 @@ def test_nanoribbon_export_uses_simplified_schema(
     assert dos.parents == [structures[expected_structure]]
 
     if include_cell_optimization:
-        assert geometry.type == "GEOMETRY_OPTIMIZATION"
+        assert geometry.type == "GEOMETRY_OPTIMISATION"
         assert geometry.props["cell_optimization"] is True
         assert geometry.props["cell_constraints"] == "x"
         assert geometry.props["final_energy"] == pytest.approx(
