@@ -1080,7 +1080,8 @@ def _get_optional_output(outputs, label):
 
 
 def _quantity(value, unit):
-    return {"value": float(value), "unit": unit}
+    """Serialize a quantity for an openBIS JSON property."""
+    return json.dumps({"value": float(value), "unit": unit})
 
 
 def _energy_in_hartree(output_parameters):

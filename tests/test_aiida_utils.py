@@ -1,4 +1,5 @@
 import importlib
+import json
 import sys
 from types import SimpleNamespace
 
@@ -174,8 +175,10 @@ def test_find_nanoribbon_calculations_reports_missing_nodes(aiida_utils):
 )
 def test_energy_is_normalized_to_hartree(aiida_utils, value, unit, expected):
     quantity = aiida_utils._energy_in_hartree({"energy": value, "energy_units": unit})
-    assert quantity["unit"] == "Hartree"
-    assert quantity["value"] == pytest.approx(expected)
+    assert isinstance(quantity, str)
+    parsed_quantity = json.loads(quantity)
+    assert parsed_quantity["unit"] == "Hartree"
+    assert parsed_quantity["value"] == pytest.approx(expected)
 
 
 def test_cp2k_method_uses_workflow_parameters(aiida_utils):
@@ -188,9 +191,9 @@ def test_cp2k_method_uses_workflow_parameters(aiida_utils):
 
 
 def test_fermi_energy_matches_multivalue_schema(aiida_utils):
-    assert aiida_utils._fermi_energy({"fermi_energy": -3.2}) == [
-        {"value": -3.2, "unit": "eV"}
-    ]
+    quantities = aiida_utils._fermi_energy({"fermi_energy": -3.2})
+    assert len(quantities) == 1
+    assert json.loads(quantities[0]) == {"value": -3.2, "unit": "eV"}
     assert aiida_utils._fermi_energy({}) is None
 
 
@@ -556,7 +559,10 @@ def test_nanoribbon_export_uses_simplified_schema(
 
     assert bands.type == "BAND_STRUCTURE"
     assert dos.type == "DOS"
-    assert bands.props["band_gap"] == {"value": 1.2, "unit": "eV"}
+    assert json.loads(bands.props["band_gap"]) == {
+        "value": 1.2,
+        "unit": "eV",
+    }
     assert dos.props["pdos"] is True
     assert dos.props["projection_description"]
     for simulation in (bands, dos):
@@ -583,7 +589,7 @@ def test_nanoribbon_export_uses_simplified_schema(
         assert geometry.type == "GEOMETRY_OPTIMISATION"
         assert geometry.props["cell_optimization"] is True
         assert geometry.props["cell_constraints"] == "x"
-        assert geometry.props["final_energy"] == pytest.approx(
+        assert json.loads(geometry.props["final_energy"]) == pytest.approx(
             {"value": -10.0, "unit": "Hartree"}
         )
         assert geometry.props["aiida_node"] == "aiida-archive-permid"
