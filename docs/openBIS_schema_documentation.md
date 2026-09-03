@@ -669,7 +669,7 @@ By mapping the detailed relationships between physical materials, hardware state
 
 ### Computer
 * **Code:** `COMPUTER`
-* **Generated code prefix:** `CODE`
+* **Generated code prefix:** `COMP`
 * **Semantic Annotation:**
 * **Metadata:**
 
