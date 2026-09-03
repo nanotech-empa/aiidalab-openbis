@@ -194,23 +194,34 @@ def test_fermi_energy_matches_multivalue_schema(aiida_utils):
     assert aiida_utils._fermi_energy({}) is None
 
 
-def test_executables_map_code_and_computer_once(monkeypatch, aiida_utils):
+def test_executables_require_confirmation_and_reuse_openbis_links(
+    monkeypatch, aiida_utils
+):
     computer = SimpleNamespace(
         uuid="computer-uuid",
         label="localhost",
         hostname="localhost",
-        description="Local AiiDAlab computer",
+        description="Empa MacBook Pro 7723 of Carlo Pignedoli",
     )
     code = SimpleNamespace(
         uuid="code-uuid",
-        label="pw-7.4",
-        full_label="pw-7.4@localhost",
-        description="pw.x (7.4) setup by AiiDAlab.",
-        filepath_executable="/opt/qe/bin/pw.x",
-        default_calc_job_plugin="quantumespresso.pw",
+        label="cp2k-2024.3",
+        full_label="cp2k-2024.3@localhost",
+        description="cp2k.psmp (2024.3) setup by AiiDAlab.",
+        filepath_executable="/opt/cp2k/bin/cp2k.psmp",
+        default_calc_job_plugin="cp2k",
         computer=computer,
     )
-    objects = {"CODE": [], "COMPUTER": [], "EXECUTABLE": []}
+    software = FakeOpenbisObject("CODE", {"name": {"name": "CP2K", "": None}})
+    openbis_computer = FakeOpenbisObject(
+        "COMPUTER",
+        {"name": {"name": "MacBook Pro 7723", "": None}},
+    )
+    objects = {
+        "CODE": [software],
+        "COMPUTER": [openbis_computer],
+        "EXECUTABLE": [],
+    }
 
     def create_openbis_object(_session, type, props, collection):
         obj = FakeOpenbisObject(type, props)
@@ -228,22 +239,131 @@ def test_executables_map_code_and_computer_once(monkeypatch, aiida_utils):
         aiida_utils.utils, "create_openbis_object", create_openbis_object
     )
 
-    first = aiida_utils._ensure_executables(object(), object())
+    with pytest.raises(aiida_utils.MissingExecutablesError) as error:
+        aiida_utils._ensure_executables(object(), object())
+
+    requirement = error.value.requirements[0]
+    assert requirement["code_name"] == "CP2K"
+    assert requirement["computer_name"] == "MacBook Pro 7723"
+    assert requirement["version"] == "2024.3"
+    assert objects["EXECUTABLE"] == []
+
+    first = aiida_utils._ensure_executables(object(), object(), create_missing=True)
     second = aiida_utils._ensure_executables(object(), object())
 
     assert first == second
-    assert {kind: len(values) for kind, values in objects.items()} == {
-        "CODE": 1,
-        "COMPUTER": 1,
-        "EXECUTABLE": 1,
-    }
-    software = objects["CODE"][0]
+    assert len(objects["CODE"]) == 1
+    assert len(objects["COMPUTER"]) == 1
+    assert len(objects["EXECUTABLE"]) == 1
     executable = objects["EXECUTABLE"][0]
-    assert software.props["name"] == "Quantum ESPRESSO"
-    assert software.props["version"] == "7.4"
+    assert executable.collection == aiida_utils.OPENBIS_COLLECTIONS_PATHS["Executable"]
     assert executable.props["code"] == software.permId
-    assert executable.props["computer"] == objects["COMPUTER"][0].permId
-    assert executable.props["comments"] == "AiiDA Code UUID: code-uuid"
+    assert executable.props["computer"] == openbis_computer.permId
+    assert "AiiDA Code UUID: code-uuid" in executable.props["comments"]
+    assert "AiiDA Computer UUID: computer-uuid" in executable.props["comments"]
+    assert (
+        "AiiDA executable path: /opt/cp2k/bin/cp2k.psmp" in executable.props["comments"]
+    )
+    assert "AiiDA plugin: cp2k" in executable.props["comments"]
+
+
+def test_code_matching_is_strictly_label_based(monkeypatch, aiida_utils):
+    computer = SimpleNamespace(
+        uuid="computer-uuid",
+        label="localhost",
+        description="Empa MacBook Pro 7723 of Carlo Pignedoli",
+    )
+    code = SimpleNamespace(
+        uuid="code-uuid",
+        label="pw-7.4",
+        full_label="pw-7.4@localhost",
+        description="Quantum ESPRESSO pw.x (7.4)",
+        filepath_executable="/opt/qe/bin/pw.x",
+        default_calc_job_plugin="quantumespresso.pw",
+        computer=computer,
+    )
+    objects = {
+        "CODE": [FakeOpenbisObject("CODE", {"name": "Quantum ESPRESSO"})],
+        "COMPUTER": [FakeOpenbisObject("COMPUTER", {"name": "MacBook Pro 7723"})],
+        "EXECUTABLE": [],
+    }
+    monkeypatch.setattr(aiida_utils, "_workchain_codes", lambda _workchain: [code])
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "get_openbis_objects",
+        lambda _session, type: objects[type],
+    )
+
+    with pytest.raises(aiida_utils.OpenbisNameMatchError, match="pw-7.4"):
+        aiida_utils._ensure_executables(object(), object())
+
+
+def test_name_matching_prefers_label_then_longest_name(aiida_utils):
+    generic = FakeOpenbisObject("COMPUTER", {"name": "Daint"})
+    specific = FakeOpenbisObject("COMPUTER", {"name": "daint@ALPS"})
+    description_match = FakeOpenbisObject("COMPUTER", {"name": "MacBook Pro 7723"})
+
+    matched = aiida_utils._match_named_openbis_object(
+        "daint.alps_lp83",
+        [generic, specific, description_match],
+        "Computer",
+        additional_names=("Empa MacBook Pro 7723",),
+    )
+    assert matched is specific
+
+
+def test_name_matching_rejects_duplicate_best_matches(aiida_utils):
+    first = FakeOpenbisObject("CODE", {"name": "CP2K"})
+    duplicate = FakeOpenbisObject("CODE", {"name": "CP2K"})
+
+    with pytest.raises(aiida_utils.OpenbisNameMatchError, match="ambiguously"):
+        aiida_utils._match_named_openbis_object(
+            "cp2k-2024.3", [first, duplicate], "Code"
+        )
+
+
+def test_export_workchain_preflights_before_archive(monkeypatch, aiida_utils):
+    workchain = SimpleNamespace(
+        uuid="workchain-uuid",
+        pk=123,
+        process_label="Cp2kGeoOptWorkChain",
+        is_finished_ok=True,
+    )
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _uuid: workchain)
+    monkeypatch.setattr(
+        aiida_utils,
+        "get_all_preceding_main_workchains",
+        lambda _uuid: [workchain.uuid],
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "get_uuids_from_oBIS",
+        lambda _session: {"wc_uuids": [], "structure_uuids": []},
+    )
+    requirement = {
+        "full_label": "cp2k@localhost",
+        "properties": {},
+    }
+
+    def stop_at_preflight(_session, pending, create_missing=False):
+        assert pending == [workchain]
+        assert create_missing is False
+        raise aiida_utils.MissingExecutablesError([requirement])
+
+    archives = []
+    monkeypatch.setattr(
+        aiida_utils, "_ensure_executables_for_workchains", stop_at_preflight
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "create_and_export_AiiDA_archive",
+        lambda *_args: archives.append(object()),
+    )
+
+    with pytest.raises(aiida_utils.MissingExecutablesError):
+        aiida_utils.export_workchain(object(), "/PROJECT/EXPERIMENT", workchain.uuid)
+
+    assert archives == []
 
 
 @pytest.mark.parametrize("include_cell_optimization", [False, True])

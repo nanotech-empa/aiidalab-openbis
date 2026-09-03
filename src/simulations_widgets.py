@@ -1,4 +1,5 @@
 import contextlib
+import html
 import io
 import json
 import shutil
@@ -509,6 +510,14 @@ class ExportSimulationsWidget(ipw.VBox):
             layout=ipw.Layout(width="100px", height="50px"),
         )
 
+        self.executable_confirmation_message = ipw.HTML()
+        self.create_missing_executables_checkbox = ipw.Checkbox(
+            value=False,
+            description="Create the listed openBIS executable records",
+            indent=False,
+            layout=ipw.Layout(display="none"),
+        )
+
         # Increase search button icon size
         increase_search_button = ipw.HTML(
             """<style>
@@ -533,6 +542,8 @@ class ExportSimulationsWidget(ipw.VBox):
             self.used_aiida_checkbox,
             self.simulation_details_vbox,
             increase_search_button,
+            self.executable_confirmation_message,
+            self.create_missing_executables_checkbox,
             self.save_simulations_button,
         ]
 
@@ -594,11 +605,50 @@ class ExportSimulationsWidget(ipw.VBox):
                     atom_model_parents = (
                         selected_slab + selected_molecules_ids + selected_reac_prods_ids
                     )
-                    last_export = aiida_utils.export_workchain(
-                        self.openbis_session,
-                        selected_experiment_id,
-                        selected_simulation_id,
-                    )
+                    try:
+                        last_export = aiida_utils.export_workchain(
+                            self.openbis_session,
+                            selected_experiment_id,
+                            selected_simulation_id,
+                            create_missing_executables=(
+                                self.create_missing_executables_checkbox.value
+                            ),
+                        )
+                    except aiida_utils.MissingExecutablesError as error:
+                        items = []
+                        for requirement in error.requirements:
+                            details = (
+                                f"{requirement['full_label']} -> "
+                                f"{requirement['code_name']} on "
+                                f"{requirement['computer_name']}; "
+                                f"path {requirement['executable_path']}; "
+                                f"plugin {requirement['plugin']}"
+                            )
+                            items.append(f"<li>{html.escape(details)}</li>")
+                        self.executable_confirmation_message.value = (
+                            "<p><b>Missing openBIS executable records:</b></p>"
+                            f"<ul>{''.join(items)}</ul>"
+                            "<p>Review the mappings, check the confirmation box, "
+                            "and click Save again. Nothing has been exported yet.</p>"
+                        )
+                        self.create_missing_executables_checkbox.value = False
+                        self.create_missing_executables_checkbox.layout.display = ""
+                        return
+                    except aiida_utils.ExecutableResolutionError as error:
+                        self.executable_confirmation_message.value = (
+                            "<p style='color:#b00020'><b>Cannot map AiiDA provenance "
+                            f"to openBIS:</b> {html.escape(str(error))}</p>"
+                            "<p>Create or correct the matching CODE/COMPUTER record "
+                            "in openBIS, or add its name to the AiiDA description, "
+                            "then retry. Nothing has been exported.</p>"
+                        )
+                        self.create_missing_executables_checkbox.value = False
+                        self.create_missing_executables_checkbox.layout.display = "none"
+                        return
+
+                    self.executable_confirmation_message.value = ""
+                    self.create_missing_executables_checkbox.value = False
+                    self.create_missing_executables_checkbox.layout.display = "none"
 
                     if last_export:
                         for exported_object in aiida_utils.normalize_exported_objects(

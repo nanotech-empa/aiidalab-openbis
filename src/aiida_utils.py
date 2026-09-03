@@ -5,6 +5,7 @@ import random
 import re
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -652,17 +653,32 @@ def normalize_exported_objects(export):
     return (export,)
 
 
-_CODE_METADATA = {
-    "quantumespresso": {
-        "name": "Quantum ESPRESSO",
-        "url": "https://www.quantum-espresso.org/",
-    },
-    "cp2k": {"name": "CP2K", "url": "https://www.cp2k.org/"},
-    "nanotech_empa": {
-        "name": "cp2k-spm-tools",
-        "url": "https://github.com/nanotech-empa/cp2k-spm-tools",
-    },
-}
+class ExecutableResolutionError(ValueError):
+    """Base error raised while mapping AiiDA codes to openBIS objects."""
+
+
+class OpenbisNameMatchError(ExecutableResolutionError):
+    """Raised when an AiiDA label cannot identify one openBIS object."""
+
+
+class MissingExecutablesError(ExecutableResolutionError):
+    """Raised when exporting would require new EXECUTABLE objects."""
+
+    def __init__(self, requirements):
+        self.requirements = tuple(requirements)
+        labels = ", ".join(item["full_label"] for item in self.requirements)
+        super().__init__(f"Missing openBIS EXECUTABLE objects for: {labels}")
+
+
+def _openbis_property(openbis_object, property_name):
+    """Return a scalar property across pyBIS 6/openBIS 7 representations."""
+    value = openbis_object.props.get(property_name)
+    if isinstance(value, dict):
+        if property_name in value:
+            return value[property_name]
+        if "value" in value:
+            return value["value"]
+    return value
 
 
 def _aiida_uuid_comment(kind, uuid):
@@ -671,31 +687,144 @@ def _aiida_uuid_comment(kind, uuid):
 
 def _find_object_by_comment(objects, comment):
     for openbis_object in objects:
-        if comment in str(openbis_object.props.get("comments", "")):
+        if comment in str(_openbis_property(openbis_object, "comments") or ""):
             return openbis_object
     return None
 
 
-def _software_properties(aiida_code):
-    plugin = str(getattr(aiida_code, "default_calc_job_plugin", "") or "")
-    plugin_family = plugin.split(".", 1)[0]
-    metadata = _CODE_METADATA.get(plugin_family, {})
-    properties = {
-        "name": metadata.get("name", plugin_family or aiida_code.label),
-    }
+def _normalize_object_name(value):
+    """Normalize an AiiDA/openBIS name for punctuation-insensitive matching."""
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _match_named_openbis_object(aiida_name, objects, object_kind, additional_names=()):
+    """Match an openBIS name within ordered AiiDA identifiers."""
+    search_names = (str(aiida_name or ""),) + tuple(
+        str(value or "") for value in additional_names
+    )
+    candidates = []
+    for search_priority, search_name in enumerate(search_names):
+        normalized_search_name = _normalize_object_name(search_name)
+        for openbis_object in objects:
+            openbis_name = str(_openbis_property(openbis_object, "name") or "")
+            normalized_openbis_name = _normalize_object_name(openbis_name)
+            if (
+                normalized_openbis_name
+                and normalized_openbis_name in normalized_search_name
+            ):
+                candidates.append(
+                    (search_priority, normalized_openbis_name, openbis_object)
+                )
+
+    if not candidates:
+        available = sorted(
+            str(_openbis_property(obj, "name"))
+            for obj in objects
+            if _openbis_property(obj, "name")
+        )
+        available_text = ", ".join(available) if available else "none"
+        identifiers = ", ".join(repr(value) for value in search_names if value)
+        raise OpenbisNameMatchError(
+            f"AiiDA {object_kind} identifiers {identifiers} do not contain the "
+            f"name of an openBIS {object_kind} object. Available names: "
+            f"{available_text}."
+        )
+
+    best_priority = min(priority for priority, _name, _obj in candidates)
+    prioritized = [
+        (name, obj) for priority, name, obj in candidates if priority == best_priority
+    ]
+    longest_name_length = max(len(name) for name, _obj in prioritized)
+    best_matches = [
+        obj for name, obj in prioritized if len(name) == longest_name_length
+    ]
+    if len(best_matches) != 1:
+        names = sorted(str(_openbis_property(obj, "name")) for obj in best_matches)
+        raise OpenbisNameMatchError(
+            f"AiiDA {object_kind} identifier '{search_names[best_priority]}' "
+            f"ambiguously matches openBIS {object_kind} objects: "
+            f"{', '.join(names)}."
+        )
+    return best_matches[0]
+
+
+def _aiida_code_version(aiida_code):
+    """Return a version inferred from an AiiDA Code description or label."""
     description = str(getattr(aiida_code, "description", "") or "")
     version_match = re.search(r"\((?:v)?([0-9]+(?:\.[0-9]+)+)\)", description)
     if version_match is None:
         version_match = re.search(
             r"[-_]v?([0-9]+(?:\.[0-9]+)+)$", str(aiida_code.label)
         )
-    if version_match is not None:
-        properties["version"] = version_match.group(1)
-    if metadata.get("url"):
-        properties["url"] = metadata["url"]
-    if description and not metadata:
-        properties["description"] = description
-    return properties
+    return version_match.group(1) if version_match is not None else ""
+
+
+def _executable_comments(aiida_code):
+    computer = aiida_code.computer
+    plugin = str(getattr(aiida_code, "default_calc_job_plugin", "") or "")
+    return "\n".join(
+        (
+            _aiida_uuid_comment("Code", aiida_code.uuid),
+            _aiida_uuid_comment("Computer", computer.uuid),
+            f"AiiDA full label: {aiida_code.full_label}",
+            f"AiiDA executable path: {aiida_code.filepath_executable}",
+            f"AiiDA plugin: {plugin}",
+        )
+    )
+
+
+def _executable_description(aiida_code):
+    details = [
+        f"AiiDA code {aiida_code.full_label}",
+        f"executable {aiida_code.filepath_executable}",
+    ]
+    plugin = str(getattr(aiida_code, "default_calc_job_plugin", "") or "")
+    version = _aiida_code_version(aiida_code)
+    if plugin:
+        details.append(f"plugin {plugin}")
+    if version:
+        details.append(f"version {version}")
+    return "; ".join(details)
+
+
+def _object_reference_id(value):
+    """Return a comparable permId from a pyBIS object-reference property."""
+    if hasattr(value, "permId"):
+        return str(value.permId)
+    if isinstance(value, dict):
+        return str(value.get("permId", value.get("identifier", "")))
+    return str(value or "")
+
+
+def _find_executable(executable_objects, aiida_code, software, computer):
+    code_uuid_comment = _aiida_uuid_comment("Code", aiida_code.uuid)
+    executable = _find_object_by_comment(executable_objects, code_uuid_comment)
+    if executable is not None:
+        return executable
+
+    normalized_label = _normalize_object_name(aiida_code.label)
+    signature_matches = []
+    for candidate in executable_objects:
+        if (
+            _normalize_object_name(_openbis_property(candidate, "name"))
+            != normalized_label
+        ):
+            continue
+        if _object_reference_id(_openbis_property(candidate, "code")) != str(
+            software.permId
+        ):
+            continue
+        if _object_reference_id(_openbis_property(candidate, "computer")) != str(
+            computer.permId
+        ):
+            continue
+        signature_matches.append(candidate)
+
+    if len(signature_matches) > 1:
+        raise ExecutableResolutionError(
+            f"Multiple openBIS EXECUTABLE objects match '{aiida_code.full_label}'."
+        )
+    return signature_matches[0] if signature_matches else None
 
 
 def _workchain_codes(workchain):
@@ -711,12 +840,22 @@ def _workchain_codes(workchain):
     return sorted(codes.values(), key=lambda code: code.full_label)
 
 
-def _ensure_executables(openbis_session, workchain):
-    """Create/reuse CODE, COMPUTER and EXECUTABLE objects for a workflow."""
+def _unique_workchain_codes(workchains):
+    codes = {}
+    for workchain in workchains:
+        for code in _workchain_codes(workchain):
+            codes[str(code.uuid)] = code
+    return sorted(codes.values(), key=lambda code: code.full_label)
+
+
+def _ensure_executables_for_workchains(
+    openbis_session, workchains: Iterable, create_missing=False
+):
+    """Resolve workflow executables, optionally creating confirmed missing ones."""
     code_type = OPENBIS_OBJECT_TYPES["Code"]
     computer_type = OPENBIS_OBJECT_TYPES["Computer"]
     executable_type = OPENBIS_OBJECT_TYPES["Executable"]
-    collection = OPENBIS_COLLECTIONS_PATHS["Open Source Code"]
+    executable_collection = OPENBIS_COLLECTIONS_PATHS["Executable"]
 
     code_objects = list(
         utils.get_openbis_objects(openbis_session, type=code_type) or []
@@ -727,75 +866,66 @@ def _ensure_executables(openbis_session, workchain):
     executable_objects = list(
         utils.get_openbis_objects(openbis_session, type=executable_type) or []
     )
-    software_by_identity = {
-        (
-            str(obj.props.get("name", "")),
-            str(obj.props.get("version", "")),
-        ): obj
-        for obj in code_objects
-    }
 
     executable_ids = []
-    for aiida_code in _workchain_codes(workchain):
-        software_properties = _software_properties(aiida_code)
-        software_identity = (
-            software_properties["name"],
-            software_properties.get("version", ""),
-        )
-        software = software_by_identity.get(software_identity)
-        if software is None:
-            software = utils.create_openbis_object(
-                openbis_session,
-                type=code_type,
-                props=software_properties,
-                collection=collection,
-            )
-            software_by_identity[software_identity] = software
-            code_objects.append(software)
-
+    missing = []
+    for aiida_code in _unique_workchain_codes(workchains):
+        software = _match_named_openbis_object(aiida_code.label, code_objects, "Code")
         computer = aiida_code.computer
-        computer_comment = _aiida_uuid_comment("Computer", computer.uuid)
-        computer_object = _find_object_by_comment(computer_objects, computer_comment)
-        if computer_object is None:
-            computer_properties = {
-                "name": computer.label,
-                "comments": computer_comment,
-            }
-            if computer.description:
-                computer_properties["description"] = computer.description
-            hostname = str(computer.hostname or "")
-            if hostname and hostname not in {"localhost", "127.0.0.1"}:
-                computer_properties["url"] = f"ssh://{hostname}"
-            computer_object = utils.create_openbis_object(
-                openbis_session,
-                type=computer_type,
-                props=computer_properties,
-                collection=collection,
-            )
-            computer_objects.append(computer_object)
-
-        executable_comment = _aiida_uuid_comment("Code", aiida_code.uuid)
-        executable = _find_object_by_comment(executable_objects, executable_comment)
+        computer_object = _match_named_openbis_object(
+            computer.label,
+            computer_objects,
+            "Computer",
+            additional_names=(computer.description,),
+        )
+        executable = _find_executable(
+            executable_objects, aiida_code, software, computer_object
+        )
         if executable is None:
-            executable_properties = {
+            properties = {
                 "name": aiida_code.label,
-                "description": (
-                    f"{aiida_code.full_label}: {aiida_code.filepath_executable}"
-                ),
-                "comments": executable_comment,
+                "description": _executable_description(aiida_code),
+                "comments": _executable_comments(aiida_code),
                 "code": software.permId,
                 "computer": computer_object.permId,
             }
-            executable = utils.create_openbis_object(
-                openbis_session,
-                type=executable_type,
-                props=executable_properties,
-                collection=collection,
+            missing.append(
+                {
+                    "full_label": aiida_code.full_label,
+                    "code_name": _openbis_property(software, "name") or "",
+                    "computer_name": _openbis_property(computer_object, "name") or "",
+                    "version": _aiida_code_version(aiida_code),
+                    "executable_path": aiida_code.filepath_executable,
+                    "plugin": str(
+                        getattr(aiida_code, "default_calc_job_plugin", "") or ""
+                    ),
+                    "properties": properties,
+                }
             )
-            executable_objects.append(executable)
+            continue
+        executable_ids.append(executable.permId)
+
+    if missing and not create_missing:
+        raise MissingExecutablesError(missing)
+
+    for requirement in missing:
+        executable = utils.create_openbis_object(
+            openbis_session,
+            type=executable_type,
+            props=requirement["properties"],
+            collection=executable_collection,
+        )
+        executable_objects.append(executable)
         executable_ids.append(executable.permId)
 
     return executable_ids
+
+
+def _ensure_executables(openbis_session, workchain, create_missing=False):
+    """Resolve a workflow's executables without silently creating records."""
+    return _ensure_executables_for_workchains(
+        openbis_session, [workchain], create_missing=create_missing
+    )
 
 
 def _find_nanoribbon_calculations(workchain):
@@ -1522,19 +1652,35 @@ def _run_exporter(
     )
 
 
-def export_workchain(openbis_session, experiment_id, workchain_uuid):
+def export_workchain(
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    create_missing_executables=False,
+):
     workchain = orm.load_node(workchain_uuid)
     workchains_to_export = get_all_preceding_main_workchains(workchain.uuid)
     export = None
     simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)
 
+    pending_workchains = []
     for main_workchain_uuid in workchains_to_export:
         main_workchain = orm.load_node(main_workchain_uuid)
         if not main_workchain.is_finished_ok:
             continue
         if main_workchain_uuid in simulation_uuids_openbis["wc_uuids"]:
             continue
+        pending_workchains.append(main_workchain)
 
+    # Resolve every name before creating any archive or simulation object.
+    _ensure_executables_for_workchains(
+        openbis_session,
+        pending_workchains,
+        create_missing=create_missing_executables,
+    )
+
+    for main_workchain in pending_workchains:
+        main_workchain_uuid = main_workchain.uuid
         logger.info("dealing with main WC %s", main_workchain.pk)
         aiida_archive = create_and_export_AiiDA_archive(
             openbis_session, main_workchain_uuid

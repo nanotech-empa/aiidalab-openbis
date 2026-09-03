@@ -29,6 +29,25 @@ SIMULATION_OBJECT → EXECUTABLE → COMPUTER
 
 Therefore, `code` and `computer` should not be duplicated on simulation objects.
 
+## AiiDA export resolution
+
+The exporter resolves provenance in three steps:
+
+1. A CODE name in openBIS must occur in the AiiDA Code label after converting
+   both values to lowercase and removing punctuation and whitespace. The AiiDA
+   Code description is not used for CODE matching.
+2. A COMPUTER name in openBIS must occur in either the AiiDA Computer label or
+   its description after the same normalization. The label is checked first.
+3. An EXECUTABLE is identified by the AiiDA Code UUID when available, with its
+   CODE, COMPUTER, executable path, plugin entry point, full label, and inferred
+   version recorded as provenance.
+
+If more than one equally specific object matches, export stops. Missing or
+ambiguous CODE and COMPUTER records must be corrected in openBIS before retrying.
+A missing EXECUTABLE is displayed for review and requires explicit confirmation
+before it is created. This preflight finishes before any AiiDA archive or
+simulation object is uploaded.
+
 ## Global method families
 
 Controlled vocabulary:
