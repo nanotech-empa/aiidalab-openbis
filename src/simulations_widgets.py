@@ -54,7 +54,7 @@ class ImportSimulationsWidget(ipw.VBox):
 
         self.molecules_accordion = ipw.Accordion()
         self.add_molecule_button = ipw.Button(
-            description="Add",
+            description="Add molecule",
             disabled=False,
             button_style="success",
             tooltip="Add molecule",
@@ -62,12 +62,23 @@ class ImportSimulationsWidget(ipw.VBox):
         )
 
         self.reacprod_concepts_accordion = ipw.Accordion()
+        reaction_products_available = (
+            "Reaction Product Concept" in widgets.OPENBIS_OBJECT_TYPES
+        )
         self.add_reacprod_concept_button = ipw.Button(
-            description="Add",
-            disabled=False,
+            description=(
+                "Add reaction product concept"
+                if reaction_products_available
+                else "Reaction products unavailable"
+            ),
+            disabled=not reaction_products_available,
             button_style="success",
-            tooltip="Add reaction product concept",
-            layout=ipw.Layout(width="150px", height="25px"),
+            tooltip=(
+                "Add reaction product concept"
+                if reaction_products_available
+                else "The connected openBIS schema has no REACTION_PRODUCT_CONCEPT type"
+            ),
+            layout=ipw.Layout(width="230px", height="25px"),
         )
 
         self.select_material_title = ipw.HTML(
@@ -1100,7 +1111,7 @@ class SimulationDetailsWidget(ipw.VBox):
 
         self.molecules_accordion = ipw.Accordion()
         self.add_molecule_button = ipw.Button(
-            description="Add",
+            description="Add molecule",
             disabled=False,
             button_style="success",
             tooltip="Add molecule",
@@ -1108,12 +1119,23 @@ class SimulationDetailsWidget(ipw.VBox):
         )
 
         self.reacprod_concepts_accordion = ipw.Accordion()
+        reaction_products_available = (
+            "Reaction Product Concept" in widgets.OPENBIS_OBJECT_TYPES
+        )
         self.add_reacprod_concept_button = ipw.Button(
-            description="Add",
-            disabled=False,
+            description=(
+                "Add reaction product concept"
+                if reaction_products_available
+                else "Reaction products unavailable"
+            ),
+            disabled=not reaction_products_available,
             button_style="success",
-            tooltip="Add reaction product concept",
-            layout=ipw.Layout(width="150px", height="25px"),
+            tooltip=(
+                "Add reaction product concept"
+                if reaction_products_available
+                else "The connected openBIS schema has no REACTION_PRODUCT_CONCEPT type"
+            ),
+            layout=ipw.Layout(width="230px", height="25px"),
         )
 
         self.select_material_title = ipw.HTML(
