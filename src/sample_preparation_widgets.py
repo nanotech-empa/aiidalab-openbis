@@ -80,6 +80,22 @@ def format_process_step_name(idx: int, raw_name: str) -> str:
     return f"{icons_prefix}{numbered_name}"
 
 
+def strip_step_number(raw_name: str) -> str:
+    """Strips the sequential number prefix from a process step name while preserving action icons.
+
+    Example:
+        '[⚙️] 01 - Delamination of Au' -> '[⚙️] Delamination of Au'
+        '01 - Delamination of Au' -> 'Delamination of Au'
+        '[⚙️] 01' -> '[⚙️]'
+        '01' -> ''
+    """
+    icons_prefix, real_name = split_icons_and_name(raw_name)
+    clean_real_name = re.sub(r"^\d+\s*(?:-\s*)?", "", real_name).strip()
+    if clean_real_name:
+        return f"{icons_prefix}{clean_real_name}"
+    return icons_prefix.strip()
+
+
 def validate_and_sort_process_steps(process_name, process_step_list, openbis_session):
     """Validates and sorts process steps for a process template.
 
@@ -2614,7 +2630,9 @@ class RegisterProcessStepWidget(ipw.VBox):
         """
         Load process step settings from process template and populate the widgets accordingly.
         """
-        self.name_textbox.value = process_step.props["name"] or ""
+        self.name_textbox.value = strip_step_number(
+            process_step.props.get("name") or ""
+        )
         self.description_textbox.value = process_step.props["description"] or ""
         self.comments_textarea.value = process_step.props["comments"] or ""
 

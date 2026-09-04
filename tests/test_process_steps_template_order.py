@@ -55,6 +55,7 @@ utils.get_interface_config_info = MagicMock(
 from src.sample_preparation_widgets import (
     format_process_step_name,
     split_icons_and_name,
+    strip_step_number,
     validate_and_sort_process_steps,
 )
 
@@ -141,6 +142,43 @@ class TestProcessStepsTemplateOrder(unittest.TestCase):
             format_process_step_name(1, "[⚙️] "),
             "[⚙️] 01",
         )
+
+    def test_strip_step_number(self):
+        # Plain name with number prefix stripped
+        self.assertEqual(
+            strip_step_number("01 - Delamination of Au"),
+            "Delamination of Au",
+        )
+
+        # Name with icon and number prefix
+        self.assertEqual(
+            strip_step_number("[⚙️] 01 - Delamination of Au"),
+            "[⚙️] Delamination of Au",
+        )
+
+        # Name with multiple icons and number prefix
+        self.assertEqual(
+            strip_step_number("[⚙️🔬] 10 - Sputtering and Annealing"),
+            "[⚙️🔬] Sputtering and Annealing",
+        )
+
+        # Name with no number prefix remains untouched
+        self.assertEqual(
+            strip_step_number("[⚙️] Delamination of Au"),
+            "[⚙️] Delamination of Au",
+        )
+        self.assertEqual(
+            strip_step_number("Delamination of Au"),
+            "Delamination of Au",
+        )
+
+        # Number only
+        self.assertEqual(strip_step_number("01"), "")
+        self.assertEqual(strip_step_number("[⚙️] 01"), "[⚙️]")
+
+        # Empty / None
+        self.assertEqual(strip_step_number(""), "")
+        self.assertEqual(strip_step_number(None), "")
 
     def test_validate_and_sort_process_steps_success(self):
         # Create mock steps in non-sequential order
