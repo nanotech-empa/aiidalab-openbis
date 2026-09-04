@@ -1,4 +1,5 @@
 import re
+import json
 import ipywidgets as ipw
 from . import utils, widgets
 from IPython.display import display, Javascript
@@ -47,6 +48,116 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
+
+
+def split_icons_and_name(raw_text: str):
+    """Splits a process step name into bracketed action icons prefix (if present) and the real step name.
+
+    Example:
+        '[⚙️] Delamination of Au' -> ('[⚙️] ', 'Delamination of Au')
+        '01 - Delamination of Au' -> ('', '01 - Delamination of Au')
+    """
+    raw_text = (raw_text or "").strip()
+    if raw_text.startswith("[") and "]" in raw_text:
+        close_idx = raw_text.find("]")
+        icons_prefix = raw_text[: close_idx + 1]
+        rest = raw_text[close_idx + 1 :].strip()
+        return f"{icons_prefix} ", rest
+    return "", raw_text
+
+
+def format_process_step_name(idx: int, raw_name: str) -> str:
+    """Formats a process step name with a zero-padded sequential number (e.g. 01 - ...).
+
+    The number comes after action icons as part of the real name of the process step.
+    """
+    icons_prefix, real_name = split_icons_and_name(raw_name)
+    clean_real_name = re.sub(r"^\d+\s*-\s*", "", real_name).strip()
+    if clean_real_name:
+        numbered_name = f"{idx:02d} - {clean_real_name}"
+    else:
+        numbered_name = f"{idx:02d}"
+    return f"{icons_prefix}{numbered_name}"
+
+
+def validate_and_sort_process_steps(process_name, process_step_list, openbis_session):
+    """Validates and sorts process steps for a process template.
+
+    Checks:
+    - All referenced step objects exist in openBIS.
+    - Each step has a sequential number at the beginning of its real name (e.g. '01 - <name>').
+    - No duplicate step numbers exist among the steps assigned to the process.
+
+    Returns:
+        tuple: (sorted_step_objects, error_message)
+        If validation fails, sorted_step_objects is None and error_message details why.
+        If validation passes, sorted_step_objects is a list of step objects sorted by number,
+        and error_message is None.
+    """
+    if not process_step_list:
+        return None, f"Process template '{process_name}' contains no process steps."
+
+    if isinstance(process_step_list, str):
+        process_step_list = [process_step_list]
+
+    errors = []
+    step_items = []
+    seen_numbers = {}
+
+    for process_step_id in process_step_list:
+        try:
+            step_obj = utils.get_openbis_object(
+                openbis_session, sample_ident=process_step_id
+            )
+        except Exception as e:
+            errors.append(
+                f"Process step '{process_step_id}' could not be loaded from openBIS: {e}"
+            )
+            continue
+
+        if step_obj is None:
+            errors.append(
+                f"Process step '{process_step_id}' was not found in openBIS."
+            )
+            continue
+
+        raw_step_name = (step_obj.props.get("name") or "").strip()
+        step_display_name = (
+            raw_step_name if raw_step_name else f"<{step_obj.permId}>"
+        )
+
+        icons_prefix, real_name = split_icons_and_name(raw_step_name)
+
+        match = re.match(r"^(\d+)\s*-\s*(.*)$", real_name)
+        if not match:
+            errors.append(
+                f"Step '{step_display_name}' does not have a number at the beginning of its name (expected format: '01 - <step name>')."
+            )
+        else:
+            step_num = int(match.group(1))
+            if step_num in seen_numbers:
+                seen_numbers[step_num].append(step_display_name)
+            else:
+                seen_numbers[step_num] = [step_display_name]
+            step_items.append((step_num, step_obj))
+
+    for step_num, names in seen_numbers.items():
+        if len(names) > 1:
+            names_str = ", ".join(f"'{n}'" for n in names)
+            errors.append(
+                f"Step number {step_num:02d} is used by multiple process steps: {names_str}."
+            )
+
+    if errors:
+        bullet_errors = "\n".join(f"• {err}" for err in errors)
+        error_msg = (
+            f"Cannot load process template '{process_name}':\n\n{bullet_errors}"
+        )
+        return None, error_msg
+
+    step_items.sort(key=lambda x: x[0])
+    sorted_steps = [item[1] for item in step_items]
+    return sorted_steps, None
 
 
 class SampleHistoryWidget(ipw.VBox):
@@ -850,43 +961,52 @@ class RegisterPreparationWidget(ipw.VBox):
         if process_id == "-1":
             return
         else:
-            process_object = utils.get_openbis_object(
-                self.openbis_session, sample_ident=process_id
-            )
-            process_name = process_object.props["name"]
-            process_step_list = process_object.props["process_steps"]
-            self.process_short_name = process_object.props["short_name"] or ""
-            if process_step_list:
-                try:
-                    for process_step_id in process_step_list:
-                        process_step = utils.get_openbis_object(
-                            self.openbis_session, sample_ident=process_step_id
-                        )
-                        processes_accordion_children = list(
-                            self.new_processes_accordion.children
-                        )
-                        process_step_index = len(processes_accordion_children)
-                        new_process_step_widget = RegisterProcessStepWidget(
-                            self.openbis_session,
-                            self.new_processes_accordion,
-                            process_step_index,
-                            preparation_widget=self,
-                            sample_id=self.select_sample_dropdown.sample_dropdown.value,
-                            process_step=process_step,
-                        )
-                        processes_accordion_children.append(new_process_step_widget)
-                        self.new_processes_accordion.children = (
-                            processes_accordion_children
-                        )
-                except Exception as e:
-                    display(
-                        Javascript(
-                            data=f"alert('Error loading process {process_name}. Please verify that the process is correctly defined in openBIS.')"
-                        )
+            try:
+                process_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=process_id
+                )
+                process_name = process_object.props.get("name") or process_id
+                process_step_list = process_object.props.get("process_steps")
+                self.process_short_name = process_object.props.get("short_name") or ""
+
+                sorted_steps, error_msg = validate_and_sort_process_steps(
+                    process_name, process_step_list, self.openbis_session
+                )
+
+                if error_msg:
+                    display(Javascript(data=f"alert({json.dumps(error_msg)})"))
+                    logger.error(error_msg)
+                    self.load_processes_hbox.children = []
+                    self.processes_dropdown.value = "-1"
+                    return
+
+                for process_step in sorted_steps:
+                    processes_accordion_children = list(
+                        self.new_processes_accordion.children
                     )
-                    logger.error(f"Error loading process {process_name}: {e}")
+                    process_step_index = len(processes_accordion_children)
+                    new_process_step_widget = RegisterProcessStepWidget(
+                        self.openbis_session,
+                        self.new_processes_accordion,
+                        process_step_index,
+                        preparation_widget=self,
+                        sample_id=self.select_sample_dropdown.sample_dropdown.value,
+                        process_step=process_step,
+                    )
+                    processes_accordion_children.append(new_process_step_widget)
+                    self.new_processes_accordion.children = (
+                        processes_accordion_children
+                    )
+            except Exception as e:
+                display(
+                    Javascript(
+                        data=f"alert('Error loading process {process_name}. Please verify that the process is correctly defined in openBIS: {e}')"
+                    )
+                )
+                logger.error(f"Error loading process {process_name}: {e}")
 
             self.load_processes_hbox.children = []
+            self.processes_dropdown.value = "-1"
 
             self.children = [
                 self.notes,
@@ -1955,8 +2075,11 @@ class RegisterProcessWidget(ipw.VBox):
                     "process_steps": [],
                 }
 
-                for process_widget in process_steps_widgets:
-                    process_step_name = process_widget.name_textbox.value
+                for idx, process_widget in enumerate(process_steps_widgets, 1):
+                    process_step_name = format_process_step_name(
+                        idx, process_widget.name_textbox.value
+                    )
+                    process_widget.name_textbox.value = process_step_name
                     process_step_description = process_widget.description_textbox.value
                     process_step_instrument = process_widget.instrument_dropdown.value
                     process_step_comments = process_widget.comments_textarea.value
