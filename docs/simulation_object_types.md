@@ -29,6 +29,23 @@ SIMULATION_OBJECT → EXECUTABLE → COMPUTER
 
 Therefore, `code` and `computer` should not be duplicated on simulation objects.
 
+Physical quantities use openBIS `REAL` properties so they can be searched and
+sorted numerically. The unit is fixed by the property code and label; exporters
+must convert values before saving them. The canonical units are Hartree for total
+energies, eV for electronic energies and barriers, Hartree/bohr for forces, Bohr
+magnetons for magnetization, volts, angstrom, femtoseconds, kelvin, and bar.
+
+Every AiiDA-generated result also records:
+
+```text
+aiida_source_uuid: UUID of the concrete WorkChain that produced the result
+aiida_result_role: stable role within that WorkChain, for example bands or pdos
+```
+
+Together with object type and target collection, these fields prevent duplicate
+results while allowing the same calculation to be published in another space.
+The linked `AIIDA_NODE` archive remains shared across spaces.
+
 ## AiiDA export resolution
 
 The exporter resolves provenance in three steps:
@@ -191,7 +208,7 @@ name: string
 method_family: enum
 method_modifiers: enum[]
 charge: float
-total_energy: quantity (Hartree)
+total_energy_hartree: float (Hartree)
 converged: boolean
 ```
 
@@ -199,9 +216,9 @@ converged: boolean
 
 ```text
 spin_multiplicity: integer
-total_magnetization: quantity (Bohr magnetons)
-fermi_energy: quantity (eV) [] list
-electronic_gap: quantity (eV) [] list
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+fermi_energy_ev: float[] (eV)
+electronic_gap_ev: float[] (eV)
 comments: text
 ```
 
@@ -331,7 +348,7 @@ method_modifiers: enum[]
 charge: number
 constrained: boolean
 cell_optimization: boolean
-final_energy: quantity [Hartree]
+final_energy_hartree: float (Hartree)
 converged: boolean
 ```
 
@@ -340,12 +357,12 @@ converged: boolean
 ```text
 constraints_description: text
 cell_constraints: string
-final_max_force: quantity [Hartree/bohr]
+final_max_force_hartree_per_bohr: float (Hartree/bohr)
 number_of_steps: integer
 spin_multiplicity: integer
-total_magnetization: quantity [Bohr magnetons]
-fermi_energy: quantity [eV] [] list
-electronic_gap: quantity [eV] [] list
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+fermi_energy_ev: float[] (eV)
+electronic_gap_ev: float[] (eV)
 comments: text
 ```
 
@@ -467,16 +484,16 @@ method_family: enum
 method_modifiers: enum[]
 method_label: string
 charge: number
-band_gap: quantity
+band_gap_ev: float (eV)
 converged: boolean
 ```
 
 ## Optional properties
 
 ```text
-fermi_energy: quantity
+fermi_energy_ev: float[] (eV)
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization_bohr_magneton: float (Bohr magnetons)
 k_path: string
 electronic_gap_type: enum
 comments: text
@@ -629,9 +646,9 @@ converged: boolean
 
 ```text
 spin_multiplicity: integer
-total_magnetization: quantity
-fermi_energy: quantity
-electronic_gap: quantity
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+fermi_energy_ev: float[] (eV)
+electronic_gap_ev: float[] (eV)
 comments: text
 ```
 
@@ -785,12 +802,12 @@ projection_description: text
 ## Optional properties
 
 ```text
-fermi_energy: quantity
-energy_min: quantity
-energy_max: quantity
+fermi_energy_ev: float[] (eV)
+energy_min_ev: float (eV)
+energy_max_ev: float (eV)
 spin_multiplicity: integer
-total_magnetization: quantity
-electronic_gap: quantity
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+electronic_gap_ev: float[] (eV)
 comments: text
 ```
 
@@ -933,18 +950,18 @@ method_modifiers: enum[]
 method_label: string
 charge: number
 path_method: enum
-forward_barrier: quantity
+forward_barrier_ev: float (eV)
 converged: boolean
 ```
 
 ## Optional properties
 
 ```text
-backward_barrier: quantity
+backward_barrier_ev: float (eV)
 number_of_images: integer
 reaction_coordinate_description: text
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1092,14 +1109,14 @@ converged: boolean
 ## Optional properties
 
 ```text
-bias_voltage: quantity
-height: quantity
-isovalue: quantity
+bias_voltage_v: float (V)
+height_angstrom: float (angstrom)
+isovalue_au: float (a.u.)
 tip_model: string
 scan_area: string
 image_mode: string
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1236,7 +1253,7 @@ converged: boolean
 
 ```text
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1390,8 +1407,8 @@ method_family: enum
 method_modifiers: enum[]
 method_label: string
 charge: number
-time_step: quantity
-total_time: quantity
+time_step_fs: float (fs)
+total_time_fs: float (fs)
 completed: boolean
 ```
 
@@ -1399,12 +1416,12 @@ completed: boolean
 
 ```text
 ensemble: enum
-temperature: quantity
-pressure: quantity
+temperature_k: float (K)
+pressure_bar: float (bar)
 thermostat: string
 barostat: string
 spin_multiplicity: integer
-total_magnetization: quantity
+total_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1597,7 +1614,8 @@ method_modifiers: enum[]
 method_label: string
 charge: number
 main_result_description: text
-main_result_value: quantity
+main_result_value_numeric: float
+main_result_unit: string
 comments: text
 ```
 
@@ -1630,3 +1648,27 @@ stdout/stderr
 raw numerical arrays
 large intermediate files
 ```
+
+# AiiDAlab export behavior
+
+For AiiDA-backed exports, the app renders an ELN preview suggestion for every
+simulation result that will be represented in openBIS. The user can review each
+suggestion and replace it with a dropped PNG or JPEG image before the export.
+The generated suggestion is used when no replacement is supplied.
+
+A simulation result is identified by `AIIDA_SOURCE_UUID` together with
+`AIIDA_RESULT_ROLE`. It is created at most once within an openBIS space. If the
+same result already exists elsewhere in the selected space, the app reuses it
+and links to its existing collection. Exporting the same AiiDA result to a
+different user space creates a separate simulation object there. Shared
+inventory objects, including `ATOMISTIC_MODEL`, `AIIDA_NODE`, `CODE`,
+`COMPUTER`, and `EXECUTABLE`, continue to be reused globally.
+
+New `COMPUTER` records are placed according to their scope:
+
+- local Empa desktops and laptops:
+  `/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_LOCAL_IT_HARDWARE`
+- external computers and HPC resources:
+  `/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_EXTERNAL_AND_HPC_RESOURCES`
+
+Existing computer records are never moved by the exporter.

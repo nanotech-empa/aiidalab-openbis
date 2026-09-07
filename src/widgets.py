@@ -16,14 +16,10 @@ OPENBIS_OBJECT_TYPES, _ = (
 MATERIALS_CONCEPTS_TYPES = INTERFACE_CONFIG_INFO["slabs_concepts_types"]
 INSTRUMENTS_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
 
-SIMULATION_TYPES = utils.read_json("config/openbis_config.json")["Simulations"]["Types"]
-OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
-    "Collections"
-]["Paths"]
-
-OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects"][
-    "Paths"
-]
+OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
+OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
+OPENBIS_PROJECTS_PATHS = OPENBIS_CONFIG["Projects"]["Paths"]
 institutions_project = OPENBIS_PROJECTS_PATHS.get("Institution")
 people_project = OPENBIS_PROJECTS_PATHS.get("Person")
 locations_project = OPENBIS_PROJECTS_PATHS.get("Location")
@@ -184,6 +180,10 @@ class AtomModelWidget(ipw.VBox):
         name_textbox = ipw.Text()
         name_hbox = ipw.HBox([name_label, name_textbox])
 
+        description_label = ipw.Label(value="Description")
+        description_textbox = ipw.Textarea()
+        description_hbox = ipw.HBox([description_label, description_textbox])
+
         wfms_uuid_label = ipw.Label(value="WFMS UUID")
         wfms_uuid_textbox = ipw.Text()
         wfms_uuid_hbox = ipw.HBox([wfms_uuid_label, wfms_uuid_textbox])
@@ -226,6 +226,7 @@ class AtomModelWidget(ipw.VBox):
             children=[
                 atom_model_props_title,
                 name_hbox,
+                description_hbox,
                 wfms_uuid_hbox,
                 cell_hbox,
                 dimensionality_hbox,
@@ -399,12 +400,20 @@ class AtomModelWidget(ipw.VBox):
 
         def save_new_atom_model(b):
             atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
-            atom_models_objs = utils.get_openbis_objects(
-                self.openbis_session, type=atom_model_type
+            wfms_uuid = wfms_uuid_textbox.value.strip()
+            existing = (
+                list(
+                    utils.get_openbis_objects(
+                        self.openbis_session,
+                        type=atom_model_type,
+                        where={"WFMS_UUID": wfms_uuid},
+                    )
+                    or []
+                )
+                if wfms_uuid
+                else []
             )
-            wfms_uuid = wfms_uuid_textbox.value
-            atom_models_uuids = [obj.props["wfms_uuid"] for obj in atom_models_objs]
-            if wfms_uuid in atom_models_uuids:
+            if existing:
                 display(Javascript(data="alert('Atomistic model already in openBIS!')"))
             else:
                 pbc = [pbc_x_checkbox.value, pbc_y_checkbox.value, pbc_z_checkbox.value]
@@ -415,6 +424,7 @@ class AtomModelWidget(ipw.VBox):
 
                 atom_model_props = {
                     "name": name_textbox.value,
+                    "description": description_textbox.value,
                     "wfms_uuid": wfms_uuid,
                     "cell": cell_json,
                     "dimensionality": dimensionality_intbox.value,
@@ -468,29 +478,20 @@ class AtomModelWidget(ipw.VBox):
                     parents=atom_model_parents,
                 )
 
-                # Atomistic model preview
-                for filename in atom_model_preview_uploader.value:
-                    file_info = atom_model_preview_uploader.value[filename]
-                    utils.write_file(file_info["content"], filename)
-                    utils.create_openbis_dataset(
-                        self.openbis_session,
-                        type="ELN_PREVIEW",
-                        sample=atom_model_obj,
-                        files=[filename],
-                    )
-                    os.remove(filename)
-
-                # Atomistic model datasets
-                for filename in atom_model_datasets_uploader.value:
-                    file_info = atom_model_datasets_uploader.value[filename]
-                    utils.write_file(file_info["content"], filename)
-                    utils.create_openbis_dataset(
-                        self.openbis_session,
-                        type="ATTACHMENT",
-                        sample=atom_model_obj,
-                        files=[filename],
-                    )
-                    os.remove(filename)
+                utils.upload_datasets(
+                    self.openbis_session,
+                    atom_model_obj,
+                    atom_model_preview_uploader,
+                    props={},
+                    dataset_type="ELN_PREVIEW",
+                )
+                utils.upload_datasets(
+                    self.openbis_session,
+                    atom_model_obj,
+                    atom_model_datasets_uploader,
+                    props={},
+                    dataset_type="ATTACHMENT",
+                )
 
                 self.create_new_atom_model_widgets.children = []
                 self.atom_model_dropdown.options = self.load_atom_models()

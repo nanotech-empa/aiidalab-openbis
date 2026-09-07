@@ -1,6 +1,4 @@
-import contextlib
 import html
-import io
 import json
 import re
 import shutil
@@ -16,26 +14,45 @@ import pandas as pd
 from aiida import orm
 from IPython.display import Javascript, display
 
-from . import aiida_utils, utils, widgets
+from . import aiida_utils, simulation_schema, utils, widgets
 
-string_io = io.StringIO()
-
-MATERIALS_CONCEPTS_TYPES = utils.read_json("config/openbis_config.json")[
-    "OpenBIS Materials Concepts Types"
-]
-SIMULATION_TYPES = utils.read_json("config/openbis_config.json")["Simulations"]["Types"]
-SIMULATION_EXPORT_TYPES = utils.read_json("config/openbis_config.json")[
-    "Simulation Export Types"
-]
-OPENBIS_OBJECT_TYPES = utils.read_json("config/openbis_config.json")["OpenBIS Types"]
-OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
-    "Collections"
-]["Paths"]
-WORKCHAIN_VIEWERS = utils.read_json("config/openbis_config.json")["Workchain Viewers"]
+OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+MATERIALS_CONCEPTS_TYPES = OPENBIS_CONFIG["OpenBIS Materials Concepts Types"]
+SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
+SIMULATION_EXPORT_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
+OPENBIS_OBJECT_TYPES = OPENBIS_CONFIG["OpenBIS Types"]
+OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
+WORKCHAIN_VIEWERS = OPENBIS_CONFIG["Workchain Viewers"]
 
 _CREATE_NEW = "__create_new_openbis_object__"
 _DOWNLOAD_ROOT = Path(__file__).resolve().parent.parent / "temp_dataset_download"
 _DOWNLOAD_LIFETIME_SECONDS = 600
+
+
+def _popup(message):
+    """Show a compact notebook popup without interpolating JavaScript code."""
+    display(Javascript(data=f"alert({json.dumps(str(message))})"))
+
+
+def _first_uploaded_file(files_widget):
+    """Return one uploaded file in a stable internal representation."""
+    value = files_widget.value
+    if not value:
+        return None
+
+    # ipywidgets 7 exposes a filename-keyed mapping, whereas ipywidgets 8
+    # exposes a tuple of uploaded-file mappings.  Supporting both shapes keeps
+    # the app usable in the current Python 3.9 and 3.12 AiiDAlab images.
+    if isinstance(value, dict):
+        name, file_info = next(iter(value.items()))
+    else:
+        file_info = value[0]
+        name = file_info.get("name", "preview.png")
+    return {"name": str(name), "content": bytes(file_info["content"])}
+
+
+def _image_format(filename):
+    return "jpeg" if Path(filename).suffix.lower() in {".jpg", ".jpeg"} else "png"
 
 
 class ImportSimulationsWidget(ipw.VBox):
@@ -121,17 +138,23 @@ class ImportSimulationsWidget(ipw.VBox):
             ]
         )
 
-        self.found_simulations_label = ipw.Label(value="Found simulations")
+        self.found_simulations_label = ipw.Label(value="Found simulations: 0")
         self.found_simulations_select_multiple = ipw.SelectMultiple(
             description="",
             disabled=False,
-            layout=ipw.Layout(width="500px"),
+            layout=ipw.Layout(width="850px", height="180px"),
             style={"description_width": "110px"},
+        )
+        self.clear_simulations_button = ipw.Button(
+            description="Clear selection",
+            icon="times",
+            layout=ipw.Layout(width="150px"),
         )
         self.found_simulations_hbox = ipw.HBox(
             children=[
                 self.found_simulations_label,
                 self.found_simulations_select_multiple,
+                self.clear_simulations_button,
             ]
         )
 
@@ -143,7 +166,7 @@ class ImportSimulationsWidget(ipw.VBox):
         )
         self.download_simulation_data_button = ipw.Button(
             description="Download data",
-            tooltip="Download datasets from selected simulations without an AiiDA archive",
+            tooltip="Download data files or linked .aiida archives in the browser",
             icon="download",
             layout=ipw.Layout(width="180px", height="50px"),
         )
@@ -169,6 +192,7 @@ class ImportSimulationsWidget(ipw.VBox):
         self.search_button.on_click(self.search_simulations)
         self.import_simulations_button.on_click(self.import_aiida_nodes)
         self.download_simulation_data_button.on_click(self.download_simulation_data)
+        self.clear_simulations_button.on_click(self.clear_simulation_selection)
 
         self.children = [
             self.select_molecules_title,
@@ -196,12 +220,14 @@ class ImportSimulationsWidget(ipw.VBox):
 
     @staticmethod
     def _simulation_label(simulation):
-        name = simulation.props.get("name") or simulation.permId
+        name = aiida_utils._openbis_property(simulation, "name") or simulation.permId
         type_code = getattr(simulation.type, "code", simulation.type)
         availability = (
-            "AiiDA archive" if simulation.props.get("aiida_node") else "data only"
+            "AiiDA archive"
+            if aiida_utils._openbis_property(simulation, "aiida_node")
+            else "data only"
         )
-        return f"{name} - {type_code} ({simulation.permId}) " f"[{availability}]"
+        return f"{name} - {type_code} ({simulation.permId}) [{availability}]"
 
     @classmethod
     def _simulation_options(cls, simulations):
@@ -221,7 +247,7 @@ class ImportSimulationsWidget(ipw.VBox):
         archive_simulations = {}
         data_only_simulations = []
         for simulation in simulations:
-            archive_id = simulation.props.get("aiida_node")
+            archive_id = aiida_utils._openbis_property(simulation, "aiida_node")
             if archive_id:
                 archive_simulations.setdefault(str(archive_id), []).append(simulation)
             else:
@@ -231,7 +257,12 @@ class ImportSimulationsWidget(ipw.VBox):
     @staticmethod
     def _simulation_names(simulations):
         return ", ".join(
-            html.escape(str(simulation.props.get("name") or simulation.permId))
+            html.escape(
+                str(
+                    aiida_utils._openbis_property(simulation, "name")
+                    or simulation.permId
+                )
+            )
             for simulation in simulations
         )
 
@@ -303,8 +334,14 @@ class ImportSimulationsWidget(ipw.VBox):
         self.found_simulations_select_multiple.options = self._simulation_options(
             simulations
         )
+        count = len(simulations)
+        self.found_simulations_label.value = f"Found simulations: {count}"
+        _popup(f"Found {count} simulation{'s' if count != 1 else ''}.")
         self.import_simulations_message_html.value = ""
         self.download_simulation_data_message_html.value = ""
+
+    def clear_simulation_selection(self, _button=None):
+        self.found_simulations_select_multiple.value = ()
 
     @staticmethod
     def _find_aiida_archive_dataset(aiida_node_object):
@@ -365,7 +402,7 @@ class ImportSimulationsWidget(ipw.VBox):
                 message = result.stderr.strip() or result.stdout.strip()
                 raise RuntimeError(message or "AiiDA archive import failed.")
 
-        workchain_uuid = aiida_node_object.props.get("wfms_uuid")
+        workchain_uuid = aiida_utils._openbis_property(aiida_node_object, "wfms_uuid")
         if not workchain_uuid:
             raise ValueError("The linked AIIDA_NODE has no workflow UUID.")
         return orm.load_node(workchain_uuid)
@@ -377,7 +414,7 @@ class ImportSimulationsWidget(ipw.VBox):
         if viewer_link:
             notebook_link = f"{viewer_link}?pk={workchain.pk}"
             return (
-                f'<a href="{html.escape(notebook_link, quote=True)}">'
+                f'<a href="{html.escape(notebook_link, quote=True)}" target="_blank">'
                 f"Imported AiiDA archive for {simulation_names}.</a>"
             )
         return (
@@ -388,35 +425,40 @@ class ImportSimulationsWidget(ipw.VBox):
     def import_aiida_nodes(self, b):
         selected_simulations = self._selected_simulation_objects()
         if not selected_simulations:
-            self.import_simulations_message_html.value = (
-                "<span style='color:#b00020'>Select at least one simulation.</span>"
-            )
+            _popup("Select at least one simulation.")
+            self.import_simulations_message_html.value = ""
             return
 
         archives, data_only = self._partition_simulations_by_archive(
             selected_simulations
         )
-        messages = []
+        links = []
+        notices = []
         for archive_id, simulations in archives.items():
             try:
                 workchain = self._import_aiida_archive(archive_id)
+                aiida_utils.record_openbis_exports(self.openbis_session, simulations)
             except Exception as error:  # noqa: BLE001 - surface import errors in UI
-                messages.append(
-                    "<span style='color:#b00020'>Could not import the AiiDA "
-                    f"archive for {self._simulation_names(simulations)}: "
-                    f"{html.escape(str(error))}</span>"
+                notices.append(
+                    f"Could not import the AiiDA archive for "
+                    f"{self._simulation_names(simulations)}: {error}"
                 )
             else:
-                messages.append(self._import_success_message(simulations, workchain))
+                links.append(self._import_success_message(simulations, workchain))
 
         if data_only:
-            messages.append(
-                f"{self._simulation_names(data_only)} "
-                "has no linked AiiDA archive and was not imported. "
-                "Use Download data instead."
+            notices.append(
+                f"{self._simulation_names(data_only)} has no linked AiiDA archive; "
+                "use Download data instead."
             )
 
-        self.import_simulations_message_html.value = "<br>".join(messages)
+        self.import_simulations_message_html.value = (
+            "<ul>" + "".join(f"<li>{link}</li>" for link in links) + "</ul>"
+            if links
+            else ""
+        )
+        if notices:
+            _popup(" ".join(notices))
 
     @staticmethod
     def _dataset_type_code(dataset):
@@ -429,6 +471,35 @@ class ImportSimulationsWidget(ipw.VBox):
             for dataset in simulation.get_datasets() or []
             if cls._dataset_type_code(dataset) != "ELN_PREVIEW"
         ]
+
+    @classmethod
+    def _prepare_archive_download(
+        cls, openbis_session, archive_ids, download_root=None
+    ):
+        root = Path(download_root or _DOWNLOAD_ROOT)
+        root.mkdir(parents=True, exist_ok=True)
+        destination = Path(
+            tempfile.mkdtemp(
+                prefix="openbis-aiida-archives-",
+                dir=str(root),
+            )
+        )
+        try:
+            for archive_id in archive_ids:
+                aiida_node = utils.get_openbis_object(
+                    openbis_session, sample_ident=archive_id
+                )
+                dataset, filename = cls._find_aiida_archive_dataset(aiida_node)
+                dataset.download(files=[filename], destination=str(destination))
+            downloaded_files = sorted(
+                path for path in destination.rglob("*.aiida") if path.is_file()
+            )
+            if not downloaded_files:
+                raise ValueError("No linked .aiida archives could be downloaded.")
+        except Exception:
+            shutil.rmtree(destination, ignore_errors=True)
+            raise
+        return destination, downloaded_files
 
     @classmethod
     def _prepare_data_download(cls, simulations, download_root=None):
@@ -481,54 +552,54 @@ class ImportSimulationsWidget(ipw.VBox):
     def download_simulation_data(self, b):
         selected_simulations = self._selected_simulation_objects()
         if not selected_simulations:
-            self.download_simulation_data_message_html.value = (
-                "<span style='color:#b00020'>Select at least one simulation.</span>"
-            )
+            _popup("Select at least one simulation.")
             return
 
         archives, data_only = self._partition_simulations_by_archive(
             selected_simulations
         )
-        if not data_only:
-            self.download_simulation_data_message_html.value = (
-                "The selected simulations link AiiDA archives. "
-                "Use Import into AiiDA instead."
-            )
+        prepared = []
+        errors = []
+        if archives:
+            try:
+                prepared.append(
+                    self._prepare_archive_download(
+                        self.openbis_session, tuple(archives)
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - surface download errors in UI
+                errors.append(f"AiiDA archives: {error}")
+        if data_only:
+            try:
+                prepared.append(self._prepare_data_download(data_only))
+            except Exception as error:  # noqa: BLE001 - surface download errors in UI
+                errors.append(f"Data-only simulations: {error}")
+
+        if not prepared:
+            _popup("Could not prepare the download. " + " ".join(errors))
+            self.download_simulation_data_message_html.value = ""
             return
 
-        try:
-            download_directory, downloaded_files = self._prepare_data_download(
-                data_only
-            )
-            links = []
+        links = []
+        for download_directory, downloaded_files in prepared:
             for downloaded_file in downloaded_files:
                 relative_path = downloaded_file.relative_to(Path.home())
                 href = f"/files/{quote(relative_path.as_posix(), safe='/')}"
                 label = downloaded_file.relative_to(download_directory).as_posix()
                 links.append(
                     f'<a href="{html.escape(href, quote=True)}" '
-                    f'download="{html.escape(downloaded_file.name, quote=True)}">'
+                    f'download="{html.escape(downloaded_file.name, quote=True)}" '
+                    'target="_blank">'
                     f"{html.escape(label)}</a>"
                 )
-        except Exception as error:  # noqa: BLE001 - surface download errors in UI
-            self.download_simulation_data_message_html.value = (
-                "<span style='color:#b00020'>Could not prepare the simulation "
-                f"data download: {html.escape(str(error))}</span>"
-            )
-            return
+            self._schedule_download_cleanup(download_directory)
 
-        message = (
-            f"Download data for {self._simulation_names(data_only)}: "
-            f"{', '.join(links)}. "
+        self.download_simulation_data_message_html.value = (
+            "Download: " + ", ".join(links) + ". "
             "These temporary links expire after 10 minutes."
         )
-        if archives:
-            message += (
-                " Simulations with linked AiiDA archives were not included; "
-                "use Import into AiiDA for those."
-            )
-        self.download_simulation_data_message_html.value = message
-        self._schedule_download_cleanup(download_directory)
+        if errors:
+            _popup("Some selected data could not be prepared. " + " ".join(errors))
 
     def load_material_type_widgets(self, change):
         if self.material_type_dropdown.value == "-1":
@@ -762,12 +833,7 @@ class ExportSimulationsWidget(ipw.VBox):
         self.provenance_resolution_box = ipw.VBox()
         self.executable_resolution_box = ipw.VBox()
         self.executable_confirmation_message = ipw.HTML()
-        self.create_missing_executables_checkbox = ipw.Checkbox(
-            value=False,
-            description="Create the listed openBIS executable records",
-            indent=False,
-            layout=ipw.Layout(display="none"),
-        )
+        self.export_message_html = ipw.HTML()
 
         # Increase search button icon size
         increase_search_button = ipw.HTML(
@@ -796,8 +862,8 @@ class ExportSimulationsWidget(ipw.VBox):
             self.provenance_resolution_box,
             self.executable_resolution_box,
             self.executable_confirmation_message,
-            self.create_missing_executables_checkbox,
             self.save_simulations_button,
+            self.export_message_html,
         ]
 
     def load_simulations_details_widgets(self, change):
@@ -862,6 +928,27 @@ class ExportSimulationsWidget(ipw.VBox):
             )
             fields.extend([url, collection])
         else:
+            text = f"{error.aiida_label} {error.aiida_description}".lower()
+            external = any(word in text for word in ("daint", "alps", "cluster", "hpc"))
+            collection = ipw.Dropdown(
+                options=[
+                    (
+                        "Local Empa computer",
+                        OPENBIS_COLLECTIONS_PATHS["Computer Local"],
+                    ),
+                    (
+                        "External/HPC resource",
+                        OPENBIS_COLLECTIONS_PATHS["Computer External"],
+                    ),
+                ],
+                value=(
+                    OPENBIS_COLLECTIONS_PATHS["Computer External"]
+                    if external
+                    else OPENBIS_COLLECTIONS_PATHS["Computer Local"]
+                ),
+                description="Collection:",
+                layout=ipw.Layout(width="95%"),
+            )
             organisations = list(
                 utils.get_openbis_objects(self.openbis_session, type="ORGANISATION")
                 or []
@@ -869,10 +956,7 @@ class ExportSimulationsWidget(ipw.VBox):
             organisation_options = [("Select a location...", "")]
             organisation_options.extend(
                 (
-                    (
-                        f"{aiida_utils._openbis_property(obj, 'name')} "
-                        f"({obj.permId})"
-                    ),
+                    (f"{aiida_utils._openbis_property(obj, 'name')} ({obj.permId})"),
                     obj.permId,
                 )
                 for obj in sorted(
@@ -887,7 +971,7 @@ class ExportSimulationsWidget(ipw.VBox):
                 description="Location:",
                 layout=ipw.Layout(width="95%"),
             )
-            fields.append(location)
+            fields.extend([location, collection])
 
         new_fields = ipw.VBox(
             fields,
@@ -910,10 +994,21 @@ class ExportSimulationsWidget(ipw.VBox):
             "new_fields": new_fields,
             "status": status,
         }
+        available = "".join(
+            f"<li>{html.escape(str(name))} ({html.escape(str(permid))})</li>"
+            for permid, name in sorted(
+                error.openbis_options, key=lambda item: (item[1].lower(), item[0])
+            )
+        )
         self.provenance_resolution_box.children = [
             ipw.HTML(
                 "<p><b>Resolve AiiDA provenance before export</b></p>"
-                f"<p>{html.escape(str(error))}</p>"
+                "<p><b>AiiDAlab identifiers</b></p><ul>"
+                f"<li>Name: {html.escape(error.aiida_label)}</li>"
+                f"<li>Description: {html.escape(error.aiida_description or 'none')}</li>"
+                "</ul>"
+                f"<p><b>Available openBIS {html.escape(kind.upper())} objects</b></p>"
+                f"<ul>{available or '<li>none</li>'}</ul>"
                 "<p>Select the intended existing object, or create it below. "
                 "Then click Save again.</p>"
             ),
@@ -923,8 +1018,6 @@ class ExportSimulationsWidget(ipw.VBox):
         ]
         self.executable_resolution_box.children = []
         self.executable_confirmation_message.value = ""
-        self.create_missing_executables_checkbox.value = False
-        self.create_missing_executables_checkbox.layout.display = "none"
 
     def _apply_pending_reference_resolution(self):
         pending = self._pending_reference_resolution
@@ -943,21 +1036,21 @@ class ExportSimulationsWidget(ipw.VBox):
         if selected == _CREATE_NEW:
             name = pending["name"].value.strip()
             if not name:
-                pending["status"].value = (
-                    "<p style='color:#b00020'>Name is required.</p>"
-                )
+                pending[
+                    "status"
+                ].value = "<p style='color:#b00020'>Name is required.</p>"
                 return False
-            existing_objects = list(
-                utils.get_openbis_objects(
-                    self.openbis_session,
+            exact_name_matches = list(
+                self.openbis_session.get_objects(
                     type=OPENBIS_OBJECT_TYPES[kind],
+                    where={"NAME": name},
                 )
                 or []
             )
             duplicate = next(
                 (
                     obj
-                    for obj in existing_objects
+                    for obj in exact_name_matches
                     if aiida_utils._normalize_object_name(
                         aiida_utils._openbis_property(obj, "name")
                     )
@@ -986,13 +1079,14 @@ class ExportSimulationsWidget(ipw.VBox):
             else:
                 location = pending["location"].value
                 if not location:
-                    pending["status"].value = (
-                        "<p style='color:#b00020'>A computer location is "
-                        "required.</p>"
+                    pending[
+                        "status"
+                    ].value = (
+                        "<p style='color:#b00020'>A computer location is required.</p>"
                     )
                     return False
                 properties["location"] = location
-                collection = OPENBIS_COLLECTIONS_PATHS["Computer"]
+                collection = pending["collection"].value
 
             try:
                 selected_object = utils.create_openbis_object(
@@ -1019,15 +1113,17 @@ class ExportSimulationsWidget(ipw.VBox):
         selectors = {}
         for requirement in error.requirements:
             details = (
-                f"{requirement['full_label']} -> "
-                f"{requirement['code_name']} on "
-                f"{requirement['computer_name']}; "
-                f"path {requirement['executable_path']}; "
-                f"plugin {requirement['plugin']}"
+                "<ul>"
+                f"<li><b>AiiDAlab code:</b> {html.escape(requirement['full_label'])}</li>"
+                f"<li><b>openBIS code:</b> {html.escape(str(requirement['code_name']))}</li>"
+                f"<li><b>openBIS computer:</b> {html.escape(str(requirement['computer_name']))}</li>"
+                f"<li><b>Executable path:</b> {html.escape(str(requirement['executable_path']))}</li>"
+                f"<li><b>Plugin:</b> {html.escape(str(requirement['plugin']))}</li>"
+                "</ul>"
             )
             selector = ipw.Dropdown(
                 options=[
-                    ("Create a new EXECUTABLE", _CREATE_NEW),
+                    ("Select an existing executable or create one...", ""),
                     *[
                         (f"{name} ({permid})", permid)
                         for permid, name in sorted(
@@ -1035,31 +1131,36 @@ class ExportSimulationsWidget(ipw.VBox):
                             key=lambda item: (item[1].lower(), item[0]),
                         )
                     ],
+                    ("Create a new EXECUTABLE", _CREATE_NEW),
                 ],
-                value=_CREATE_NEW,
+                value="",
                 description="Executable:",
                 layout=ipw.Layout(width="95%"),
             )
             selectors[requirement["aiida_code_uuid"]] = selector
-            rows.extend([ipw.HTML(f"<p>{html.escape(details)}</p>"), selector])
+            rows.extend([ipw.HTML(details), selector])
 
         self._executable_selection_widgets = selectors
         self.executable_resolution_box.children = rows
         self.executable_confirmation_message.value = (
-            "<p><b>Resolve missing executable records.</b> Select an existing "
-            "EXECUTABLE where appropriate. For entries left as Create new, "
-            "check the confirmation box and click Save again. Nothing has "
-            "been exported yet.</p>"
+            "<p><b>Resolve missing executable records.</b></p>"
+            "<p>Explicitly select an existing executable or choose Create new "
+            "for every row, then click Save again. Nothing has been exported yet.</p>"
         )
-        self.create_missing_executables_checkbox.value = False
-        self.create_missing_executables_checkbox.layout.display = ""
 
     def _apply_executable_selections(self):
+        create_missing = False
         for aiida_code_uuid, selector in self._executable_selection_widgets.items():
-            if selector.value != _CREATE_NEW:
-                self._provenance_overrides["Executable"][
-                    aiida_code_uuid
-                ] = selector.value
+            if not selector.value:
+                _popup("Resolve every missing executable before exporting.")
+                return False, False
+            if selector.value == _CREATE_NEW:
+                create_missing = True
+            else:
+                self._provenance_overrides["Executable"][aiida_code_uuid] = (
+                    selector.value
+                )
+        return True, create_missing
 
     def _clear_resolution_controls(self):
         self._pending_reference_resolution = None
@@ -1067,13 +1168,11 @@ class ExportSimulationsWidget(ipw.VBox):
         self.provenance_resolution_box.children = []
         self.executable_resolution_box.children = []
         self.executable_confirmation_message.value = ""
-        self.create_missing_executables_checkbox.value = False
-        self.create_missing_executables_checkbox.layout.display = "none"
 
     def export_simulation_to_openbis(self, b):
         selected_experiment_id = self.select_experiment_widget.experiment_dropdown.value
         if selected_experiment_id == "-1":
-            display(Javascript(data="alert('Select an experiment.')"))
+            _popup("Select an experiment.")
         else:
             selected_molecules_widgets = (
                 self.simulation_details_vbox.molecules_accordion.children
@@ -1119,23 +1218,29 @@ class ExportSimulationsWidget(ipw.VBox):
                     self.simulation_details_vbox.simulations_dropdown.value
                 )
                 if selected_simulation_id == "-1":
-                    display(Javascript(data="alert('Select a simulation.')"))
+                    _popup("Select a simulation.")
                 else:
                     atom_model_parents = (
                         selected_slab + selected_molecules_ids + selected_reac_prods_ids
                     )
                     if not self._apply_pending_reference_resolution():
                         return
-                    self._apply_executable_selections()
+                    selections_valid, create_missing = (
+                        self._apply_executable_selections()
+                    )
+                    if not selections_valid:
+                        return
                     try:
-                        last_export = aiida_utils.export_workchain(
+                        preview_overrides = (
+                            self.simulation_details_vbox.preview_overrides()
+                        )
+                        exported = aiida_utils.export_workchain(
                             self.openbis_session,
                             selected_experiment_id,
                             selected_simulation_id,
-                            create_missing_executables=(
-                                self.create_missing_executables_checkbox.value
-                            ),
+                            create_missing_executables=create_missing,
                             provenance_overrides=self._provenance_overrides,
+                            preview_overrides=preview_overrides,
                         )
                     except aiida_utils.MissingExecutablesError as error:
                         self._show_missing_executables(error)
@@ -1144,36 +1249,70 @@ class ExportSimulationsWidget(ipw.VBox):
                         self._show_reference_resolution(error)
                         return
                     except aiida_utils.ExecutableResolutionError as error:
-                        self.executable_confirmation_message.value = (
-                            "<p style='color:#b00020'><b>Cannot map AiiDA provenance "
-                            f"to openBIS:</b> {html.escape(str(error))}</p>"
-                            "<p>Nothing has been exported.</p>"
-                        )
-                        self.create_missing_executables_checkbox.value = False
-                        self.create_missing_executables_checkbox.layout.display = "none"
+                        _popup(f"Cannot map AiiDA provenance to openBIS: {error}")
+                        return
+                    except Exception as error:  # noqa: BLE001 - show export errors in UI
+                        _popup(f"Could not export the simulation: {error}")
                         return
 
                     self._clear_resolution_controls()
-
-                    if last_export:
-                        for exported_object in aiida_utils.normalize_exported_objects(
-                            last_export
+                    exported_objects = aiida_utils.normalize_exported_objects(exported)
+                    for exported_object in exported_objects:
+                        if not getattr(exported_object, "_aiidalab_created", True):
+                            continue
+                        first_atom_model = utils.find_first_atomistic_model(
+                            self.openbis_session,
+                            exported_object,
+                            OPENBIS_OBJECT_TYPES["Atomistic Model"],
+                        )
+                        if (
+                            first_atom_model is not None
+                            and len(first_atom_model.parents) == 0
                         ):
-                            first_atom_model = utils.find_first_atomistic_model(
-                                self.openbis_session,
-                                exported_object,
-                                OPENBIS_OBJECT_TYPES["Atomistic Model"],
-                            )
+                            first_atom_model.parents = atom_model_parents
+                            utils.update_openbis_object(first_atom_model)
 
-                            if len(first_atom_model.parents) == 0:
-                                first_atom_model.parents = atom_model_parents
-                                utils.update_openbis_object(first_atom_model)
-                        display(Javascript(data="alert('Upload successful!')"))
-                    else:
-                        display(
-                            Javascript(
-                                data="alert('Simulation is already in openBIS!')"
+                    links = []
+                    for exported_object in exported_objects:
+                        name = aiida_utils._openbis_property(exported_object, "name")
+                        label = html.escape(str(name or exported_object.permId))
+                        url = aiida_utils._openbis_eln_url(exported_object)
+                        if url:
+                            links.append(
+                                f'<li><a href="{html.escape(url, quote=True)}" '
+                                f'target="_blank">{label}</a></li>'
                             )
+                        else:
+                            links.append(f"<li>{label} ({exported_object.permId})</li>")
+                    self.export_message_html.value = (
+                        "<p>Simulation results in openBIS:</p><ul>"
+                        + "".join(links)
+                        + "</ul>"
+                        if links
+                        else ""
+                    )
+                    created_count = sum(
+                        bool(getattr(obj, "_aiidalab_created", True))
+                        for obj in exported_objects
+                    )
+                    existing_count = len(exported_objects) - created_count
+                    if created_count and existing_count:
+                        _popup(
+                            f"Exported {created_count} new result(s); reused "
+                            f"{existing_count} result(s) already present in this collection."
+                        )
+                    elif created_count:
+                        _popup(
+                            f"Exported {created_count} simulation result(s) successfully."
+                        )
+                    elif existing_count:
+                        _popup(
+                            "All simulation results were already present in this "
+                            "openBIS collection. The existing links are shown below."
+                        )
+                    else:
+                        _popup(
+                            "No supported finished simulation result was found to export."
                         )
 
             else:
@@ -1181,135 +1320,70 @@ class ExportSimulationsWidget(ipw.VBox):
                     self.simulation_details_vbox.simulation_type_dropdown.value
                 )
                 if simulation_type == "-1":
+                    _popup("Select a simulation type.")
                     return
-                else:
-                    # Get atomistic models
-                    atom_model_widget = self.simulation_details_vbox.atom_model_widget
-                    selected_atom_model_id = atom_model_widget.atom_model_dropdown.value
-                    if selected_atom_model_id == "-1":
-                        selected_atom_model_id = []
-                    else:
-                        selected_atom_model_id = [selected_atom_model_id]
 
-                    selected_codes_ids = (
-                        self.simulation_details_vbox.codes_multi_selector.value
+                atom_model_widget = self.simulation_details_vbox.atom_model_widget
+                selected_atom_model_id = atom_model_widget.atom_model_dropdown.value
+                simulation_parents = (
+                    [] if selected_atom_model_id == "-1" else [selected_atom_model_id]
+                )
+                if (
+                    simulation_type
+                    != SIMULATION_EXPORT_TYPES["Unclassified Simulation"]
+                    and not simulation_parents
+                ):
+                    _popup("Select the input atomistic model.")
+                    return
+                if not self.simulation_details_vbox.upload_image_preview_uploader.value:
+                    _popup("Upload the required simulation preview image.")
+                    return
+                if not self.simulation_details_vbox.upload_datasets_uploader.value:
+                    _popup("Upload the required input/output data bundle.")
+                    return
+
+                try:
+                    simulation_props = self.simulation_details_vbox.simulation_properties_widget.values()
+                    selected_executables = list(
+                        self.simulation_details_vbox.executables_multi_selector.value
                     )
-                    selected_codes_ids = list(selected_codes_ids)
-
-                    simulation_props_widget = (
-                        self.simulation_details_vbox.simulation_properties_widget
+                    if selected_executables:
+                        simulation_props["executables"] = selected_executables
+                    simulation_obj = utils.create_openbis_object(
+                        self.openbis_session,
+                        type=simulation_type,
+                        collection=selected_experiment_id,
+                        parents=simulation_parents,
+                        props=simulation_props,
                     )
-
-                    level_theory_params = (
-                        simulation_props_widget.level_theory_parameters_textbox.value
+                    utils.upload_datasets(
+                        self.openbis_session,
+                        simulation_obj,
+                        self.simulation_details_vbox.upload_image_preview_uploader,
+                        props={},
+                        dataset_type="ELN_PREVIEW",
                     )
-                    if not utils.is_valid_json(level_theory_params):
-                        level_theory_params = ""
-
-                    input_parameters = (
-                        simulation_props_widget.method_input_parameters_textbox.value
+                    utils.upload_datasets(
+                        self.openbis_session,
+                        simulation_obj,
+                        self.simulation_details_vbox.upload_datasets_uploader,
+                        props={},
+                        dataset_type="RAW_DATA",
                     )
-                    if not utils.is_valid_json(input_parameters):
-                        input_parameters = ""
+                except Exception as error:  # noqa: BLE001 - show openBIS errors in UI
+                    _popup(f"Could not export the simulation: {error}")
+                    return
 
-                    output_parameters = (
-                        simulation_props_widget.method_output_parameters_textbox.value
-                    )
-                    if not utils.is_valid_json(output_parameters):
-                        output_parameters = ""
-
-                    simulation_props = {
-                        "name": simulation_props_widget.name_textbox.value,
-                        "wfms_uuid": simulation_props_widget.wfms_uuid_textbox.value,
-                        "input_parameters": input_parameters,
-                        "output_parameters": output_parameters,
-                        "comments": simulation_props_widget.comments_textbox.value,
-                    }
-
-                    simulation_types_with_level_theory = [
-                        OPENBIS_OBJECT_TYPES["Band Structure"],
-                        OPENBIS_OBJECT_TYPES["Geometry Optimisation"],
-                        OPENBIS_OBJECT_TYPES["PDOS"],
-                        OPENBIS_OBJECT_TYPES["Vibrational Spectroscopy"],
-                    ]
-                    if simulation_type in simulation_types_with_level_theory:
-                        simulation_props["level_theory_method"] = (
-                            simulation_props_widget.level_theory_method_textbox.value
-                        )
-                        simulation_props["level_theory_parameters"] = (
-                            level_theory_params
-                        )
-
-                        if simulation_type == OPENBIS_OBJECT_TYPES["Band Structure"]:
-                            band_gap = {
-                                "value": simulation_props_widget.band_gap_value_textbox.value,
-                                "unit": simulation_props_widget.band_gap_unit_textbox.value,
-                            }
-                            simulation_props["band_gap"] = band_gap
-
-                        elif (
-                            simulation_type
-                            == OPENBIS_OBJECT_TYPES["Geometry Optimisation"]
-                        ):
-                            simulation_props["cell_opt_constraints"] = (
-                                simulation_props_widget.cell_opt_constraints_textbox.value
-                            )
-                            simulation_props["cell_optimised"] = (
-                                simulation_props_widget.cell_optimised_checkbox.value
-                            )
-                            simulation_props["driver_code"] = (
-                                simulation_props_widget.driver_code_textbox.value
-                            )
-                            simulation_props["constrained"] = (
-                                simulation_props_widget.constrained_checkbox.value
-                            )
-
-                            force_convergence_threshold = {
-                                "value": simulation_props_widget.force_convergence_threshold_value_textbox.value,
-                                "unit": simulation_props_widget.force_convergence_threshold_unit_textbox.value,
-                            }
-                            simulation_props["force_convergence_threshold"] = (
-                                force_convergence_threshold
-                            )
-
-                    elif (
-                        simulation_type
-                        == OPENBIS_OBJECT_TYPES["Unclassified Simulation"]
-                    ):
-                        simulation_props["description"] = (
-                            simulation_props_widget.description_textbox.value
-                        )
-
-                    simulation_props["codes"] = selected_codes_ids
-
-                    simulation_parents = selected_atom_model_id
-
-                    with contextlib.redirect_stdout(string_io):
-                        simulation_obj = utils.create_openbis_object(
-                            self.openbis_session,
-                            type=simulation_type,
-                            collection=selected_experiment_id,
-                            parents=simulation_parents,
-                            props=simulation_props,
-                        )
-
-                    # Simulation preview
-                    with contextlib.redirect_stdout(string_io):
-                        utils.upload_datasets(
-                            self.openbis_session,
-                            simulation_obj,
-                            self.simulation_details_vbox.upload_image_preview_uploader,
-                            "ELN_PREVIEW",
-                        )
-
-                    # Simulation datasets
-                    with contextlib.redirect_stdout(string_io):
-                        utils.upload_datasets(
-                            self.openbis_session,
-                            simulation_obj,
-                            self.simulation_details_vbox.upload_datasets_uploader,
-                            "ATTACHMENT",
-                        )
+                url = aiida_utils._openbis_eln_url(simulation_obj)
+                name = aiida_utils._openbis_property(simulation_obj, "name")
+                label = html.escape(str(name or simulation_obj.permId))
+                self.export_message_html.value = (
+                    f'<p>Simulation in openBIS: <a href="{html.escape(url, quote=True)}" '
+                    f'target="_blank">{label}</a></p>'
+                    if url
+                    else f"<p>Simulation in openBIS: {label} ({simulation_obj.permId})</p>"
+                )
+                _popup("Simulation exported successfully.")
 
 
 class SimulationDetailsWidget(ipw.VBox):
@@ -1420,6 +1494,16 @@ class SimulationDetailsWidget(ipw.VBox):
             ]
         )
 
+        self.preview_suggestions_title = ipw.HTML(
+            value=(
+                "<span style='font-weight: bold; font-size: 18px;'>"
+                "ELN preview suggestions</span>"
+            )
+        )
+        self.preview_suggestions_status = ipw.HTML()
+        self.preview_suggestions_box = ipw.VBox()
+        self._preview_entries = {}
+
         self.select_simulation_type_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 18px;'>Select simulation type</span>"
         )
@@ -1448,18 +1532,28 @@ class SimulationDetailsWidget(ipw.VBox):
         )
         self.atom_model_widget = widgets.AtomModelWidget(self.openbis_session)
 
-        self.select_codes_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 18px;'>Select codes</span>"
+        self.select_executables_title = ipw.HTML(
+            value="<span style='font-weight: bold; font-size: 18px;'>Select executables</span>"
         )
 
-        self.codes_label = ipw.Label(value="Codes")
-        codes_objects = utils.get_openbis_objects(
-            self.openbis_session, type=OPENBIS_OBJECT_TYPES["Code"]
+        self.executables_label = ipw.Label(value="Executables")
+        executable_objects = list(
+            utils.get_openbis_objects(
+                self.openbis_session, type=OPENBIS_OBJECT_TYPES["Executable"]
+            )
+            or []
         )
-        codes_options = [(obj.props["name"], obj.permId) for obj in codes_objects]
-        self.codes_multi_selector = ipw.SelectMultiple(options=codes_options)
-        self.codes_hbox = ipw.HBox(
-            children=[self.codes_label, self.codes_multi_selector]
+        executable_options = [
+            (details, permid)
+            for permid, details in aiida_utils._openbis_executable_options(
+                self.openbis_session, executable_objects
+            )
+        ]
+        self.executables_multi_selector = ipw.SelectMultiple(
+            options=executable_options, layout=ipw.Layout(width="850px", height="120px")
+        )
+        self.executables_hbox = ipw.HBox(
+            children=[self.executables_label, self.executables_multi_selector]
         )
 
         self.upload_image_preview_title = ipw.HTML(
@@ -1476,6 +1570,9 @@ class SimulationDetailsWidget(ipw.VBox):
 
         self.upload_datasets_uploader = ipw.FileUpload(multiple=True)
 
+        self.simulations_dropdown.observe(
+            self.load_aiida_preview_suggestions, names="value"
+        )
         self.simulation_type_dropdown.observe(
             self.load_simulation_type_properties, names="value"
         )
@@ -1484,6 +1581,118 @@ class SimulationDetailsWidget(ipw.VBox):
         )
         self.add_molecule_button.on_click(self.add_molecule)
         self.add_reacprod_concept_button.on_click(self.add_reacprod_concept)
+
+    def load_aiida_preview_suggestions(self, change=None):
+        self._preview_entries = {}
+        self.preview_suggestions_box.children = []
+        selected_simulation = self.simulations_dropdown.value
+        if selected_simulation == "-1":
+            self.preview_suggestions_status.value = ""
+            return
+
+        self.preview_suggestions_status.value = "<p>Preparing preview suggestions…</p>"
+        try:
+            suggestions = aiida_utils.render_workchain_preview_suggestions(
+                selected_simulation
+            )
+        except Exception as error:  # noqa: BLE001 - surface preview errors in UI
+            self.preview_suggestions_status.value = (
+                "<p style='color:#b00020'>Could not prepare ELN previews: "
+                f"{html.escape(str(error))}</p>"
+            )
+            return
+
+        cards = []
+        for suggestion in suggestions:
+            content = suggestion["content"]
+            preview = (
+                ipw.Image(
+                    value=content,
+                    format="png",
+                    layout=ipw.Layout(max_width="560px", height="auto"),
+                )
+                if content is not None
+                else ipw.HTML(
+                    "<p style='color:#b00020'>No suggestion could be generated: "
+                    f"{html.escape(str(suggestion['error']))}</p>"
+                )
+            )
+            preview_box = ipw.VBox([preview])
+            uploader = ipw.FileUpload(
+                accept=".jpg,.jpeg,.png", multiple=False, description="Replace preview"
+            )
+            status = ipw.HTML(
+                "<p>Suggested image will be used unless you replace it.</p>"
+                if content is not None
+                else "<p>Drop a replacement image here before exporting.</p>"
+            )
+
+            def show_replacement(
+                _change, uploader=uploader, preview_box=preview_box, status=status
+            ):
+                uploaded = _first_uploaded_file(uploader)
+                if uploaded is None:
+                    return
+                preview_box.children = [
+                    ipw.Image(
+                        value=uploaded["content"],
+                        format=_image_format(uploaded["name"]),
+                        layout=ipw.Layout(max_width="560px", height="auto"),
+                    )
+                ]
+                status.value = (
+                    "<p style='color:#237804'>Replacement image selected.</p>"
+                )
+
+            uploader.observe(show_replacement, names="value")
+            self._preview_entries[suggestion["key"]] = {
+                "suggestion": suggestion,
+                "uploader": uploader,
+            }
+            cards.append(
+                ipw.VBox(
+                    [
+                        ipw.HTML(f"<b>{html.escape(suggestion['title'])}</b>"),
+                        preview_box,
+                        uploader,
+                        status,
+                    ],
+                    layout=ipw.Layout(
+                        border="1px solid #cccccc", padding="10px", margin="4px 0"
+                    ),
+                )
+            )
+
+        self.preview_suggestions_box.children = cards
+        self.preview_suggestions_status.value = (
+            f"<p>Prepared {len(cards)} ELN preview suggestion(s). "
+            "Review each image or drop a replacement before exporting.</p>"
+            if cards
+            else "<p>No supported simulation result previews were found.</p>"
+        )
+
+    def preview_overrides(self):
+        if not self._preview_entries:
+            raise ValueError(
+                "No ELN preview suggestions are ready. Reselect the simulation "
+                "to prepare them."
+            )
+
+        previews = {}
+        for key, entry in self._preview_entries.items():
+            uploaded = _first_uploaded_file(entry["uploader"])
+            suggestion = entry["suggestion"]
+            selected = uploaded or (
+                {"name": suggestion["name"], "content": suggestion["content"]}
+                if suggestion["content"] is not None
+                else None
+            )
+            if selected is None:
+                raise ValueError(
+                    f"A replacement preview is required for {suggestion['title']}."
+                )
+            previews[key] = selected
+        return previews
 
     def load_simulation_type_properties(self, change):
         simulation_type = self.simulation_type_dropdown.value
@@ -1503,9 +1712,6 @@ class SimulationDetailsWidget(ipw.VBox):
             orm.WorkChainNode,
             filters={
                 "attributes.process_label": {"in": labels},  # Filter by process_label
-                "extras": {
-                    "!has_key": "exported"
-                },  # Exclude nodes with the 'exported' key in extras
                 "attributes.process_state": {"in": ["finished"]},
             },
             project=[
@@ -1563,6 +1769,9 @@ class SimulationDetailsWidget(ipw.VBox):
                 self.select_simulation_title,
                 self.simulations_dropdown_hbox,
                 self.sort_simulations_hbox,
+                self.preview_suggestions_title,
+                self.preview_suggestions_status,
+                self.preview_suggestions_box,
             ]
 
         else:
@@ -1572,8 +1781,8 @@ class SimulationDetailsWidget(ipw.VBox):
                 self.simulation_properties_widget,
                 self.select_atom_model_title,
                 self.atom_model_widget,
-                self.select_codes_title,
-                self.codes_hbox,
+                self.select_executables_title,
+                self.executables_hbox,
                 self.upload_image_preview_title,
                 self.upload_image_preview_uploader,
                 self.upload_datasets_title,
@@ -1712,202 +1921,151 @@ class SimulationDetailsWidget(ipw.VBox):
 
 
 class SimulationPropertiesWidget(ipw.VBox):
+    """Schema-driven editor for manual, non-AiiDA simulation records."""
+
+    _EXCLUDED_PROPERTIES = frozenset(
+        {
+            "EXECUTABLES",
+            "AIIDA_NODE",
+            "AIIDA_SOURCE_UUID",
+            "AIIDA_RESULT_ROLE",
+        }
+    )
+
     def __init__(self, openbis_session):
         super().__init__()
         self.openbis_session = openbis_session
         self.simulation_type = ""
-
-        self.simulation_properties_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 18px;'>Simulation properties</span>"
+        self.fields = {}
+        self.assignments = []
+        self.title = ipw.HTML(
+            value="<span style='font-weight: bold; font-size: 18px;'>"
+            "Simulation properties</span>"
         )
 
-        self.name_label = ipw.Label(value="Name")
-        self.name_textbox = ipw.Text()
-        self.name_hbox = ipw.HBox(children=[self.name_label, self.name_textbox])
+    @staticmethod
+    def _vocabulary_options(property_definition):
+        vocabulary = property_definition.get("vocabulary")
+        return [
+            (label, label)
+            for _code, label in simulation_schema.VOCABULARIES.get(vocabulary, [])
+        ]
 
-        self.description_label = ipw.Label(value="Description")
-        self.description_textbox = ipw.Textarea()
-        self.description_hbox = ipw.HBox(
-            children=[self.description_label, self.description_textbox]
-        )
-
-        self.wfms_uuid_label = ipw.Label(value="WFMS UUID")
-        self.wfms_uuid_textbox = ipw.Text()
-        self.wfms_uuid_hbox = ipw.HBox(
-            children=[self.wfms_uuid_label, self.wfms_uuid_textbox]
-        )
-
-        self.band_gap_label = ipw.Label(value="Band gap:")
-        self.band_gap_value_textbox = ipw.Text()
-        self.band_gap_unit_textbox = ipw.Dropdown(options=["eV", "J", "Ha"], value="Ha")
-        self.band_gap_hbox = ipw.HBox(
-            children=[
-                self.band_gap_label,
-                self.band_gap_value_textbox,
-                self.band_gap_unit_textbox,
-            ]
-        )
-
-        self.cell_opt_constraints_label = ipw.Label(value="Cell opt constraints")
-        self.cell_opt_constraints_textbox = ipw.Text()
-        self.cell_opt_constraints_hbox = ipw.HBox(
-            children=[
-                self.cell_opt_constraints_label,
-                self.cell_opt_constraints_textbox,
-            ]
-        )
-
-        self.cell_optimised_label = ipw.Label(value="Cell optimised")
-        self.cell_optimised_checkbox = ipw.Checkbox(indent=False)
-        self.cell_optimised_hbox = ipw.HBox(
-            children=[self.cell_optimised_label, self.cell_optimised_checkbox]
-        )
-
-        self.driver_code_label = ipw.Label(value="Driver code")
-        self.driver_code_textbox = ipw.Text()
-        self.driver_code_hbox = ipw.HBox(
-            children=[self.driver_code_label, self.driver_code_textbox]
-        )
-
-        self.constrained_label = ipw.Label(value="Constrained")
-        self.constrained_checkbox = ipw.Checkbox(indent=False)
-        self.constrained_hbox = ipw.HBox(
-            children=[self.constrained_label, self.constrained_checkbox]
-        )
-
-        self.force_convergence_threshold_label = ipw.Label(
-            value="Force convergence threshold: "
-        )
-        self.force_convergence_threshold_value_label = ipw.Label(value="Value")
-        self.force_convergence_threshold_value_textbox = ipw.Text(
-            layout=ipw.Layout(width="100px")
-        )
-        self.force_convergence_threshold_unit_label = ipw.Label(value="Unit")
-        self.force_convergence_threshold_unit_textbox = ipw.Text(
-            layout=ipw.Layout(width="100px")
-        )
-        self.force_convergence_threshold_hbox = ipw.HBox(
-            children=[
-                self.force_convergence_threshold_label,
-                self.force_convergence_threshold_value_label,
-                self.force_convergence_threshold_value_textbox,
-                self.force_convergence_threshold_unit_label,
-                self.force_convergence_threshold_unit_textbox,
-            ]
-        )
-
-        self.level_theory_method_label = ipw.Label(value="Level of theory (method)")
-        self.level_theory_method_textbox = ipw.Text()
-        self.level_theory_method_hbox = ipw.HBox(
-            children=[self.level_theory_method_label, self.level_theory_method_textbox]
-        )
-
-        self.level_theory_parameters_label = ipw.Label(
-            value="Level of theory (parameters)"
-        )
-        self.level_theory_parameters_textbox = ipw.Textarea(
-            placeholder='{"uks": false, "charge": 0.0, "plus_u": false, "xc_functional": "PBESOL"}'
-        )
-        self.level_theory_parameters_hbox = ipw.HBox(
-            children=[
-                self.level_theory_parameters_label,
-                self.level_theory_parameters_textbox,
-            ]
-        )
-
-        self.method_input_parameters_label = ipw.Label(value="Method input parameters")
-        self.method_input_parameters_textbox = ipw.Textarea(
-            placeholder='{"degauss": 0.0, "volume": 0.0}'
-        )
-        self.method_input_parameters_hbox = ipw.HBox(
-            children=[
-                self.method_input_parameters_label,
-                self.method_input_parameters_textbox,
-            ]
-        )
-
-        self.method_output_parameters_label = ipw.Label(
-            value="Method output parameters"
-        )
-        self.method_output_parameters_textbox = ipw.Textarea(
-            placeholder='{"energy": 0.0, "has_electric_field": false}'
-        )
-        self.method_output_parameters_hbox = ipw.HBox(
-            children=[
-                self.method_output_parameters_label,
-                self.method_output_parameters_textbox,
-            ]
-        )
-
-        self.comments_label = ipw.Label(value="Comments")
-        self.comments_textbox = ipw.Textarea()
-        self.comments_hbox = ipw.HBox(
-            children=[self.comments_label, self.comments_textbox]
+    @classmethod
+    def _field_widget(cls, property_definition, mandatory):
+        data_type = property_definition["dataType"]
+        label = property_definition["label"] + (" *" if mandatory else "")
+        style = {"description_width": "220px"}
+        layout = ipw.Layout(width="850px")
+        if data_type == "BOOLEAN":
+            return ipw.Checkbox(description=label, indent=False)
+        if data_type == "MULTILINE_VARCHAR":
+            return ipw.Textarea(description=label, style=style, layout=layout)
+        if data_type == "CONTROLLEDVOCABULARY":
+            options = cls._vocabulary_options(property_definition)
+            if property_definition.get("multiValue"):
+                return ipw.SelectMultiple(
+                    options=options,
+                    description=label,
+                    style=style,
+                    layout=ipw.Layout(width="850px", height="100px"),
+                )
+            return ipw.Dropdown(
+                options=[("Select...", "")] + options,
+                description=label,
+                style=style,
+                layout=layout,
+            )
+        placeholder = ""
+        if data_type == "REAL" and property_definition.get("multiValue"):
+            placeholder = "Comma-separated numeric values"
+        elif data_type in {"REAL", "INTEGER"}:
+            placeholder = "Numeric value"
+        return ipw.Text(
+            description=label,
+            placeholder=placeholder,
+            style=style,
+            layout=layout,
         )
 
     def load_widgets(self, simulation_type):
         self.simulation_type = simulation_type
+        self.fields = {}
+        self.assignments = []
+        if simulation_type not in simulation_schema.OBJECT_TYPES:
+            self.children = []
+            return
 
-        if simulation_type == OPENBIS_OBJECT_TYPES["Band Structure"]:
-            self.children = [
-                self.simulation_properties_title,
-                self.name_hbox,
-                self.wfms_uuid_hbox,
-                self.band_gap_hbox,
-                self.level_theory_method_hbox,
-                self.level_theory_parameters_hbox,
-                self.method_input_parameters_hbox,
-                self.method_output_parameters_hbox,
-                self.comments_hbox,
-            ]
+        sections = {}
+        for assignment in simulation_schema.OBJECT_TYPES[simulation_type][
+            "assignments"
+        ]:
+            code = assignment["code"]
+            if code in self._EXCLUDED_PROPERTIES:
+                continue
+            definition = simulation_schema.PROPERTY_TYPES[code]
+            widget = self._field_widget(definition, assignment["mandatory"])
+            self.fields[code] = widget
+            self.assignments.append(assignment)
+            sections.setdefault(assignment["section"], []).append(widget)
 
-        elif simulation_type == OPENBIS_OBJECT_TYPES["Geometry Optimisation"]:
-            self.children = [
-                self.simulation_properties_title,
-                self.name_hbox,
-                self.wfms_uuid_hbox,
-                self.cell_opt_constraints_hbox,
-                self.cell_optimised_hbox,
-                self.driver_code_hbox,
-                self.constrained_hbox,
-                self.force_convergence_threshold_hbox,
-                self.level_theory_method_hbox,
-                self.level_theory_parameters_hbox,
-                self.method_input_parameters_hbox,
-                self.method_output_parameters_hbox,
-                self.comments_hbox,
-            ]
+        children = [self.title]
+        for section, section_fields in sections.items():
+            children.append(ipw.HTML(f"<h4>{html.escape(section)}</h4>"))
+            children.extend(section_fields)
+        self.children = children
 
-        elif simulation_type == OPENBIS_OBJECT_TYPES["PDOS"]:
-            self.children = [
-                self.simulation_properties_title,
-                self.name_hbox,
-                self.wfms_uuid_hbox,
-                self.level_theory_method_hbox,
-                self.level_theory_parameters_hbox,
-                self.method_input_parameters_hbox,
-                self.method_output_parameters_hbox,
-                self.comments_hbox,
-            ]
+    def values(self):
+        """Validate widgets and return lower-case pyBIS property values."""
+        properties = {}
+        missing = []
+        for assignment in self.assignments:
+            code = assignment["code"]
+            definition = simulation_schema.PROPERTY_TYPES[code]
+            widget = self.fields[code]
+            value = widget.value
+            data_type = definition["dataType"]
 
-        elif simulation_type == OPENBIS_OBJECT_TYPES["Vibrational Spectroscopy"]:
-            self.children = [
-                self.simulation_properties_title,
-                self.name_hbox,
-                self.wfms_uuid_hbox,
-                self.level_theory_method_hbox,
-                self.level_theory_parameters_hbox,
-                self.method_input_parameters_hbox,
-                self.method_output_parameters_hbox,
-                self.comments_hbox,
-            ]
+            if data_type == "BOOLEAN":
+                if assignment["mandatory"] or value:
+                    properties[code.lower()] = bool(value)
+                continue
+            if definition.get("multiValue"):
+                if data_type == "REAL":
+                    raw_values = [
+                        item.strip() for item in str(value).split(",") if item.strip()
+                    ]
+                    try:
+                        value = [float(item) for item in raw_values]
+                    except ValueError as error:
+                        raise ValueError(
+                            f"{definition['label']} must contain numbers."
+                        ) from error
+                else:
+                    value = list(value)
+            else:
+                value = str(value).strip()
+                if value and data_type == "REAL":
+                    try:
+                        value = float(value)
+                    except ValueError as error:
+                        raise ValueError(
+                            f"{definition['label']} must be a number."
+                        ) from error
+                elif value and data_type == "INTEGER":
+                    try:
+                        value = int(value)
+                    except ValueError as error:
+                        raise ValueError(
+                            f"{definition['label']} must be an integer."
+                        ) from error
 
-        elif simulation_type == OPENBIS_OBJECT_TYPES["Unclassified Simulation"]:
-            self.children = [
-                self.simulation_properties_title,
-                self.name_hbox,
-                self.description_hbox,
-                self.method_input_parameters_hbox,
-                self.method_output_parameters_hbox,
-                self.comments_hbox,
-            ]
+            if value in ("", [], ()):  # optional fields are omitted from pyBIS
+                if assignment["mandatory"]:
+                    missing.append(definition["label"])
+                continue
+            properties[code.lower()] = value
+
+        if missing:
+            raise ValueError("Complete the required fields: " + ", ".join(missing))
+        return properties

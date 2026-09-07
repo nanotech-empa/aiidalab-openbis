@@ -28,17 +28,22 @@
             "Custom Code": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/CUSTOM_CODE_COLLECTION",
             "Proprietary Code": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/PROPRIETARY_SOFTWARE_COLLECTION",
             "Executable": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/COMPUTATIONAL_SIMULATIONS_EXP_1",
-            "Computer": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/COMPUTATIONAL_SIMULATIONS_EXP_2"
+            "Computer Local": "/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_LOCAL_IT_HARDWARE",
+            "Computer External": "/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_EXTERNAL_AND_HPC_RESOURCES"
         }
     },
     "Simulations": {
         "Types": {
-            "Geometry optimisation": "GEOMETRY_OPTIMISATION",
-            "Band structure": "BAND_STRUCTURE",
-            "PDOS": "PDOS",
-            "Vibrational spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
-            "Unclassified simulation": "UNCLASSIFIED_SIMULATION",
-            "STM simulation": "STM_SIMULATION"
+            "Energy Calculation": "ENERGY_CALCULATION",
+            "Geometry Optimisation": "GEOMETRY_OPTIMISATION",
+            "Band Structure": "BAND_STRUCTURE",
+            "Charge Analysis": "CHARGE_ANALYSIS",
+            "DOS": "DOS",
+            "Reaction Barrier": "REACTION_BARRIER",
+            "SPM Simulation": "SPM_SIMULATION",
+            "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
+            "Molecular Dynamics": "MOLECULAR_DYNAMICS",
+            "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
         }
     },
     "Simulation Export Types": {
@@ -54,10 +59,10 @@
         "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
     },
     "Workchain Viewers": {
-        "QeAppWorkChain": "/apps/quantum-espresso/qe.ipynb",
-        "Cp2kGeoOptWorkChain": "/apps/surfaces/view_geometry_optimization.ipynb",
-        "Cp2kStmWorkChain": "/apps/surfaces/view_stm.ipynb",
-        "NanoribbonWorkChain": "/apps/nanoribbons/show.ipynb"
+        "QeAppWorkChain": "/apps/apps/quantum-espresso/qe.ipynb",
+        "Cp2kGeoOptWorkChain": "/apps/apps/surfaces/view_geometry_optimization.ipynb",
+        "Cp2kStmWorkChain": "/apps/apps/surfaces/view_stm.ipynb",
+        "NanoribbonWorkChain": "/apps/apps/nanoribbons/show.ipynb"
     },
     "OpenBIS Types": {
         "Process": "PROCESS",

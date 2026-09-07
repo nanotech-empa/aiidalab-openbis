@@ -25,8 +25,6 @@ IMMUTABLE_PROPERTY_MIGRATIONS = (
     "CHARGE",
     "AIIDA_NODE",
     "METHOD_MODIFIERS",
-    "FERMI_ENERGY",
-    "ELECTRONIC_GAP",
     "EXECUTABLES",
 )
 
@@ -116,7 +114,7 @@ PROPERTY_TYPES = {
         prop("NAME", "Name", "VARCHAR"),
         prop("COMMENTS", "Comments", "MULTILINE_VARCHAR"),
         prop("CONSTRAINED", "Constrained", "BOOLEAN"),
-        prop("BAND_GAP", "Band gap", "JSON", "Band gap quantity"),
+        prop("BAND_GAP_EV", "Band gap (eV)", "REAL"),
         prop(
             "METHOD_FAMILY",
             "Method family",
@@ -132,18 +130,17 @@ PROPERTY_TYPES = {
         ),
         prop("METHOD_LABEL", "Method label", "VARCHAR"),
         prop("CHARGE", "Charge", "REAL"),
-        prop("TOTAL_ENERGY", "Total energy", "JSON", "Quantity in Hartree"),
+        prop("TOTAL_ENERGY_HARTREE", "Total energy (Hartree)", "REAL"),
         prop("CONVERGED", "Converged", "BOOLEAN"),
         prop("SPIN_MULTIPLICITY", "Spin multiplicity", "INTEGER"),
         prop(
-            "TOTAL_MAGNETIZATION",
-            "Total magnetization",
-            "JSON",
-            "Quantity in Bohr magnetons",
+            "TOTAL_MAGNETIZATION_BOHR_MAGNETON",
+            "Total magnetization (Bohr magneton)",
+            "REAL",
         ),
         # These are multivalued globally to support spin-resolved values.
-        prop("FERMI_ENERGY", "Fermi energy", "JSON", multi_value=True),
-        prop("ELECTRONIC_GAP", "Electronic gap", "JSON", multi_value=True),
+        prop("FERMI_ENERGY_EV", "Fermi energy (eV)", "REAL", multi_value=True),
+        prop("ELECTRONIC_GAP_EV", "Electronic gap (eV)", "REAL", multi_value=True),
         prop(
             "EXECUTABLES",
             "Executables",
@@ -157,8 +154,10 @@ PROPERTY_TYPES = {
             "SAMPLE",
             sample_type="AIIDA_NODE",
         ),
+        prop("AIIDA_SOURCE_UUID", "AiiDA source UUID", "VARCHAR"),
+        prop("AIIDA_RESULT_ROLE", "AiiDA result role", "VARCHAR"),
         prop("CELL_OPTIMIZATION", "Cell optimization", "BOOLEAN"),
-        prop("FINAL_ENERGY", "Final energy", "JSON", "Quantity in Hartree"),
+        prop("FINAL_ENERGY_HARTREE", "Final energy (Hartree)", "REAL"),
         prop(
             "CONSTRAINTS_DESCRIPTION",
             "Constraints description",
@@ -166,10 +165,9 @@ PROPERTY_TYPES = {
         ),
         prop("CELL_CONSTRAINTS", "Cell constraints", "VARCHAR"),
         prop(
-            "FINAL_MAX_FORCE",
-            "Final maximum force",
-            "JSON",
-            "Quantity in Hartree/bohr",
+            "FINAL_MAX_FORCE_HARTREE_PER_BOHR",
+            "Final maximum force (Hartree/bohr)",
+            "REAL",
         ),
         prop("NUMBER_OF_STEPS", "Number of steps", "INTEGER"),
         prop("K_PATH", "k-path", "VARCHAR"),
@@ -186,16 +184,16 @@ PROPERTY_TYPES = {
             "Projection description",
             "MULTILINE_VARCHAR",
         ),
-        prop("ENERGY_MIN", "Minimum energy", "JSON"),
-        prop("ENERGY_MAX", "Maximum energy", "JSON"),
+        prop("ENERGY_MIN_EV", "Minimum energy (eV)", "REAL"),
+        prop("ENERGY_MAX_EV", "Maximum energy (eV)", "REAL"),
         prop(
             "PATH_METHOD",
             "Path method",
             "CONTROLLEDVOCABULARY",
             vocabulary="PATH_METHOD_ENUM",
         ),
-        prop("FORWARD_BARRIER", "Forward barrier", "JSON"),
-        prop("BACKWARD_BARRIER", "Backward barrier", "JSON"),
+        prop("FORWARD_BARRIER_EV", "Forward barrier (eV)", "REAL"),
+        prop("BACKWARD_BARRIER_EV", "Backward barrier (eV)", "REAL"),
         prop("NUMBER_OF_IMAGES", "Number of images", "INTEGER"),
         prop(
             "REACTION_COORDINATE_DESCRIPTION",
@@ -208,9 +206,9 @@ PROPERTY_TYPES = {
             "CONTROLLEDVOCABULARY",
             vocabulary="SPM_MODE_ENUM",
         ),
-        prop("BIAS_VOLTAGE", "Bias voltage", "JSON"),
-        prop("HEIGHT", "Height", "JSON"),
-        prop("ISOVALUE", "Isovalue", "JSON"),
+        prop("BIAS_VOLTAGE_V", "Bias voltage (V)", "REAL"),
+        prop("HEIGHT_ANGSTROM", "Height (angstrom)", "REAL"),
+        prop("ISOVALUE_AU", "Isovalue (a.u.)", "REAL"),
         prop("TIP_MODEL", "Tip model", "VARCHAR"),
         prop("SCAN_AREA", "Scan area", "VARCHAR"),
         prop("IMAGE_MODE", "Image mode", "VARCHAR"),
@@ -220,8 +218,8 @@ PROPERTY_TYPES = {
             "CONTROLLEDVOCABULARY",
             vocabulary="VIBRATIONAL_MODE_ENUM",
         ),
-        prop("TIME_STEP", "Time step", "JSON"),
-        prop("TOTAL_TIME", "Total time", "JSON"),
+        prop("TIME_STEP_FS", "Time step (fs)", "REAL"),
+        prop("TOTAL_TIME_FS", "Total time (fs)", "REAL"),
         prop("COMPLETED", "Completed", "BOOLEAN"),
         prop(
             "ENSEMBLE",
@@ -229,8 +227,8 @@ PROPERTY_TYPES = {
             "CONTROLLEDVOCABULARY",
             vocabulary="MD_ENSEMBLE_ENUM",
         ),
-        prop("TEMPERATURE", "Temperature", "JSON"),
-        prop("PRESSURE", "Pressure", "JSON"),
+        prop("TEMPERATURE_K", "Temperature (K)", "REAL"),
+        prop("PRESSURE_BAR", "Pressure (bar)", "REAL"),
         prop("THERMOSTAT", "Thermostat", "VARCHAR"),
         prop("BAROSTAT", "Barostat", "VARCHAR"),
         prop(
@@ -243,7 +241,8 @@ PROPERTY_TYPES = {
             "Main result description",
             "MULTILINE_VARCHAR",
         ),
-        prop("MAIN_RESULT_VALUE", "Main result value", "JSON"),
+        prop("MAIN_RESULT_VALUE_NUMERIC", "Main result value", "REAL"),
+        prop("MAIN_RESULT_UNIT", "Main result unit", "VARCHAR"),
     ]
 }
 
@@ -261,10 +260,12 @@ METHOD = [
 PROVENANCE = [
     assignment("EXECUTABLES", False, "Provenance"),
     assignment("AIIDA_NODE", False, "Provenance"),
+    assignment("AIIDA_SOURCE_UUID", False, "Provenance"),
+    assignment("AIIDA_RESULT_ROLE", False, "Provenance"),
 ]
 SPIN = [
     assignment("SPIN_MULTIPLICITY", False, "Electronic properties"),
-    assignment("TOTAL_MAGNETIZATION", False, "Electronic properties"),
+    assignment("TOTAL_MAGNETIZATION_BOHR_MAGNETON", False, "Electronic properties"),
 ]
 
 
@@ -285,10 +286,10 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("TOTAL_ENERGY", True, "Results"),
+            assignment("TOTAL_ENERGY_HARTREE", True, "Results"),
             assignment("CONVERGED", True, "Results"),
-            assignment("FERMI_ENERGY", False, "Electronic properties"),
-            assignment("ELECTRONIC_GAP", False, "Electronic properties"),
+            assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
+            assignment("ELECTRONIC_GAP_EV", False, "Electronic properties"),
         ]
         + SPIN
         + [assignment("COMMENTS", False, "General information")]
@@ -302,14 +303,14 @@ OBJECT_TYPES = {
         + [
             assignment("CONSTRAINED", True, "Optimization"),
             assignment("CELL_OPTIMIZATION", True, "Optimization"),
-            assignment("FINAL_ENERGY", True, "Results"),
+            assignment("FINAL_ENERGY_HARTREE", True, "Results"),
             assignment("CONVERGED", True, "Results"),
             assignment("CONSTRAINTS_DESCRIPTION", False, "Optimization"),
             assignment("CELL_CONSTRAINTS", False, "Optimization"),
-            assignment("FINAL_MAX_FORCE", False, "Results"),
+            assignment("FINAL_MAX_FORCE_HARTREE_PER_BOHR", False, "Results"),
             assignment("NUMBER_OF_STEPS", False, "Results"),
-            assignment("FERMI_ENERGY", False, "Electronic properties"),
-            assignment("ELECTRONIC_GAP", False, "Electronic properties"),
+            assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
+            assignment("ELECTRONIC_GAP_EV", False, "Electronic properties"),
         ]
         + SPIN
         + [assignment("COMMENTS", False, "General information")]
@@ -322,9 +323,9 @@ OBJECT_TYPES = {
         + METHOD
         + [
             assignment("METHOD_LABEL", True, "Method"),
-            assignment("BAND_GAP", True, "Results"),
+            assignment("BAND_GAP_EV", True, "Results"),
             assignment("CONVERGED", True, "Results"),
-            assignment("FERMI_ENERGY", False, "Electronic properties"),
+            assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
             assignment("K_PATH", False, "Results"),
             assignment("ELECTRONIC_GAP_TYPE", False, "Results"),
         ]
@@ -341,8 +342,8 @@ OBJECT_TYPES = {
             assignment("METHOD_LABEL", True, "Method"),
             assignment("CHARGE_ANALYSIS_METHOD", True, "Method"),
             assignment("CONVERGED", True, "Results"),
-            assignment("FERMI_ENERGY", False, "Electronic properties"),
-            assignment("ELECTRONIC_GAP", False, "Electronic properties"),
+            assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
+            assignment("ELECTRONIC_GAP_EV", False, "Electronic properties"),
         ]
         + SPIN
         + [assignment("COMMENTS", False, "General information")]
@@ -358,10 +359,10 @@ OBJECT_TYPES = {
             assignment("PDOS", True, "Results"),
             assignment("PROJECTION_DESCRIPTION", False, "Results"),
             assignment("CONVERGED", True, "Results"),
-            assignment("FERMI_ENERGY", False, "Electronic properties"),
-            assignment("ENERGY_MIN", False, "Results"),
-            assignment("ENERGY_MAX", False, "Results"),
-            assignment("ELECTRONIC_GAP", False, "Electronic properties"),
+            assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
+            assignment("ENERGY_MIN_EV", False, "Results"),
+            assignment("ENERGY_MAX_EV", False, "Results"),
+            assignment("ELECTRONIC_GAP_EV", False, "Electronic properties"),
         ]
         + SPIN
         + [assignment("COMMENTS", False, "General information")]
@@ -375,9 +376,9 @@ OBJECT_TYPES = {
         + [
             assignment("METHOD_LABEL", True, "Method"),
             assignment("PATH_METHOD", True, "Method"),
-            assignment("FORWARD_BARRIER", True, "Results"),
+            assignment("FORWARD_BARRIER_EV", True, "Results"),
             assignment("CONVERGED", True, "Results"),
-            assignment("BACKWARD_BARRIER", False, "Results"),
+            assignment("BACKWARD_BARRIER_EV", False, "Results"),
             assignment("NUMBER_OF_IMAGES", False, "Results"),
             assignment("REACTION_COORDINATE_DESCRIPTION", False, "General information"),
         ]
@@ -394,9 +395,9 @@ OBJECT_TYPES = {
             assignment("METHOD_LABEL", True, "Method"),
             assignment("SPM_MODE", True, "Method"),
             assignment("CONVERGED", True, "Results"),
-            assignment("BIAS_VOLTAGE", False, "Simulation settings"),
-            assignment("HEIGHT", False, "Simulation settings"),
-            assignment("ISOVALUE", False, "Simulation settings"),
+            assignment("BIAS_VOLTAGE_V", False, "Simulation settings"),
+            assignment("HEIGHT_ANGSTROM", False, "Simulation settings"),
+            assignment("ISOVALUE_AU", False, "Simulation settings"),
             assignment("TIP_MODEL", False, "Simulation settings"),
             assignment("SCAN_AREA", False, "Simulation settings"),
             assignment("IMAGE_MODE", False, "Simulation settings"),
@@ -426,12 +427,12 @@ OBJECT_TYPES = {
         + METHOD
         + [
             assignment("METHOD_LABEL", True, "Method"),
-            assignment("TIME_STEP", True, "Simulation settings"),
-            assignment("TOTAL_TIME", True, "Simulation settings"),
+            assignment("TIME_STEP_FS", True, "Simulation settings"),
+            assignment("TOTAL_TIME_FS", True, "Simulation settings"),
             assignment("COMPLETED", True, "Results"),
             assignment("ENSEMBLE", False, "Simulation settings"),
-            assignment("TEMPERATURE", False, "Simulation settings"),
-            assignment("PRESSURE", False, "Simulation settings"),
+            assignment("TEMPERATURE_K", False, "Simulation settings"),
+            assignment("PRESSURE_BAR", False, "Simulation settings"),
             assignment("THERMOSTAT", False, "Simulation settings"),
             assignment("BAROSTAT", False, "Simulation settings"),
         ]
@@ -451,7 +452,8 @@ OBJECT_TYPES = {
             assignment("METHOD_LABEL", False, "Method"),
             assignment("CHARGE", False, "Method"),
             assignment("MAIN_RESULT_DESCRIPTION", False, "Results"),
-            assignment("MAIN_RESULT_VALUE", False, "Results"),
+            assignment("MAIN_RESULT_VALUE_NUMERIC", False, "Results"),
+            assignment("MAIN_RESULT_UNIT", False, "Results"),
             assignment("COMMENTS", False, "General information"),
         ]
         + PROVENANCE,
@@ -762,6 +764,37 @@ def delete_obsolete_object_type(session, code: str):
     )
 
 
+def apply_object_type_assignments(session, code: str, expected: dict[str, Any]):
+    """Make one empty object type's property assignments exact and idempotent."""
+    object_type = create_object_type(session, code, expected)
+    current = assignment_state(object_type)
+    changed = set(current) != {item["code"] for item in expected["assignments"]} or any(
+        not assignment_matches(current[item["code"]], item, ordinal)
+        for ordinal, item in enumerate(expected["assignments"], start=1)
+        if item["code"] in current
+    )
+    if changed:
+        count = session.get_objects(type=code).totalCount
+        if count:
+            raise RuntimeError(
+                f"Refusing to replace assignments for populated object type {code}"
+            )
+        # Revoke the complete set so openBIS cannot preserve ordinal gaps.
+        for property_code in current:
+            object_type.revoke_property(property_code, force=True)
+
+    current = assignment_state(object_type)
+    for ordinal, item in enumerate(expected["assignments"], start=1):
+        if item["code"] in current:
+            continue
+        object_type.assign_property(
+            session.get_property_type(item["code"], use_cache=False),
+            section=item["section"],
+            ordinal=ordinal,
+            mandatory=item["mandatory"],
+        )
+
+
 def apply_schema(session):
     for code, terms in VOCABULARIES.items():
         create_vocabulary(session, code, terms)
@@ -776,33 +809,7 @@ def apply_schema(session):
         create_property_type(session, expected)
 
     for code, expected in OBJECT_TYPES.items():
-        object_type = create_object_type(session, code, expected)
-        current = assignment_state(object_type)
-        desired = {item["code"]: item for item in expected["assignments"]}
-        for property_code in set(current) - set(desired):
-            object_type.revoke_property(property_code, force=True)
-        desired_ordinals = {
-            item["code"]: ordinal
-            for ordinal, item in enumerate(expected["assignments"], start=1)
-        }
-        for property_code in set(current) & set(desired):
-            if not assignment_matches(
-                current[property_code],
-                desired[property_code],
-                desired_ordinals[property_code],
-            ):
-                object_type.revoke_property(property_code, force=True)
-
-        current = assignment_state(object_type)
-        for ordinal, item in enumerate(expected["assignments"], start=1):
-            if item["code"] in current:
-                continue
-            object_type.assign_property(
-                session.get_property_type(item["code"], use_cache=False),
-                section=item["section"],
-                ordinal=ordinal,
-                mandatory=item["mandatory"],
-            )
+        apply_object_type_assignments(session, code, expected)
 
     for code in OBSOLETE_OBJECT_TYPES:
         delete_obsolete_object_type(session, code)
