@@ -89,6 +89,17 @@ def aiida_utils(monkeypatch):
     return importlib.import_module("src.aiida_utils")
 
 
+def test_log_paths_are_anchored_to_app_root(aiida_utils):
+    from src import utils
+
+    expected_root = Path(utils.__file__).resolve().parent.parent
+    assert utils.APP_ROOT == expected_root
+    assert utils.LOG_DIR == expected_root / "logs"
+    assert (
+        utils.LOG_FILE_PATH == expected_root / "logs" / "aiidalab_openbis_interface.log"
+    )
+
+
 def make_calculation(label, inputs=None, outputs=None):
     return SimpleNamespace(
         label=label,

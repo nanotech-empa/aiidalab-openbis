@@ -14,6 +14,9 @@ from pybis import Openbis
 
 string_io = io.StringIO()
 ELN_CONFIG = Path.home() / ".aiidalab" / "aiidalab-eln-config.json"
+APP_ROOT = Path(__file__).resolve().parent.parent
+LOG_DIR = APP_ROOT / "logs"
+LOG_FILE_PATH = LOG_DIR / "aiidalab_openbis_interface.log"
 
 # OpenBIS-AiiDAlab functions
 

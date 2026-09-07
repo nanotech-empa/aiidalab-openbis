@@ -26,9 +26,10 @@ OPENBIS_SIMULATION_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
 OPENBIS_SESSION, SESSION_DATA = utils.connect_openbis_aiida()
 
 
+utils.LOG_DIR.mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename=utils.LOG_FILE_PATH,
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",

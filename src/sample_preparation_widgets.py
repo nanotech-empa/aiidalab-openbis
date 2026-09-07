@@ -10,7 +10,6 @@ import time
 import threading
 import os
 import logging
-import pathlib
 from traitlets import TraitError
 from . import custom_widgets as cw
 from bs4 import BeautifulSoup
@@ -37,13 +36,10 @@ OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects
 ]
 processes_project = OPENBIS_PROJECTS_PATHS.get("Process")
 
-if not os.path.exists("logs"):
-    os.mkdir("logs")
-
+utils.LOG_DIR.mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
-app_folder = pathlib.Path().resolve().parent
 logging.basicConfig(
-    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
+    filename=utils.LOG_FILE_PATH,
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
