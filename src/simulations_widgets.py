@@ -1299,7 +1299,7 @@ class ExportSimulationsWidget(ipw.VBox):
                     if created_count and existing_count:
                         _popup(
                             f"Exported {created_count} new result(s); reused "
-                            f"{existing_count} result(s) already present in this collection."
+                            f"{existing_count} result(s) already present in this openBIS space."
                         )
                     elif created_count:
                         _popup(
@@ -1308,7 +1308,7 @@ class ExportSimulationsWidget(ipw.VBox):
                     elif existing_count:
                         _popup(
                             "All simulation results were already present in this "
-                            "openBIS collection. The existing links are shown below."
+                            "openBIS space. The existing links are shown below."
                         )
                     else:
                         _popup(

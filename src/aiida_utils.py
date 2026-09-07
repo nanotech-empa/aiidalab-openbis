@@ -1465,6 +1465,24 @@ def _mark_export_result(openbis_object, created):
     return openbis_object
 
 
+def _collection_space_code(openbis_session, collection_id):
+    # Accept either the collection identifier used by the API or its UI permID.
+    collection_id = str(collection_id)
+    if collection_id.startswith("/"):
+        return collection_id.strip("/").split("/", 1)[0]
+
+    collection = openbis_session.get_collection(collection_id)
+    space = getattr(getattr(collection, "project", None), "space", None)
+    space_code = getattr(space, "code", None)
+    if space_code:
+        return str(space_code)
+
+    identifier = str(getattr(collection, "identifier", "") or "")
+    if identifier.startswith("/"):
+        return identifier.strip("/").split("/", 1)[0]
+    raise ValueError(f"Could not determine the openBIS space for {collection_id}.")
+
+
 def _create_simulation_object(
     openbis_session,
     experiment_id,
@@ -1480,7 +1498,10 @@ def _create_simulation_object(
         "AIIDA_RESULT_ROLE": properties.get("aiida_result_role"),
     }
     if all(identity.values()):
-        target_space = str(experiment_id).strip("/").split("/", 1)[0]
+        # Experiment dropdowns expose permIDs, while pyBIS space searches need
+        # the actual space code. Passing an experiment permID as ``space`` makes
+        # pyBIS build an invalid Space PermIdSearchCriteria on this openBIS version.
+        target_space = _collection_space_code(openbis_session, experiment_id)
         existing = list(
             openbis_session.get_objects(
                 type=object_type,

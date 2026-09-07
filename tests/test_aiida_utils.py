@@ -724,6 +724,58 @@ def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils)
     assert rendered == [True]
 
 
+def test_simulation_identity_resolves_collection_permid_to_space(aiida_utils):
+    existing = FakeOpenbisObject(
+        "SPM_SIMULATION",
+        {
+            "aiida_source_uuid": "source-uuid",
+            "aiida_result_role": "stm",
+        },
+    )
+    queried_spaces = []
+
+    class PermidCollectionSession:
+        def get_collection(self, collection_id):
+            assert collection_id == "collection-permid"
+            return SimpleNamespace(
+                project=SimpleNamespace(space=SimpleNamespace(code="SPACE"))
+            )
+
+        def get_objects(self, **kwargs):
+            queried_spaces.append(kwargs["space"])
+            return [existing]
+
+    reused = aiida_utils._create_simulation_object(
+        PermidCollectionSession(),
+        "collection-permid",
+        "SPM_SIMULATION",
+        {
+            "aiida_source_uuid": "source-uuid",
+            "aiida_result_role": "stm",
+        },
+        [],
+        object(),
+        "stm",
+    )
+
+    assert reused is existing
+    assert reused._aiidalab_created is False
+    assert queried_spaces == ["SPACE"]
+
+
+def test_collection_space_code_accepts_collection_identifier(aiida_utils):
+    class NoLookupSession:
+        def get_collection(self, _collection_id):
+            pytest.fail("collection identifiers do not require a server lookup")
+
+    assert (
+        aiida_utils._collection_space_code(
+            NoLookupSession(), "/SPACE/PROJECT/COLLECTION"
+        )
+        == "SPACE"
+    )
+
+
 def test_record_openbis_exports_updates_structured_workchain_extra(
     monkeypatch, aiida_utils
 ):
