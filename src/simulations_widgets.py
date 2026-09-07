@@ -1171,8 +1171,9 @@ class ExportSimulationsWidget(ipw.VBox):
 
     def export_simulation_to_openbis(self, b):
         selected_experiment_id = self.select_experiment_widget.experiment_dropdown.value
-        if selected_experiment_id == "-1":
-            _popup("Select an experiment.")
+        if selected_experiment_id in (None, "", "-1"):
+            _popup("Select an experiment before exporting.")
+            return
         else:
             selected_molecules_widgets = (
                 self.simulation_details_vbox.molecules_accordion.children

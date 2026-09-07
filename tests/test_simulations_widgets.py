@@ -27,6 +27,25 @@ def simulations_widgets(monkeypatch):
     return importlib.import_module("src.simulations_widgets")
 
 
+@pytest.mark.parametrize("selection", [None, "", "-1"])
+def test_export_requires_experiment_selection(
+    monkeypatch, simulations_widgets, selection
+):
+    messages = []
+    monkeypatch.setattr(simulations_widgets, "_popup", messages.append)
+    widget = SimpleNamespace(
+        select_experiment_widget=SimpleNamespace(
+            experiment_dropdown=SimpleNamespace(value=selection)
+        )
+    )
+
+    simulations_widgets.ExportSimulationsWidget.export_simulation_to_openbis(
+        widget, None
+    )
+
+    assert messages == ["Select an experiment before exporting."]
+
+
 def test_resolution_options_include_existing_and_create(simulations_widgets):
     options = simulations_widgets.ExportSimulationsWidget._resolution_options(
         (("perm-2", "Zulu"), ("perm-1", "Alpha")),

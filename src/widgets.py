@@ -834,7 +834,11 @@ class SelectExperimentWidget(ipw.VBox):
         self.experiment_label = ipw.HTML(
             value="<b>Experiment:</b>", layout=ipw.Layout(width="80px")
         )
-        self.experiment_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+        self.experiment_dropdown = ipw.Dropdown(
+            options=[("Select experiment...", "-1")],
+            value="-1",
+            layout=ipw.Layout(width="500px"),
+        )
         self.create_experiment_button = ipw.Button(
             tooltip="Add new experiment",
             icon="plus",
@@ -909,7 +913,11 @@ class SelectExperimentWidget(ipw.VBox):
         self.project_label = ipw.HTML(
             value="<b>Project:</b>", layout=ipw.Layout(width="80px")
         )
-        self.project_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+        self.project_dropdown = ipw.Dropdown(
+            options=[("Select project...", "-1")],
+            value="-1",
+            layout=ipw.Layout(width="500px"),
+        )
         self.project_hbox = ipw.HBox([self.project_label, self.project_dropdown])
 
         # Sort Row
@@ -1082,7 +1090,10 @@ class SelectExperimentWidget(ipw.VBox):
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
         options.insert(0, ("Select experiment...", "-1"))
+        selected = self.experiment_dropdown.value
         self.experiment_dropdown.options = options
+        if selected not in {value for _label, value in options}:
+            self.experiment_dropdown.value = "-1"
 
     def update_project_dropdown(self, change):
         if self.raw_projects_df is None or self.raw_projects_df.empty:
@@ -1108,7 +1119,10 @@ class SelectExperimentWidget(ipw.VBox):
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
         options.insert(0, ("Select project...", "-1"))
+        selected = self.project_dropdown.value
         self.project_dropdown.options = options
+        if selected not in {value for _label, value in options}:
+            self.project_dropdown.value = "-1"
 
     # ==========================================
     # 4. ACTION HANDLERS
