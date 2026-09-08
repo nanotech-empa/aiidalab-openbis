@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote
 
@@ -27,6 +29,30 @@ WORKCHAIN_VIEWERS = OPENBIS_CONFIG["Workchain Viewers"]
 _CREATE_NEW = "__create_new_openbis_object__"
 _DOWNLOAD_ROOT = Path(__file__).resolve().parent.parent / "temp_dataset_download"
 _DOWNLOAD_LIFETIME_SECONDS = 600
+_FUZZY_MATCH_THRESHOLD = 65
+_FUZZY_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "the",
+    "this",
+    "to",
+    "very",
+    "with",
+}
 
 
 def _popup(message):
@@ -69,7 +95,10 @@ class ImportSimulationsWidget(ipw.VBox):
         )
 
         self.select_slab_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select slab</span>"
+            value=(
+                "<span style='font-weight: bold; font-size: 20px;'>"
+                "Select material or slab</span>"
+            )
         )
 
         self.search_simulations_title = ipw.HTML(
@@ -120,15 +149,76 @@ class ImportSimulationsWidget(ipw.VBox):
 
         self.material_details_vbox = ipw.VBox()
 
-        self.search_logical_operator_label = ipw.Label(value="Search logical operator")
+        search_text_style = {"description_width": "120px"}
+        search_text_layout = ipw.Layout(width="600px")
+        self.name_search_text = ipw.Text(
+            description="Name",
+            placeholder="Optional name search",
+            style=search_text_style,
+            layout=search_text_layout,
+        )
+        self.description_search_text = ipw.Text(
+            description="Description",
+            placeholder="Optional description search",
+            style=search_text_style,
+            layout=search_text_layout,
+        )
+        self.text_match_mode_dropdown = ipw.Dropdown(
+            description="Text matching",
+            options=[
+                ("Fuzzy (typo tolerant)", "fuzzy"),
+                ("Contains all words", "all_words"),
+            ],
+            value="fuzzy",
+            style=search_text_style,
+            layout=ipw.Layout(width="380px"),
+        )
+        simulation_type_options = [("All simulation types", "")]
+        simulation_type_options.extend(SIMULATION_TYPES.items())
+        self.simulation_type_search_dropdown = ipw.Dropdown(
+            description="Simulation type",
+            options=simulation_type_options,
+            value="",
+            style=search_text_style,
+            layout=ipw.Layout(width="380px"),
+        )
+        self.archive_status_dropdown = ipw.Dropdown(
+            description="Archive status",
+            options=[
+                ("All", "all"),
+                ("AiiDA archive", "archive"),
+                ("Data only", "data_only"),
+            ],
+            value="all",
+            style=search_text_style,
+            layout=ipw.Layout(width="380px"),
+        )
+        self.search_filters_box = ipw.VBox(
+            [
+                self.name_search_text,
+                self.description_search_text,
+                self.text_match_mode_dropdown,
+                self.simulation_type_search_dropdown,
+                self.archive_status_dropdown,
+            ]
+        )
+
+        self.search_logical_operator_label = ipw.Label(value="Match materials:")
         self.search_logical_operator_dropdown = ipw.Dropdown(
-            value="AND", options=["AND", "OR"], layout=ipw.Layout(width="150px")
+            value="AND",
+            options=[
+                ("All selected materials", "AND"),
+                ("Any selected material", "OR"),
+            ],
+            disabled=True,
+            layout=ipw.Layout(width="230px"),
         )
         self.search_button = ipw.Button(
+            description="Search",
             disabled=False,
             icon="search",
             tooltip="Search simulations in openBIS",
-            layout=ipw.Layout(width="50px", height="25px"),
+            layout=ipw.Layout(width="110px", height="30px"),
         )
         self.search_logical_operator_hbox = ipw.HBox(
             children=[
@@ -136,6 +226,12 @@ class ImportSimulationsWidget(ipw.VBox):
                 self.search_logical_operator_dropdown,
                 self.search_button,
             ]
+        )
+        self.search_operator_help = ipw.HTML(
+            value=(
+                "<small>No material filters selected: all simulations are searched. "
+                "All/Any applies only when two or more materials are selected.</small>"
+            )
         )
 
         self.found_simulations_label = ipw.Label(value="Found simulations: 0")
@@ -162,14 +258,17 @@ class ImportSimulationsWidget(ipw.VBox):
             description="Import into AiiDA",
             tooltip="Import the AiiDA archives linked to the selected simulations",
             icon="download",
+            disabled=True,
             layout=ipw.Layout(width="180px", height="50px"),
         )
         self.download_simulation_data_button = ipw.Button(
             description="Download data",
             tooltip="Download data files or linked .aiida archives in the browser",
             icon="download",
+            disabled=True,
             layout=ipw.Layout(width="180px", height="50px"),
         )
+        self._simulation_archive_by_permid = {}
 
         self.import_simulations_message_html = ipw.HTML()
         self.download_simulation_data_message_html = ipw.HTML()
@@ -187,12 +286,24 @@ class ImportSimulationsWidget(ipw.VBox):
         self.material_type_dropdown.observe(
             self.load_material_type_widgets, names="value"
         )
+        self.material_type_dropdown.observe(
+            self._update_material_match_controls, names="value"
+        )
+        self.molecules_accordion.observe(
+            self._update_material_match_controls, names="children"
+        )
+        self.reacprod_concepts_accordion.observe(
+            self._update_material_match_controls, names="children"
+        )
         self.add_molecule_button.on_click(self.add_molecule)
         self.add_reacprod_concept_button.on_click(self.add_reacprod_concept)
         self.search_button.on_click(self.search_simulations)
         self.import_simulations_button.on_click(self.import_aiida_nodes)
         self.download_simulation_data_button.on_click(self.download_simulation_data)
         self.clear_simulations_button.on_click(self.clear_simulation_selection)
+        self.found_simulations_select_multiple.observe(
+            self._update_action_buttons, names="value"
+        )
 
         self.children = [
             self.select_molecules_title,
@@ -205,7 +316,9 @@ class ImportSimulationsWidget(ipw.VBox):
             self.material_type_dropdown,
             self.material_details_vbox,
             self.search_simulations_title,
+            self.search_filters_box,
             self.search_logical_operator_hbox,
+            self.search_operator_help,
             increase_search_button,
             self.found_simulations_hbox,
             ipw.HBox(
@@ -219,7 +332,245 @@ class ImportSimulationsWidget(ipw.VBox):
         ]
 
     @staticmethod
-    def _simulation_label(simulation):
+    def _normalize_search_text(value):
+        normalized = unicodedata.normalize("NFKD", str(value or ""))
+        normalized = "".join(
+            character
+            for character in normalized
+            if not unicodedata.combining(character)
+        )
+        return " ".join(normalized.casefold().split())
+
+    @classmethod
+    def _search_words(cls, value, remove_stopwords=False):
+        words = re.findall(r"[a-z0-9]+", cls._normalize_search_text(value))
+        if remove_stopwords:
+            significant = [word for word in words if word not in _FUZZY_STOPWORDS]
+            if significant:
+                return significant
+        return words
+
+    @classmethod
+    def _fuzzy_score(cls, query, candidate):
+        query = cls._normalize_search_text(query)
+        candidate = cls._normalize_search_text(candidate)
+        if not query or not candidate:
+            return 0
+        if query == candidate:
+            return 100
+
+        character_score = 100 * SequenceMatcher(None, query, candidate).ratio()
+        if query in candidate:
+            character_score = max(character_score, 95)
+
+        query_words = cls._search_words(query, remove_stopwords=True)
+        candidate_words = cls._search_words(candidate, remove_stopwords=True)
+        token_score = 0
+        if query_words and candidate_words:
+            token_score = (
+                100
+                * sum(
+                    max(
+                        SequenceMatcher(None, query_word, candidate_word).ratio()
+                        for candidate_word in candidate_words
+                    )
+                    for query_word in query_words
+                )
+                / len(query_words)
+            )
+
+        sorted_word_score = (
+            100
+            * SequenceMatcher(
+                None,
+                " ".join(sorted(query_words)),
+                " ".join(sorted(candidate_words)),
+            ).ratio()
+        )
+        return round(max(character_score, token_score, sorted_word_score))
+
+    @classmethod
+    def _text_matches(cls, query, candidate, mode):
+        if not cls._normalize_search_text(query):
+            return True, 100
+        if mode == "all_words":
+            query_words = cls._search_words(query)
+            candidate_words = set(cls._search_words(candidate))
+            matches = bool(query_words) and all(
+                word in candidate_words for word in query_words
+            )
+            return matches, 100 if matches else 0
+
+        score = cls._fuzzy_score(query, candidate)
+        return score >= _FUZZY_MATCH_THRESHOLD, score
+
+    @staticmethod
+    def _simulation_type_code(simulation):
+        return str(getattr(simulation.type, "code", simulation.type))
+
+    @staticmethod
+    def _simulation_has_archive(simulation):
+        return bool(aiida_utils._openbis_property(simulation, "aiida_node"))
+
+    @classmethod
+    def _filter_simulations(
+        cls,
+        simulations,
+        name_query="",
+        description_query="",
+        match_mode="fuzzy",
+        simulation_type="",
+        archive_status="all",
+    ):
+        filtered = []
+        scores = {}
+        fuzzy_search_active = match_mode == "fuzzy" and (
+            cls._normalize_search_text(name_query)
+            or cls._normalize_search_text(description_query)
+        )
+
+        for simulation in simulations:
+            if (
+                simulation_type
+                and cls._simulation_type_code(simulation) != simulation_type
+            ):
+                continue
+
+            has_archive = cls._simulation_has_archive(simulation)
+            if archive_status == "archive" and not has_archive:
+                continue
+            if archive_status == "data_only" and has_archive:
+                continue
+
+            name = aiida_utils._openbis_property(simulation, "name") or ""
+            description = aiida_utils._openbis_property(simulation, "description") or ""
+            name_matches, name_score = cls._text_matches(name_query, name, match_mode)
+            description_matches, description_score = cls._text_matches(
+                description_query, description, match_mode
+            )
+            if not name_matches or not description_matches:
+                continue
+
+            filtered.append(simulation)
+            if fuzzy_search_active:
+                active_scores = []
+                if cls._normalize_search_text(name_query):
+                    active_scores.append(name_score)
+                if cls._normalize_search_text(description_query):
+                    active_scores.append(description_score)
+                scores[str(simulation.permId)] = round(
+                    sum(active_scores) / len(active_scores)
+                )
+
+        return filtered, scores
+
+    def _selected_parent_permids(self):
+        parent_permids = []
+        for molecule_widget in self.molecules_accordion.children:
+            value = molecule_widget.dropdown.value
+            if value not in (None, "", "-1"):
+                parent_permids.append(str(value))
+
+        if (
+            self.material_type_dropdown.value != "-1"
+            and self.material_details_vbox.children
+        ):
+            select_material_box = self.material_details_vbox.children[0]
+            if select_material_box.children:
+                value = select_material_box.children[0].value
+                if value not in (None, "", "-1"):
+                    parent_permids.append(str(value))
+
+        for concept_widget in self.reacprod_concepts_accordion.children:
+            value = concept_widget.dropdown.value
+            if value not in (None, "", "-1"):
+                parent_permids.append(str(value))
+
+        return parent_permids
+
+    @staticmethod
+    def _combine_simulation_permids(permid_sets, logical_operator):
+        if not permid_sets:
+            return set()
+        combined = set(permid_sets[0])
+        for permids in permid_sets[1:]:
+            if logical_operator == "OR":
+                combined.update(permids)
+            else:
+                combined.intersection_update(permids)
+        return combined
+
+    def _update_material_match_controls(self, _change=None):
+        material_count = len(self._selected_parent_permids())
+        self.search_logical_operator_dropdown.disabled = material_count < 2
+        if material_count == 0:
+            message = (
+                "No material filters selected: all simulations are searched. "
+                "All/Any applies only when two or more materials are selected."
+            )
+        elif material_count == 1:
+            message = (
+                "One material filter selected. Add another material to choose "
+                "between matching all or any."
+            )
+        else:
+            message = "All requires every selected material; Any requires at least one."
+        self.search_operator_help.value = f"<small>{message}</small>"
+
+    def _update_action_buttons(self, _change=None):
+        selected = tuple(self.found_simulations_select_multiple.value)
+        self.download_simulation_data_button.disabled = not selected
+        self.import_simulations_button.disabled = not any(
+            self._simulation_archive_by_permid.get(str(permid), False)
+            for permid in selected
+        )
+
+    def _all_simulations(self, simulation_type=""):
+        type_codes = (
+            [simulation_type]
+            if simulation_type
+            else list(dict.fromkeys(SIMULATION_TYPES.values()))
+        )
+        simulations = {}
+        for type_code in type_codes:
+            objects = utils.get_openbis_objects(
+                self.openbis_session,
+                type=type_code,
+            )
+            if objects is None:
+                continue
+            for simulation in objects:
+                simulations[str(simulation.permId)] = simulation
+        return list(simulations.values())
+
+    def _simulations_from_materials(self, parent_permids, logical_operator):
+        simulations_by_permid = {}
+        parent_result_sets = []
+        for parent_permid in parent_permids:
+            parent_object = utils.get_openbis_object(
+                self.openbis_session,
+                sample_ident=parent_permid,
+            )
+            simulations = utils.find_openbis_simulations(
+                self.openbis_session,
+                parent_object,
+                SIMULATION_TYPES,
+            )
+            permids = set()
+            for simulation in simulations:
+                permid = str(simulation.permId)
+                permids.add(permid)
+                simulations_by_permid[permid] = simulation
+            parent_result_sets.append(permids)
+
+        selected_permids = self._combine_simulation_permids(
+            parent_result_sets,
+            logical_operator,
+        )
+        return [simulations_by_permid[permid] for permid in selected_permids]
+
+    @staticmethod
+    def _simulation_label(simulation, match_score=None):
         name = aiida_utils._openbis_property(simulation, "name") or simulation.permId
         type_code = getattr(simulation.type, "code", simulation.type)
         availability = (
@@ -227,19 +578,40 @@ class ImportSimulationsWidget(ipw.VBox):
             if aiida_utils._openbis_property(simulation, "aiida_node")
             else "data only"
         )
-        return f"{name} - {type_code} ({simulation.permId}) [{availability}]"
+        score_label = f" [{match_score}% match]" if match_score is not None else ""
+        return (
+            f"{name} - {type_code} ({simulation.permId}) "
+            f"[{availability}]{score_label}"
+        )
 
     @classmethod
-    def _simulation_options(cls, simulations):
-        return [
-            (cls._simulation_label(simulation), str(simulation.permId))
-            for simulation in sorted(
-                simulations,
-                key=lambda item: (
-                    cls._simulation_label(item).lower(),
-                    str(item.permId),
-                ),
+    def _simulation_options(cls, simulations, scores=None):
+        scores = scores or {}
+        ordered = sorted(
+            simulations,
+            key=lambda item: (
+                cls._simulation_label(item).lower(),
+                str(item.permId),
+            ),
+        )
+        ordered.sort(
+            key=lambda item: str(getattr(item, "registrationDate", "") or ""),
+            reverse=True,
+        )
+        if scores:
+            ordered.sort(
+                key=lambda item: scores.get(str(item.permId), 0),
+                reverse=True,
             )
+        return [
+            (
+                cls._simulation_label(
+                    simulation,
+                    match_score=scores.get(str(simulation.permId)),
+                ),
+                str(simulation.permId),
+            )
+            for simulation in ordered
         ]
 
     @staticmethod
@@ -275,70 +647,41 @@ class ImportSimulationsWidget(ipw.VBox):
             for simulation_permid in self.found_simulations_select_multiple.value
         ]
 
-    def search_simulations(self, b):
-        parents_permid_list = []
-        for molecule_widget in self.molecules_accordion.children:
-            molecule_permid = molecule_widget.dropdown.value
-            if molecule_permid != "-1":
-                parents_permid_list.append(molecule_permid)
-
-        if self.material_type_dropdown.value != "-1":
-            material_permid = self.material_details_vbox.children[0].children[0].value
-            if material_permid != "-1":
-                parents_permid_list.append(material_permid)
-
-        for reacprod_concept_widget in self.reacprod_concepts_accordion.children:
-            reacprod_concept_permid = reacprod_concept_widget.dropdown.value
-            if reacprod_concept_permid != "-1":
-                parents_permid_list.append(reacprod_concept_permid)
-
-        simulation_permid_set = set()
+    def search_simulations(self, _button=None):
+        parent_permids = self._selected_parent_permids()
         logical_operator = self.search_logical_operator_dropdown.value
+        simulation_type = self.simulation_type_search_dropdown.value
 
-        if logical_operator == "OR":
-            for parent in parents_permid_list:
-                parent_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=parent
-                )
-                simulation_objects_children = utils.find_openbis_simulations(
-                    self.openbis_session, parent_object, SIMULATION_EXPORT_TYPES
-                )
-                simulation_permid_set.update(
-                    str(simulation_object.permId)
-                    for simulation_object in simulation_objects_children
-                )
-        else:
-            for idx, parent in enumerate(parents_permid_list):
-                parent_object = utils.get_openbis_object(
-                    self.openbis_session, sample_ident=parent
-                )
-                simulation_objects_children = utils.find_openbis_simulations(
-                    self.openbis_session, parent_object, SIMULATION_EXPORT_TYPES
-                )
-                parent_simulation_permids = {
-                    str(simulation_object.permId)
-                    for simulation_object in simulation_objects_children
-                }
-                if idx == 0:
-                    simulation_permid_set = parent_simulation_permids
-                else:
-                    simulation_permid_set.intersection_update(parent_simulation_permids)
-
-        simulations = [
-            utils.get_openbis_object(
-                self.openbis_session,
-                sample_ident=simulation_permid,
+        if parent_permids:
+            simulations = self._simulations_from_materials(
+                parent_permids,
+                logical_operator,
             )
-            for simulation_permid in simulation_permid_set
-        ]
-        self.found_simulations_select_multiple.options = self._simulation_options(
-            simulations
+        else:
+            simulations = self._all_simulations(simulation_type)
+
+        simulations, scores = self._filter_simulations(
+            simulations,
+            name_query=self.name_search_text.value,
+            description_query=self.description_search_text.value,
+            match_mode=self.text_match_mode_dropdown.value,
+            simulation_type=simulation_type,
+            archive_status=self.archive_status_dropdown.value,
         )
+        self._simulation_archive_by_permid = {
+            str(simulation.permId): self._simulation_has_archive(simulation)
+            for simulation in simulations
+        }
+        self.found_simulations_select_multiple.options = self._simulation_options(
+            simulations,
+            scores=scores,
+        )
+        self.found_simulations_select_multiple.value = ()
         count = len(simulations)
         self.found_simulations_label.value = f"Found simulations: {count}"
-        _popup(f"Found {count} simulation{'s' if count != 1 else ''}.")
         self.import_simulations_message_html.value = ""
         self.download_simulation_data_message_html.value = ""
+        self._update_action_buttons()
 
     def clear_simulation_selection(self, _button=None):
         self.found_simulations_select_multiple.value = ()
@@ -604,6 +947,7 @@ class ImportSimulationsWidget(ipw.VBox):
     def load_material_type_widgets(self, change):
         if self.material_type_dropdown.value == "-1":
             self.material_details_vbox.children = []
+            self._update_material_match_controls()
             return
         else:
             material_options = [("Select material...", "-1")]
@@ -768,12 +1112,21 @@ class ImportSimulationsWidget(ipw.VBox):
             name_checkbox.observe(sort_material_dropdown, names="value")
             registration_date_checkbox.observe(sort_material_dropdown, names="value")
             material_dropdown.observe(load_material_details, names="value")
+            material_dropdown.observe(
+                self._update_material_match_controls,
+                names="value",
+            )
+            self._update_material_match_controls()
 
     def add_molecule(self, b):
         molecules_accordion_children = list(self.molecules_accordion.children)
         molecule_index = len(molecules_accordion_children)
         molecule_widget = widgets.MoleculeWidget(
             self.openbis_session, self.molecules_accordion, molecule_index
+        )
+        molecule_widget.dropdown.observe(
+            self._update_material_match_controls,
+            names="value",
         )
         molecules_accordion_children.append(molecule_widget)
         self.molecules_accordion.children = molecules_accordion_children
@@ -787,6 +1140,10 @@ class ImportSimulationsWidget(ipw.VBox):
             self.openbis_session,
             self.reacprod_concepts_accordion,
             reacprod_concept_index,
+        )
+        reacprod_concept_widget.dropdown.observe(
+            self._update_material_match_controls,
+            names="value",
         )
         reacprod_concepts_accordion_children.append(reacprod_concept_widget)
         self.reacprod_concepts_accordion.children = reacprod_concepts_accordion_children

@@ -218,13 +218,191 @@ def test_create_new_computer_requires_location(monkeypatch, simulations_widgets)
     assert creations == []
 
 
-def _simulation(name, permid, type_code, aiida_node=None, datasets=None):
+def _simulation(
+    name,
+    permid,
+    type_code,
+    aiida_node=None,
+    datasets=None,
+    description="",
+    registration_date="",
+):
     return SimpleNamespace(
-        props={"name": name, "aiida_node": aiida_node},
+        props={
+            "name": name,
+            "description": description,
+            "aiida_node": aiida_node,
+        },
         permId=permid,
         type=SimpleNamespace(code=type_code),
+        registrationDate=registration_date,
         get_datasets=lambda: list(datasets or []),
     )
+
+
+def test_fuzzy_matching_tolerates_typos_and_extra_words(simulations_widgets):
+    score = simulations_widgets.ImportSimulationsWidget._fuzzy_score(
+        "this is a god pearr",
+        "very good pear",
+    )
+
+    assert score >= simulations_widgets._FUZZY_MATCH_THRESHOLD
+
+
+def test_contains_all_words_is_case_insensitive_and_order_independent(
+    simulations_widgets,
+):
+    matches, score = simulations_widgets.ImportSimulationsWidget._text_matches(
+        "EXPORT Test",
+        "This is the test export result",
+        "all_words",
+    )
+    missing, _ = simulations_widgets.ImportSimulationsWidget._text_matches(
+        "export geometry",
+        "This is the test export result",
+        "all_words",
+    )
+
+    assert matches is True
+    assert score == 100
+    assert missing is False
+
+
+def test_simulation_filter_combines_text_type_and_archive_status(
+    simulations_widgets,
+):
+    data_only = _simulation(
+        "test export",
+        "simulation-1",
+        "GEOMETRY_OPTIMISATION",
+        description="A very good pear calculation",
+    )
+    archived = _simulation(
+        "test archive",
+        "simulation-2",
+        "GEOMETRY_OPTIMISATION",
+        aiida_node="archive-1",
+        description="A very good pear calculation",
+    )
+    wrong_type = _simulation(
+        "test export",
+        "simulation-3",
+        "DOS",
+        description="A very good pear calculation",
+    )
+
+    filtered, scores = simulations_widgets.ImportSimulationsWidget._filter_simulations(
+        [data_only, archived, wrong_type],
+        name_query="tset exprt",
+        description_query="god pearr",
+        match_mode="fuzzy",
+        simulation_type="GEOMETRY_OPTIMISATION",
+        archive_status="data_only",
+    )
+
+    assert filtered == [data_only]
+    assert scores["simulation-1"] >= simulations_widgets._FUZZY_MATCH_THRESHOLD
+
+
+def test_material_match_all_and_any_have_explicit_set_semantics(
+    simulations_widgets,
+):
+    combine = simulations_widgets.ImportSimulationsWidget._combine_simulation_permids
+    material_results = [
+        {"simulation-1", "simulation-2"},
+        {"simulation-2", "simulation-3"},
+    ]
+
+    assert combine(material_results, "AND") == {"simulation-2"}
+    assert combine(material_results, "OR") == {
+        "simulation-1",
+        "simulation-2",
+        "simulation-3",
+    }
+
+
+def test_search_without_material_filters_searches_all_simulation_types(
+    monkeypatch,
+    simulations_widgets,
+):
+    target = _simulation(
+        "test export",
+        "simulation-1",
+        "GEOMETRY_OPTIMISATION",
+        description="Manually uploaded geometry",
+        registration_date="2026-09-08 06:38:37",
+    )
+    queried_types = []
+
+    def get_objects(_session, type):
+        queried_types.append(type)
+        return [target] if type == "GEOMETRY_OPTIMISATION" else []
+
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "get_openbis_objects",
+        get_objects,
+    )
+    widget = simulations_widgets.ImportSimulationsWidget(object())
+    widget.name_search_text.value = "tset exprt"
+
+    widget.search_simulations()
+
+    assert set(queried_types) == set(simulations_widgets.SIMULATION_TYPES.values())
+    assert [
+        value for _label, value in widget.found_simulations_select_multiple.options
+    ] == ["simulation-1"]
+    assert "% match" in widget.found_simulations_select_multiple.options[0][0]
+    assert widget.found_simulations_label.value == "Found simulations: 1"
+
+
+@pytest.mark.parametrize(
+    ("material_count", "disabled", "message"),
+    [
+        (0, True, "all simulations are searched"),
+        (1, True, "One material filter selected"),
+        (2, False, "All requires every selected material"),
+    ],
+)
+def test_material_match_control_explains_when_all_any_applies(
+    simulations_widgets,
+    material_count,
+    disabled,
+    message,
+):
+    widget = SimpleNamespace(
+        _selected_parent_permids=lambda: ["material"] * material_count,
+        search_logical_operator_dropdown=SimpleNamespace(disabled=None),
+        search_operator_help=SimpleNamespace(value=""),
+    )
+
+    simulations_widgets.ImportSimulationsWidget._update_material_match_controls(widget)
+
+    assert widget.search_logical_operator_dropdown.disabled is disabled
+    assert message in widget.search_operator_help.value
+
+
+def test_action_buttons_follow_selected_archive_availability(simulations_widgets):
+    widget = SimpleNamespace(
+        found_simulations_select_multiple=SimpleNamespace(value=("data-only",)),
+        _simulation_archive_by_permid={
+            "data-only": False,
+            "archived": True,
+        },
+        import_simulations_button=SimpleNamespace(disabled=None),
+        download_simulation_data_button=SimpleNamespace(disabled=None),
+    )
+
+    simulations_widgets.ImportSimulationsWidget._update_action_buttons(widget)
+
+    assert widget.import_simulations_button.disabled is True
+    assert widget.download_simulation_data_button.disabled is False
+
+    widget.found_simulations_select_multiple.value = ("data-only", "archived")
+    simulations_widgets.ImportSimulationsWidget._update_action_buttons(widget)
+
+    assert widget.import_simulations_button.disabled is False
+    assert widget.download_simulation_data_button.disabled is False
 
 
 def test_simulation_options_use_unique_simulation_permids(simulations_widgets):
