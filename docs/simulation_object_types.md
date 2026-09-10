@@ -35,16 +35,36 @@ must convert values before saving them. The canonical units are Hartree for tota
 energies, eV for electronic energies and barriers, Hartree/bohr for forces, Bohr
 magnetons for magnetization, volts, angstrom, femtoseconds, kelvin, and bar.
 
-Every AiiDA-generated result also records:
+### AiiDA result identity
+
+Every AiiDA-generated simulation object records:
 
 ```text
-aiida_source_uuid: UUID of the concrete WorkChain that produced the result
-aiida_result_role: stable role within that WorkChain, for example bands or pdos
+AIIDA_SOURCE_UUID: UUID of the concrete WorkChain that produced the result
 ```
 
-Together with object type and target collection, these fields prevent duplicate
-results while allowing the same calculation to be published in another space.
-The linked `AIIDA_NODE` archive remains shared across spaces.
+This is a conditional requirement for an AiiDA-generated object and is omitted
+for a non-AiiDA simulation. It is assigned by the exporter and is not editable
+by the user.
+
+`AIIDA_SOURCE_UUID` identifies the concrete result-producing WorkChain, rather
+than the AiiDA installation or the archive object. Importing an AiiDA archive on
+another installation preserves this UUID.
+
+The result role is already expressed by the simulation object type; an
+additional `AIIDA_RESULT_ROLE` property would duplicate that information.
+Within one openBIS space, the exporter therefore searches by object type and
+`AIIDA_SOURCE_UUID`. If it finds a match, it reuses the existing object
+instead of creating a duplicate. The same AiiDA result may still be published
+as a distinct simulation object in another openBIS space.
+
+This identity does not determine archive boundaries. The exporter
+creates or reuses one `AIIDA_NODE` for each main AiiDA WorkChain selected by
+the provenance traversal. Multiple result objects from that block share its
+`AIIDA_NODE`. For example, `ENERGY_CALCULATION` and `CHARGE_ANALYSIS`
+created from one `Cp2kScfWorkChain` share one archive, while a preceding
+`Cp2kGeoOptWorkChain` has a separate archive. Shared inventory objects,
+including `AIIDA_NODE`, remain globally reusable.
 
 ## AiiDA export resolution
 
@@ -844,15 +864,23 @@ full projection arrays
 
 ---
 
-# REACTION_BARRIER
+# MINIMUM_ENERGY_PATH
 
 ## Object type
 
-`REACTION_BARRIER`
+`MINIMUM_ENERGY_PATH`
 
 ## Definition
 
-Simulation that computes the energy barrier between two or more `ATOMISTIC_MODEL` objects along a reaction path.
+One computed path between two endpoint `ATOMISTIC_MODEL` objects. It may be
+obtained from a nudged-elastic-band calculation, a constrained replica chain,
+or another explicitly described path method.
+
+`REACTION_BARRIER` is deliberately not redefined here. Its eventual scope
+(for example free-energy barriers obtained from molecular dynamics, umbrella
+sampling, or metadynamics) must be agreed separately. A MEP nevertheless
+contains its forward and backward barrier values as compact summaries of the
+stored energy profile.
 
 ## Suggested method families
 
@@ -860,7 +888,6 @@ Simulation that computes the energy barrier between two or more `ATOMISTIC_MODEL
 DFT
 TB
 MFH-TB
-CASSCF
 ForceField
 MLPotential
 ```
@@ -870,38 +897,30 @@ MLPotential
 Required:
 
 ```text
-ATOMISTIC_MODEL
-ATOMISTIC_MODEL
+initial ATOMISTIC_MODEL
+final ATOMISTIC_MODEL
 ```
 
 Relations:
 
 ```text
-reactant ATOMISTIC_MODEL → REACTION_BARRIER
-product ATOMISTIC_MODEL → REACTION_BARRIER
+initial ATOMISTIC_MODEL → MINIMUM_ENERGY_PATH
+final ATOMISTIC_MODEL → MINIMUM_ENERGY_PATH
 ```
 
 Optional:
 
 ```text
-intermediate/input-path ATOMISTIC_MODEL[]
+preceding MINIMUM_ENERGY_PATH
 ```
 
-## Child objects
+The optional preceding path records scientific-block provenance, for example
+replica chain → NEB or NEB → continued NEB. Each block keeps its own
+`AIIDA_NODE` and therefore its own minimally scoped `.aiida` archive.
 
-Optional:
-
-```text
-transition_state ATOMISTIC_MODEL
-optimized_path ATOMISTIC_MODEL[]
-```
-
-Relations:
-
-```text
-REACTION_BARRIER → transition_state ATOMISTIC_MODEL
-REACTION_BARRIER → optimized_path ATOMISTIC_MODEL[]
-```
+Intermediate images are intentionally not registered as additional
+`ATOMISTIC_MODEL` objects. They remain available from the linked AiiDA archive
+or, for a non-AiiDA result, from the input/output bundle.
 
 ## Object references
 
@@ -949,41 +968,61 @@ method_family: enum
 method_modifiers: enum[]
 method_label: string
 charge: number
-path_method: enum
+mep_method: enum
+relative_energies_ev: float[] (eV, relative to the initial endpoint)
 forward_barrier_ev: float (eV)
+backward_barrier_ev: float (eV)
 converged: boolean
+number_of_images: integer
 ```
 
 ## Optional properties
 
 ```text
-backward_barrier_ev: float (eV)
-number_of_images: integer
+neb_variant: enum
+other_method_description: text
+collective_variables: text
+constraints_description: text
 reaction_coordinate_description: text
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
-## `path_method` vocabulary
+## `mep_method` vocabulary
 
 ```text
-CI-NEB
-dimer
-TS_search
-Constrained
+NEB
+REPLICA_CHAIN
+OTHER
 ```
+
+`neb_variant` is required when `mep_method = NEB`:
+
+```text
+NEB
+CI_NEB
+```
+
+`collective_variables` is required for `REPLICA_CHAIN` and records the
+definitions, targets, increments, and actual values when available.
+`other_method_description` is required for `OTHER`. Constraints are stored
+for both NEB and replica-chain calculations when present.
 
 ## Required linked content
 
 ```text
-parents: reactant ATOMISTIC_MODEL, product ATOMISTIC_MODEL
-optional children: transition_state ATOMISTIC_MODEL, optimized_path ATOMISTIC_MODEL[]
+parents: initial ATOMISTIC_MODEL, final ATOMISTIC_MODEL
+optional parent: preceding MINIMUM_ENERGY_PATH
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
 aiida_node: AIIDA_NODE, if AiiDA
 input_output_bundle: dataset, if non-AiiDA
 ```
+
+The `ELN_PREVIEW` is the final energy-profile plot. For an AiiDA-generated
+result it is proposed automatically and may be replaced by the user before
+export.
 
 ## Do not duplicate if `aiida_node` exists
 
@@ -1001,10 +1040,16 @@ occupations
 restart files
 stdout/stderr
 full path arrays
-full trajectory
 all intermediate geometries
 all force arrays
 ```
+
+## AiiDA mapping
+
+- `Cp2kReplicaWorkChain` → `mep_method = REPLICA_CHAIN`
+- `Cp2kNebWorkChain` → `mep_method = NEB`
+- A continuation is a new `MINIMUM_ENERGY_PATH`, linked to the preceding MEP.
+- A preceding geometry optimization remains a separate simulation/archive block.
 
 ---
 
@@ -1488,7 +1533,7 @@ GEOMETRY_OPTIMISATION
 BAND_STRUCTURE
 CHARGE_ANALYSIS
 DOS
-REACTION_BARRIER
+MINIMUM_ENERGY_PATH
 SPM_SIMULATION
 VIBRATIONAL_SPECTROSCOPY
 MOLECULAR_DYNAMICS
@@ -1537,7 +1582,7 @@ GEOMETRY_OPTIMISATION
 BAND_STRUCTURE
 CHARGE_ANALYSIS
 DOS
-REACTION_BARRIER
+MINIMUM_ENERGY_PATH
 SPM_SIMULATION
 VIBRATIONAL_SPECTROSCOPY
 MOLECULAR_DYNAMICS
@@ -1656,8 +1701,8 @@ simulation result that will be represented in openBIS. The user can review each
 suggestion and replace it with a dropped PNG or JPEG image before the export.
 The generated suggestion is used when no replacement is supplied.
 
-A simulation result is identified by `AIIDA_SOURCE_UUID` together with
-`AIIDA_RESULT_ROLE`. It is created at most once within an openBIS space. If the
+A simulation result is identified by its object type together with
+`AIIDA_SOURCE_UUID`. It is created at most once within an openBIS space. If the
 same result already exists elsewhere in the selected space, the app reuses it
 and links to its existing collection. Exporting the same AiiDA result to a
 different user space creates a separate simulation object there. Shared

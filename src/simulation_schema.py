@@ -29,7 +29,14 @@ IMMUTABLE_PROPERTY_MIGRATIONS = (
 )
 
 # Superseded empty types created before the canonical names were agreed.
-OBSOLETE_OBJECT_TYPES = ("GEOMETRY_OPTIMIZATION", "SPM")
+OBSOLETE_OBJECT_TYPES = (
+    "GEOMETRY_OPTIMIZATION",
+    "SPM",
+    # This pre-existing type uses "potential" where the scientific object is
+    # a path. REACTION_BARRIER is intentionally left untouched until its
+    # future scope (including free-energy/MD methods) is agreed.
+    "MINIMUM_ENERGY_POTENTIAL",
+)
 
 
 VOCABULARIES = {
@@ -58,11 +65,14 @@ VOCABULARIES = {
         ("INDIRECT", "indirect"),
         ("UNKNOWN", "unknown"),
     ],
-    "PATH_METHOD_ENUM": [
+    "MEP_METHOD_ENUM": [
+        ("NEB", "NEB"),
+        ("REPLICA_CHAIN", "Replica chain"),
+        ("OTHER", "Other"),
+    ],
+    "NEB_VARIANT_ENUM": [
+        ("NEB", "NEB"),
         ("CI_NEB", "CI-NEB"),
-        ("DIMER", "dimer"),
-        ("TS_SEARCH", "TS_search"),
-        ("CONSTRAINED", "Constrained"),
     ],
     "SPM_MODE_ENUM": [
         ("STM", "STM"),
@@ -155,7 +165,6 @@ PROPERTY_TYPES = {
             sample_type="AIIDA_NODE",
         ),
         prop("AIIDA_SOURCE_UUID", "AiiDA source UUID", "VARCHAR"),
-        prop("AIIDA_RESULT_ROLE", "AiiDA result role", "VARCHAR"),
         prop("CELL_OPTIMIZATION", "Cell optimization", "BOOLEAN"),
         prop("FINAL_ENERGY_HARTREE", "Final energy (Hartree)", "REAL"),
         prop(
@@ -187,14 +196,36 @@ PROPERTY_TYPES = {
         prop("ENERGY_MIN_EV", "Minimum energy (eV)", "REAL"),
         prop("ENERGY_MAX_EV", "Maximum energy (eV)", "REAL"),
         prop(
-            "PATH_METHOD",
-            "Path method",
+            "MEP_METHOD",
+            "MEP method",
             "CONTROLLEDVOCABULARY",
-            vocabulary="PATH_METHOD_ENUM",
+            vocabulary="MEP_METHOD_ENUM",
+        ),
+        prop(
+            "NEB_VARIANT",
+            "NEB variant",
+            "CONTROLLEDVOCABULARY",
+            vocabulary="NEB_VARIANT_ENUM",
+        ),
+        prop(
+            "OTHER_METHOD_DESCRIPTION",
+            "Other MEP method description",
+            "MULTILINE_VARCHAR",
+        ),
+        prop(
+            "RELATIVE_ENERGIES_EV",
+            "Relative energies (eV)",
+            "REAL",
+            multi_value=True,
         ),
         prop("FORWARD_BARRIER_EV", "Forward barrier (eV)", "REAL"),
         prop("BACKWARD_BARRIER_EV", "Backward barrier (eV)", "REAL"),
         prop("NUMBER_OF_IMAGES", "Number of images", "INTEGER"),
+        prop(
+            "COLLECTIVE_VARIABLES",
+            "Collective variables",
+            "MULTILINE_VARCHAR",
+        ),
         prop(
             "REACTION_COORDINATE_DESCRIPTION",
             "Reaction coordinate description",
@@ -261,7 +292,6 @@ PROVENANCE = [
     assignment("EXECUTABLES", False, "Provenance"),
     assignment("AIIDA_NODE", False, "Provenance"),
     assignment("AIIDA_SOURCE_UUID", False, "Provenance"),
-    assignment("AIIDA_RESULT_ROLE", False, "Provenance"),
 ]
 SPIN = [
     assignment("SPIN_MULTIPLICITY", False, "Electronic properties"),
@@ -368,18 +398,23 @@ OBJECT_TYPES = {
         + [assignment("COMMENTS", False, "General information")]
         + PROVENANCE,
     ),
-    "REACTION_BARRIER": object_type(
-        "BARRIER",
-        "Reaction-path and energy-barrier calculation.",
+    "MINIMUM_ENERGY_PATH": object_type(
+        "MEP",
+        "Minimum-energy path from NEB, a replica chain, or another specified method.",
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
             assignment("METHOD_LABEL", True, "Method"),
-            assignment("PATH_METHOD", True, "Method"),
+            assignment("MEP_METHOD", True, "Method"),
+            assignment("NEB_VARIANT", False, "Method"),
+            assignment("OTHER_METHOD_DESCRIPTION", False, "Method"),
+            assignment("RELATIVE_ENERGIES_EV", True, "Results"),
             assignment("FORWARD_BARRIER_EV", True, "Results"),
+            assignment("BACKWARD_BARRIER_EV", True, "Results"),
             assignment("CONVERGED", True, "Results"),
-            assignment("BACKWARD_BARRIER_EV", False, "Results"),
-            assignment("NUMBER_OF_IMAGES", False, "Results"),
+            assignment("NUMBER_OF_IMAGES", True, "Results"),
+            assignment("COLLECTIVE_VARIABLES", False, "Path definition"),
+            assignment("CONSTRAINTS_DESCRIPTION", False, "Path definition"),
             assignment("REACTION_COORDINATE_DESCRIPTION", False, "General information"),
         ]
         + SPIN

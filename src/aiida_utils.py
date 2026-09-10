@@ -288,11 +288,34 @@ def get_all_preceding_main_workchains(node_uuid):
         for input_link in n.base.links.get_incoming().all():
             trace_back_main_workchains(input_link.node)
 
+        # CP2K path continuations identify the previous path WorkChain through
+        # a UUID-valued input rather than a provenance link. Include it so a
+        # continued MEP exports/imports as a new block linked to its predecessor.
+        if getattr(n, "process_label", "") in {
+            "Cp2kNebWorkChain",
+            "Cp2kReplicaWorkChain",
+        }:
+            try:
+                restart_from = getattr(n.inputs, "restart_from")
+                restart_uuid = getattr(restart_from, "value", restart_from)
+                if restart_uuid:
+                    trace_back_main_workchains(orm.load_node(str(restart_uuid)))
+            except (AttributeError, NotExistentAttributeError, TypeError, ValueError):
+                pass
     # Start tracing back from the given node
     trace_back_main_workchains(node)
 
-    # Return the PKs of all unique MAIN workchains found
-    return [wc.uuid for wc in main_workchains]
+    # A set made the archive/export order unpredictable. Creation time gives
+    # the predecessor-first order required by linked scientific results.
+    ordered = sorted(
+        main_workchains,
+        key=lambda wc: (
+            str(getattr(wc, "ctime", "")),
+            int(getattr(wc, "pk", 0) or 0),
+            str(wc.uuid),
+        ),
+    )
+    return [wc.uuid for wc in ordered]
 
 
 def get_qe_output_parameters(outputs):
@@ -697,8 +720,12 @@ def record_openbis_exports(openbis_session, openbis_objects, collection=""):
     """Cache verified openBIS result links on their concrete AiiDA source nodes."""
     server = str(getattr(openbis_session, "url", "") or "")
     for openbis_object in normalize_exported_objects(openbis_objects):
-        source_uuid = _openbis_property(openbis_object, "aiida_source_uuid")
-        role = _openbis_property(openbis_object, "aiida_result_role")
+        source_uuid = getattr(openbis_object, "_aiidalab_source_uuid", None)
+        if not source_uuid:
+            source_uuid = _openbis_property(openbis_object, "aiida_source_uuid")
+        role = getattr(openbis_object, "_aiidalab_result_role", None)
+        if not role:
+            role = _openbis_type_code(openbis_object).lower()
         if not source_uuid or not role:
             continue
         try:
@@ -1217,27 +1244,44 @@ def _method_modifiers(dft_parameters):
     if float(dft_parameters.get("hfx_fraction", 0.0)) > 0.0 or any(
         label in xc for label in ("PBE0", "HSE", "B3LYP", "HYBRID")
     ):
-        modifiers.append("hybrid")
+        modifiers.append("HYBRID")
     vdw = str(dft_parameters.get("vdw_corr", "")).strip().lower()
     if vdw not in {"", "0", "false", "no", "none"}:
-        modifiers.append("vdW")
+        modifiers.append("VDW")
     if dft_parameters.get("plus_u"):
-        modifiers.append("DFT+U")
+        modifiers.append("DFT_U")
     if dft_parameters.get("spin_orbit_coupling"):
-        modifiers.append("spin_orbit")
+        modifiers.append("SPIN_ORBIT")
     if dft_parameters.get("non_collinear"):
-        modifiers.append("spin_non_collinear")
+        modifiers.append("SPIN_NON_COLLINEAR")
     elif dft_parameters.get("uks"):
-        modifiers.append("spin_collinear")
+        modifiers.append("SPIN_COLLINEAR")
     return modifiers
 
 
-def _workchain_name(workchain, prefix):
+def _workchain_description(workchain):
+    """Return the user-authored description associated with a workflow."""
     description = getattr(workchain, "description", "")
     if not description:
         caller = getattr(workchain, "caller", None)
         description = getattr(caller, "description", "") if caller else ""
+    return str(description or "").strip()
+
+
+def _workchain_name(workchain, prefix):
+    description = _workchain_description(workchain)
     suffix = description[:80] if description else str(workchain.uuid)[:8]
+    formula = None
+    try:
+        structure = workchain.inputs.structure
+        formula = structure.get_formula()
+    except (AttributeError, NotExistentAttributeError):
+        try:
+            formula = structure.get_ase().get_chemical_formula()
+        except (AttributeError, UnboundLocalError):
+            pass
+    if formula:
+        return f"{prefix} {formula} - {suffix}"
     return f"{prefix} - {suffix}"
 
 
@@ -1258,9 +1302,12 @@ def _simulation_properties(
         "converged": bool(getattr(workchain, "is_finished_ok", True)),
         "aiida_node": aiida_node_id,
         "aiida_source_uuid": str(workchain.uuid),
-        "aiida_result_role": result_role
+        "_aiidalab_result_role": result_role
         or re.sub(r"[^a-z0-9]+", "_", prefix.lower()).strip("_"),
     }
+    description = _workchain_description(workchain)
+    if description:
+        properties["comments"] = description
     if method_label:
         properties["method_label"] = str(dft_parameters.get("xc_functional", "unknown"))
     if executable_ids is not None:
@@ -1276,6 +1323,418 @@ def _fermi_energy(output_parameters):
     if value is None:
         return None
     return [float(value)]
+
+
+def _input_value(workchain, label, default=None):
+    """Return the plain value of an optional AiiDA input."""
+    try:
+        value = getattr(workchain.inputs, label)
+    except (AttributeError, NotExistentAttributeError):
+        return default
+    return getattr(value, "value", value)
+
+
+def _repository_text(data_node, filename):
+    """Read a UTF-8 text file from an AiiDA repository node."""
+    with data_node.base.repository.open(filename, mode="r") as handle:
+        return handle.read()
+
+
+def _cp2k_scf_output_text(workchain):
+    """Return the final CP2K stdout retained by a Cp2kScfWorkChain."""
+    for label in ("retrieved", "ot_retrieved"):
+        retrieved = _get_optional_output(workchain.outputs, label)
+        if retrieved is None:
+            continue
+        try:
+            return _repository_text(retrieved, "aiida.out")
+        except (FileNotFoundError, OSError):
+            continue
+    return ""
+
+
+def _cp2k_fermi_energies(output_parameters, output_text):
+    """Extract the final printed CP2K Fermi energy for each spin channel."""
+    values = []
+    for line in output_text.splitlines():
+        if "fermi energy" not in line.lower() or "ev" not in line.lower():
+            continue
+        match = re.search(
+            r"Fermi\s+Energy.*?\[eV\]\s*[:=]\s*"
+            r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?)",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            values.append(float(match.group(1)))
+
+    if values:
+        number_of_spins = (
+            2 if str(output_parameters.get("dft_type", "")).upper() == "UKS" else 1
+        )
+        return values[-number_of_spins:]
+    return _fermi_energy(output_parameters)
+
+
+def _cp2k_electronic_gaps(output_parameters):
+    """Return one RKS gap or the two UKS gaps in eV when available."""
+    is_uks = str(output_parameters.get("dft_type", "")).upper() == "UKS"
+    spin_channels = (1, 2) if is_uks else (1,)
+    gaps = []
+    for spin in spin_channels:
+        value = output_parameters.get(f"printed_bandgap_spin{spin}_ev")
+        if value is None:
+            value = output_parameters.get(f"bandgap_spin{spin}_au")
+            if value is not None:
+                value = float(value) * Hartree
+        if value is not None:
+            gaps.append(float(value))
+    return gaps or None
+
+
+def _cp2k_charge_analysis_methods(workchain, output_text=None):
+    """Report only charge analyses that are demonstrably present in the archive."""
+    output_text = (
+        _cp2k_scf_output_text(workchain) if output_text is None else output_text
+    )
+    methods = []
+    markers = (
+        ("mulliken population analysis", "Mulliken"),
+        ("hirshfeld charges", "Hirshfeld"),
+        ("lowdin population analysis", "Löwdin"),
+    )
+    lower_text = output_text.lower()
+    for marker, method in markers:
+        if marker in lower_text:
+            methods.append(method)
+
+    bader = _get_optional_output(workchain.outputs, "bader_retrieved")
+    if bader is not None:
+        try:
+            names = bader.base.repository.list_object_names()
+        except (AttributeError, OSError):
+            names = []
+        if "ACF.dat" in names:
+            methods.append("Bader")
+    return methods
+
+
+def _scf_executable_ids(workchain, executable_ids, purpose):
+    """Select the executables participating in one SCF-derived result."""
+    if executable_ids is None:
+        return None
+    executable_ids = list(executable_ids)
+    pairs = list(zip(_workchain_codes(workchain), executable_ids))
+    if not pairs:
+        return executable_ids
+
+    def code_name(code):
+        return f"{getattr(code, 'label', '')} {getattr(code, 'full_label', '')}".lower()
+
+    cp2k = [permid for code, permid in pairs if "cp2k" in code_name(code)]
+    if purpose == "energy":
+        return cp2k or executable_ids
+    if purpose == "charge":
+        bader = [permid for code, permid in pairs if "bader" in code_name(code)]
+        return list(dict.fromkeys((cp2k or executable_ids) + bader))
+    if purpose == "unfolding":
+        unfolding = [
+            permid
+            for code, permid in pairs
+            if "unfold" in code_name(code) or "bandup" in code_name(code)
+        ]
+        return list(dict.fromkeys((cp2k or executable_ids) + unfolding))
+    return executable_ids
+
+
+def _cp2k_scf_property_definitions(
+    workchain, aiida_node_id=None, executable_ids=None
+):
+    """Build schema properties for all scientific results of a CP2K SCF block."""
+    dft_parameters = get_dft_parameters_cp2k(
+        workchain.inputs.cp2k_code.description,
+        workchain.inputs.dft_params.get_dict(),
+    )
+    output_parameters = workchain.outputs.output_parameters.get_dict()
+    output_text = _cp2k_scf_output_text(workchain)
+    fermi_energies = _cp2k_fermi_energies(output_parameters, output_text)
+    electronic_gaps = _cp2k_electronic_gaps(output_parameters)
+    scf_steps = output_parameters.get("motion_step_info", {}).get(
+        "scf_converged", []
+    )
+    converged = bool(getattr(workchain, "is_finished_ok", True)) and (
+        not scf_steps or bool(scf_steps[-1])
+    )
+
+    energy = _simulation_properties(
+        workchain,
+        "Energy calculation",
+        dft_parameters,
+        aiida_node_id,
+        method_label=False,
+        executable_ids=_scf_executable_ids(workchain, executable_ids, "energy"),
+        result_role="energy_calculation",
+    )
+    energy.update(
+        {
+            "total_energy_hartree": _energy_in_hartree(output_parameters),
+            "converged": converged,
+        }
+    )
+    if fermi_energies is not None:
+        energy["fermi_energy_ev"] = fermi_energies
+    if electronic_gaps is not None:
+        energy["electronic_gap_ev"] = electronic_gaps
+
+    definitions = {
+        "energy_calculation": {
+            "object_type": OPENBIS_SIMULATION_TYPES["Energy Calculation"],
+            "properties": energy,
+        }
+    }
+
+    charge_methods = _cp2k_charge_analysis_methods(workchain, output_text)
+    if charge_methods:
+        charge = _simulation_properties(
+            workchain,
+            "Charge analysis",
+            dft_parameters,
+            aiida_node_id,
+            executable_ids=_scf_executable_ids(workchain, executable_ids, "charge"),
+            result_role="charge_analysis",
+        )
+        charge.update(
+            {
+                "charge_analysis_method": "; ".join(charge_methods),
+                "converged": converged,
+            }
+        )
+        if fermi_energies is not None:
+            charge["fermi_energy_ev"] = fermi_energies
+        if electronic_gaps is not None:
+            charge["electronic_gap_ev"] = electronic_gaps
+        definitions["charge_analysis"] = {
+            "object_type": OPENBIS_SIMULATION_TYPES["Charge Analysis"],
+            "properties": charge,
+        }
+
+    unfolding = _get_optional_output(workchain.outputs, "unfolding_retrieved")
+    if unfolding is not None:
+        band = _simulation_properties(
+            workchain,
+            "Band unfolding",
+            dft_parameters,
+            aiida_node_id,
+            executable_ids=_scf_executable_ids(
+                workchain, executable_ids, "unfolding"
+            ),
+            result_role="band_unfolding",
+        )
+        band.update(
+            {
+                "band_gap_ev": min(electronic_gaps or [0.0]),
+                "electronic_gap_type": "unknown",
+                "converged": converged,
+            }
+        )
+        if fermi_energies is not None:
+            band["fermi_energy_ev"] = fermi_energies
+        k_path = _input_value(workchain, "unfolding_path")
+        if k_path:
+            band["k_path"] = str(k_path)
+        definitions["band_unfolding"] = {
+            "object_type": OPENBIS_SIMULATION_TYPES["Band Structure"],
+            "properties": band,
+        }
+
+    return definitions
+
+
+def _namespace_items(namespace):
+    """Return dynamic AiiDA namespace items, including simple test doubles."""
+    if namespace is None:
+        return []
+    items = getattr(namespace, "items", None)
+    if callable(items):
+        return list(items())
+    return list(vars(namespace).items())
+
+
+def _ordered_namespace_nodes(namespace, prefixes=()):
+    items = _namespace_items(namespace)
+    if prefixes:
+        items = [
+            (label, node)
+            for label, node in items
+            if any(str(label).startswith(prefix) for prefix in prefixes)
+        ]
+    return [node for _label, node in sorted(items, key=lambda item: str(item[0]))]
+
+
+def _replica_chain_profile(workchain):
+    """Return path energies, CV values, and endpoint structures."""
+    details = _get_optional_output(workchain.outputs, "details")
+    detail_items = _namespace_items(details)
+    detail_items.sort(
+        key=lambda item: (
+            0 if str(item[0]) == "initial_scf" else 1,
+            str(item[0]),
+        )
+    )
+    energies_hartree = []
+    actual_values = []
+    for _label, detail_node in detail_items:
+        detail = detail_node.get_dict()
+        parameters = detail.get("output_parameters", {})
+        energy = parameters.get("energy_scf", parameters.get("energy"))
+        if energy is None:
+            raise ValueError("A replica-chain step has no electronic energy.")
+        energies_hartree.append(
+            _energy_in_hartree(
+                {
+                    "energy": energy,
+                    "energy_units": parameters.get("energy_units", "a.u."),
+                }
+            )
+        )
+        actual_values.append(list(detail.get("cvs_actual", [])))
+
+    structures = _ordered_namespace_nodes(
+        _get_optional_output(workchain.outputs, "structures"),
+        prefixes=("initial_scf", "step_"),
+    )
+    if len(energies_hartree) < 2 or len(structures) < 2:
+        raise ValueError("A replica chain requires at least two path images.")
+    relative_energies = (
+        (np.asarray(energies_hartree, dtype=float) - energies_hartree[0]) * Hartree
+    )
+    return relative_energies, actual_values, structures[0], structures[-1]
+
+
+def _neb_input_endpoints(workchain):
+    """Return the structures defining the initial and final NEB endpoints."""
+    restart_uuid = _input_value(workchain, "restart_from")
+    if restart_uuid:
+        previous = orm.load_node(str(restart_uuid))
+        replicas = _ordered_namespace_nodes(
+            previous.outputs, prefixes=("opt_replica_",)
+        )
+        if len(replicas) >= 2:
+            return replicas[0], replicas[-1]
+
+    replicas = _ordered_namespace_nodes(
+        _get_optional_output(workchain.inputs, "replicas"),
+        prefixes=("replica_",),
+    )
+    if not replicas:
+        raise ValueError("The NEB workflow has no final input endpoint.")
+    return workchain.inputs.structure, replicas[-1]
+
+
+def _neb_profile(workchain):
+    """Return the last complete NEB energy profile and reaction coordinates."""
+    energies = np.asarray(
+        workchain.outputs.replica_energies.get_array("energies"), dtype=float
+    )
+    if energies.ndim == 2:
+        energies = energies[-1]
+    if energies.ndim != 1 or len(energies) < 2:
+        raise ValueError("The NEB result has no complete energy profile.")
+    relative_energies = (energies - energies[0]) * Hartree
+
+    coordinates = None
+    distances_node = _get_optional_output(workchain.outputs, "replica_distances")
+    if distances_node is not None:
+        distances = np.asarray(distances_node.get_array("distances"), dtype=float)
+        if distances.ndim == 2:
+            distances = distances[-1]
+        if distances.ndim == 1 and len(distances) == len(energies):
+            coordinates = np.cumsum(distances) * Bohr
+    return relative_energies, coordinates
+
+
+def _collective_variables_description(system_parameters, actual_values=None):
+    definition = str(system_parameters.get("colvars", "") or "").strip()
+    targets = system_parameters.get("colvars_targets")
+    increments = system_parameters.get("colvars_increments")
+    if not definition and targets is None and increments is None and not actual_values:
+        return ""
+    content = {}
+    if definition:
+        content["definitions"] = definition
+    if targets is not None:
+        content["targets"] = list(targets)
+    if increments is not None:
+        content["increments"] = list(increments)
+    if actual_values:
+        content["actual_values"] = actual_values
+    return json.dumps(content, indent=2)
+
+
+def _cp2k_mep_property_definition(
+    workchain, aiida_node_id=None, executable_ids=None
+):
+    """Build MINIMUM_ENERGY_PATH properties for CP2K path workflows."""
+    dft_parameters = get_dft_parameters_cp2k(
+        workchain.inputs.code.description,
+        workchain.inputs.dft_params.get_dict(),
+    )
+    system_parameters = workchain.inputs.sys_params.get_dict()
+    properties = _simulation_properties(
+        workchain,
+        "Minimum energy path",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+        result_role="minimum_energy_path",
+    )
+
+    if workchain.process_label == "Cp2kReplicaWorkChain":
+        energies, actual_values, _start, _end = _replica_chain_profile(workchain)
+        properties["mep_method"] = "REPLICA_CHAIN"
+        collective_variables = _collective_variables_description(
+            system_parameters, actual_values
+        )
+        if collective_variables:
+            properties["collective_variables"] = collective_variables
+            properties["reaction_coordinate_description"] = str(
+                system_parameters.get("colvars", "")
+            ).strip()
+    elif workchain.process_label == "Cp2kNebWorkChain":
+        energies, _coordinates = _neb_profile(workchain)
+        properties["mep_method"] = "NEB"
+        band_type = str(workchain.inputs.neb_params.get_dict().get("band_type", "NEB"))
+        normalized = re.sub(r"[^A-Z0-9]+", "_", band_type.upper()).strip("_")
+        properties["neb_variant"] = "CI_NEB" if normalized == "CI_NEB" else "NEB"
+        collective_variables = _collective_variables_description(system_parameters)
+        if collective_variables:
+            properties["collective_variables"] = collective_variables
+    else:
+        raise ValueError(
+            f"Unsupported minimum-energy-path workflow: {workchain.process_label}"
+        )
+
+    maximum = float(np.max(energies))
+    properties.update(
+        {
+            "relative_energies_ev": [float(value) for value in energies],
+            "forward_barrier_ev": maximum - float(energies[0]),
+            "backward_barrier_ev": maximum - float(energies[-1]),
+            "number_of_images": int(len(energies)),
+            # Some accepted CP2K NEB runs currently terminate externally after
+            # writing a usable final profile. Preserve the WorkChain decision.
+            "converged": bool(getattr(workchain, "is_finished_ok", True)),
+        }
+    )
+    constraints = str(system_parameters.get("constraints", "") or "").strip()
+    if constraints:
+        properties["constraints_description"] = constraints
+    return {
+        "minimum_energy_path": {
+            "object_type": OPENBIS_SIMULATION_TYPES["Minimum Energy Path"],
+            "properties": properties,
+        }
+    }
 
 
 def _attach_parent(openbis_object, parent):
@@ -1359,6 +1818,102 @@ def _render_xy_preview(xy_node, path, title, x_label=None, y_label=None):
     axis.set_title(title)
     if len(curves) > 1:
         axis.legend(fontsize="small")
+    figure.savefig(path, dpi=160)
+
+
+def _render_mep_preview(workchain, path):
+    """Render the final minimum-energy path suggested for the ELN preview."""
+    from matplotlib.figure import Figure
+
+    if workchain.process_label == "Cp2kReplicaWorkChain":
+        energies, actual_values, _start, _end = _replica_chain_profile(workchain)
+        if actual_values and all(len(values) == 1 for values in actual_values):
+            coordinates = np.asarray([values[0] for values in actual_values])
+            x_label = "Collective variable"
+        else:
+            coordinates = np.arange(len(energies))
+            x_label = "Path image"
+    else:
+        energies, coordinates = _neb_profile(workchain)
+        if coordinates is None or not np.any(np.diff(coordinates)):
+            coordinates = np.arange(len(energies))
+            x_label = "Path image"
+        else:
+            x_label = "Cumulative path distance (angstrom)"
+
+    figure = Figure(figsize=(7, 4.5), constrained_layout=True)
+    axis = figure.subplots()
+    axis.plot(coordinates, energies, "o-", color="#1f77b4")
+    maximum_index = int(np.argmax(energies))
+    axis.scatter(
+        [coordinates[maximum_index]],
+        [energies[maximum_index]],
+        color="#d62728",
+        zorder=3,
+        label="Maximum",
+    )
+    axis.set_xlabel(x_label)
+    axis.set_ylabel("Relative energy (eV)")
+    axis.set_title("Minimum energy path")
+    axis.legend()
+    figure.savefig(path, dpi=160)
+
+
+def _render_unfolding_preview(workchain, path):
+    """Render the compact unfolded-band view stored by Cp2kScfWorkChain."""
+    from matplotlib.figure import Figure
+
+    retrieved = workchain.outputs.unfolding_retrieved
+    with retrieved.base.repository.open("unfolding_bands.npz", mode="rb") as handle:
+        with np.load(handle, allow_pickle=True) as archive:
+            data = {key: archive[key] for key in archive.files}
+
+    path_indices = np.asarray(data["path_k_indices"], dtype=int)
+    path_x = np.asarray(data["path_x"], dtype=float)
+    reference = float(data["ref_energy_ev"])
+    spin_indices = sorted(
+        int(key.rsplit("_", 1)[-1])
+        for key in data
+        if key.startswith("weights_spin_")
+    )
+    if not spin_indices:
+        raise ValueError("The unfolding archive contains no spectral weights.")
+
+    figure = Figure(figsize=(7, 4.5), constrained_layout=True)
+    axis = figure.subplots()
+    plotted_energies = []
+    for spin in spin_indices:
+        energies = np.asarray(data[f"evals_ev_spin_{spin}"], dtype=float) - reference
+        weights = np.asarray(data[f"weights_spin_{spin}"], dtype=float)
+        for k_index, x_value in zip(path_indices, path_x):
+            sizes = 150.0 * np.maximum(weights[k_index], 0.0)
+            mask = sizes > 1.0e-8
+            axis.scatter(
+                np.full(np.count_nonzero(mask), x_value),
+                energies[mask],
+                s=sizes[mask],
+                alpha=0.65,
+                color="black",
+            )
+            plotted_energies.extend(energies[mask].tolist())
+
+    x_ticks = np.asarray(data["x_ticks"], dtype=float)
+    x_labels = [str(label) for label in data["x_tick_labels"]]
+    for x_tick in x_ticks:
+        axis.axvline(x_tick, linewidth=0.8, alpha=0.35)
+    axis.axhline(0.0, linestyle="--", linewidth=1.0)
+    axis.set_xticks(x_ticks)
+    axis.set_xticklabels(x_labels)
+    axis.set_xlim(x_ticks[0], x_ticks[-1])
+    if plotted_energies:
+        low, high = np.percentile(plotted_energies, [2.0, 98.0])
+        low = max(float(low), -15.0)
+        high = min(float(high), 15.0)
+        if low < high:
+            axis.set_ylim(low, high)
+    axis.set_xlabel("Primitive-cell k-path")
+    axis.set_ylabel("Energy - reference (eV)")
+    axis.set_title("Unfolded band structure")
     figure.savefig(path, dpi=160)
 
 
@@ -1458,11 +2013,47 @@ def _preview_override(preview_overrides, workchain, result_role):
     return preview_overrides.get(f"{workchain.uuid}:{result_role}")
 
 
-def _mark_export_result(openbis_object, created):
+def _apply_property_overrides(properties, property_overrides, workchain, result_role):
+    """Apply reviewed user values without allowing provenance fields to change."""
+    if not property_overrides:
+        return properties
+    reviewed = property_overrides.get(f"{workchain.uuid}:{result_role}", {})
+    protected = {
+        "aiida_node",
+        "aiida_source_uuid",
+        "_aiidalab_result_role",
+        "executables",
+    }
+    properties = dict(properties)
+    for code, value in reviewed.items():
+        code = str(code).lower()
+        if code in protected:
+            continue
+        if value is None:
+            properties.pop(code, None)
+        else:
+            properties[code] = value
+    return properties
+
+
+def _mark_export_result(
+    openbis_object,
+    created,
+    source_uuid=None,
+    result_role=None,
+):
     # pyBIS entities treat normal attribute assignment as a server-attribute
     # update and reject private names. Bypassing pyBIS __setattr__ stores this
     # transient UI marker only on the local Python object.
     object.__setattr__(openbis_object, "_aiidalab_created", bool(created))
+    if source_uuid:
+        object.__setattr__(
+            openbis_object, "_aiidalab_source_uuid", str(source_uuid)
+        )
+    if result_role:
+        object.__setattr__(
+            openbis_object, "_aiidalab_result_role", str(result_role)
+        )
     return openbis_object
 
 
@@ -1494,10 +2085,10 @@ def _create_simulation_object(
     preview_stem,
     preview_override=None,
 ):
-    identity = {
-        "AIIDA_SOURCE_UUID": properties.get("aiida_source_uuid"),
-        "AIIDA_RESULT_ROLE": properties.get("aiida_result_role"),
-    }
+    properties = dict(properties)
+    result_role = properties.pop("_aiidalab_result_role", None)
+    source_uuid = properties.get("aiida_source_uuid")
+    identity = {"AIIDA_SOURCE_UUID": source_uuid}
     if all(identity.values()):
         # Experiment dropdowns expose permIDs, while pyBIS space searches need
         # the actual space code. Passing an experiment permID as ``space`` makes
@@ -1512,7 +2103,12 @@ def _create_simulation_object(
             or []
         )
         if existing:
-            return _mark_export_result(existing[0], created=False)
+            return _mark_export_result(
+                existing[0],
+                created=False,
+                source_uuid=source_uuid,
+                result_role=result_role,
+            )
 
     openbis_object = utils.create_openbis_object(
         openbis_session,
@@ -1521,7 +2117,12 @@ def _create_simulation_object(
         collection=experiment_id,
         parents=parents,
     )
-    _mark_export_result(openbis_object, created=True)
+    _mark_export_result(
+        openbis_object,
+        created=True,
+        source_uuid=source_uuid,
+        result_role=result_role,
+    )
     _upload_preview_content(
         openbis_session,
         openbis_object,
@@ -1546,19 +2147,16 @@ def _qe_dft_from_calculation(calculation):
     }
 
 
-def _create_band_and_dos_objects(
-    openbis_session,
-    experiment_id,
+def _band_and_dos_properties(
     workchain,
     dft_parameters,
     output_parameters,
     bands_node,
-    dos_node,
-    structure_object,
     aiida_node_id,
     executable_ids,
-    preview_overrides=None,
+    projection_description,
 ):
+    """Build the shared BAND_STRUCTURE and DOS property dictionaries."""
     electron_count = output_parameters.get("number_of_electrons")
     if electron_count is None:
         raise ValueError("The workflow output does not contain number_of_electrons.")
@@ -1571,10 +2169,52 @@ def _create_band_and_dos_objects(
         executable_ids=executable_ids,
     )
     band_properties["band_gap_ev"] = float(0.0 if gap is None else gap)
+
+    dos_properties = _simulation_properties(
+        workchain,
+        "PDOS",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    dos_properties.update(
+        {"pdos": True, "projection_description": projection_description}
+    )
     fermi = _fermi_energy(output_parameters)
     if fermi is not None:
         band_properties["fermi_energy_ev"] = fermi
+        dos_properties["fermi_energy_ev"] = fermi
+    return band_properties, dos_properties
 
+
+def _create_band_and_dos_objects(
+    openbis_session,
+    experiment_id,
+    workchain,
+    dft_parameters,
+    output_parameters,
+    bands_node,
+    dos_node,
+    structure_object,
+    aiida_node_id,
+    executable_ids,
+    preview_overrides=None,
+    property_overrides=None,
+):
+    band_properties, dos_properties = _band_and_dos_properties(
+        workchain,
+        dft_parameters,
+        output_parameters,
+        bands_node,
+        aiida_node_id,
+        executable_ids,
+        "Orbital-projected density of states generated from the AiiDA workflow. "
+        "Full arrays are stored in the linked AiiDA archive.",
+    )
+
+    band_properties = _apply_property_overrides(
+        band_properties, property_overrides, workchain, "bands"
+    )
     bands_object = _create_simulation_object(
         openbis_session,
         experiment_id,
@@ -1588,24 +2228,9 @@ def _create_band_and_dos_objects(
         preview_override=_preview_override(preview_overrides, workchain, "bands"),
     )
 
-    dos_properties = _simulation_properties(
-        workchain,
-        "PDOS",
-        dft_parameters,
-        aiida_node_id,
-        executable_ids=executable_ids,
+    dos_properties = _apply_property_overrides(
+        dos_properties, property_overrides, workchain, "pdos"
     )
-    dos_properties.update(
-        {
-            "pdos": True,
-            "projection_description": (
-                "Orbital-projected density of states generated from the AiiDA "
-                "workflow. Full arrays are stored in the linked AiiDA archive."
-            ),
-        }
-    )
-    if fermi is not None:
-        dos_properties["fermi_energy_ev"] = fermi
     dos_object = _create_simulation_object(
         openbis_session,
         experiment_id,
@@ -1627,6 +2252,7 @@ def NanoribbonWorkChain_export(
     aiida_node_id,
     executable_ids=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     """Export a nanoribbon workflow using the simplified simulation schema."""
     workchain = orm.load_node(workchain_uuid)
@@ -1664,6 +2290,7 @@ def NanoribbonWorkChain_export(
         aiida_node_id,
         executable_ids,
         preview_overrides=preview_overrides,
+        property_overrides=property_overrides,
     )
 
     geometry_object = None
@@ -1689,6 +2316,9 @@ def NanoribbonWorkChain_export(
         )
         if cell_dofree:
             properties["cell_constraints"] = str(cell_dofree)
+        properties = _apply_property_overrides(
+            properties, property_overrides, workchain, "geometry_optimization"
+        )
         input_structure_object = structure_to_atomistic_model(
             openbis_session, workchain.inputs.structure.uuid, uuids
         )
@@ -1720,6 +2350,7 @@ def PwRelaxWorkChain_export(
     aiida_node_id,
     executable_ids=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
@@ -1750,6 +2381,9 @@ def PwRelaxWorkChain_export(
     if cell_constraints:
         properties["cell_constraints"] = str(cell_constraints)
 
+    properties = _apply_property_overrides(
+        properties, property_overrides, workchain, "geometry_optimization"
+    )
     input_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
     )
@@ -1784,6 +2418,7 @@ def BandsWorkChain_export(
     aiida_node_id,
     executable_ids=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
@@ -1812,6 +2447,7 @@ def BandsWorkChain_export(
         aiida_node_id,
         executable_ids,
         preview_overrides=preview_overrides,
+        property_overrides=property_overrides,
     )
 
 
@@ -1823,6 +2459,7 @@ def PdosWorkChain_export(
     aiida_node_id,
     executable_ids=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
@@ -1851,6 +2488,9 @@ def PdosWorkChain_export(
     fermi = _fermi_energy(output_parameters)
     if fermi is not None:
         properties["fermi_energy_ev"] = fermi
+    properties = _apply_property_overrides(
+        properties, property_overrides, workchain, "pdos"
+    )
     pdos_node = workchain.outputs.projwfc.Dos
     return _create_simulation_object(
         openbis_session,
@@ -1872,6 +2512,7 @@ def VibroWorkChain_export(
     aiida_node_id,
     executable_ids=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
@@ -1895,7 +2536,10 @@ def VibroWorkChain_export(
         aiida_node_id,
         executable_ids=executable_ids,
     )
-    properties["vibrational_mode"] = "Phonons"
+    properties["vibrational_mode"] = "PHONONS"
+    properties = _apply_property_overrides(
+        properties, property_overrides, workchain, "vibrational_spectroscopy"
+    )
     structure_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
     )
@@ -1931,6 +2575,7 @@ def Cp2kGeoOptWorkChain_export(
     aiida_node_id,
     executable_ids=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
@@ -1969,6 +2614,9 @@ def Cp2kGeoOptWorkChain_export(
     if motion.get("step"):
         properties["number_of_steps"] = int(motion["step"][-1])
 
+    properties = _apply_property_overrides(
+        properties, property_overrides, workchain, "geometry_optimization"
+    )
     input_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
     )
@@ -1995,6 +2643,179 @@ def Cp2kGeoOptWorkChain_export(
     return geometry_object
 
 
+def Cp2kScfWorkChain_export(
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
+    preview_overrides=None,
+    property_overrides=None,
+):
+    """Export an SCF block and its optional charge/unfolding scientific results."""
+    workchain = orm.load_node(workchain_uuid)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
+    definitions = _cp2k_scf_property_definitions(
+        workchain,
+        aiida_node_id=aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    structure_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
+    )
+
+    energy_properties = _apply_property_overrides(
+        definitions["energy_calculation"]["properties"],
+        property_overrides,
+        workchain,
+        "energy_calculation",
+    )
+    energy_object = _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["Energy Calculation"],
+        energy_properties,
+        [structure_object],
+        lambda path: _render_structure_preview(workchain.inputs.structure, path),
+        "energy_calculation",
+        preview_override=_preview_override(
+            preview_overrides, workchain, "energy_calculation"
+        ),
+    )
+    exported_objects = [energy_object]
+
+    if "charge_analysis" in definitions:
+        charge_properties = _apply_property_overrides(
+            definitions["charge_analysis"]["properties"],
+            property_overrides,
+            workchain,
+            "charge_analysis",
+        )
+        charge_object = _create_simulation_object(
+            openbis_session,
+            experiment_id,
+            OPENBIS_SIMULATION_TYPES["Charge Analysis"],
+            charge_properties,
+            [structure_object, energy_object],
+            lambda path: _render_structure_preview(workchain.inputs.structure, path),
+            "charge_analysis",
+            preview_override=_preview_override(
+                preview_overrides, workchain, "charge_analysis"
+            ),
+        )
+        exported_objects.append(charge_object)
+
+    if "band_unfolding" in definitions:
+        band_properties = _apply_property_overrides(
+            definitions["band_unfolding"]["properties"],
+            property_overrides,
+            workchain,
+            "band_unfolding",
+        )
+        band_object = _create_simulation_object(
+            openbis_session,
+            experiment_id,
+            OPENBIS_SIMULATION_TYPES["Band Structure"],
+            band_properties,
+            [structure_object],
+            lambda path: _render_unfolding_preview(workchain, path),
+            "band_unfolding",
+            preview_override=_preview_override(
+                preview_overrides, workchain, "band_unfolding"
+            ),
+        )
+        exported_objects.append(band_object)
+
+    return tuple(exported_objects)
+
+
+def _preceding_mep_objects(openbis_session, experiment_id, workchain):
+    """Return already exported MEP blocks represented in this provenance chain."""
+    target_space = _collection_space_code(openbis_session, experiment_id)
+    objects = []
+    seen = set()
+    for preceding_uuid in get_all_preceding_main_workchains(workchain.uuid):
+        if str(preceding_uuid) == str(workchain.uuid):
+            continue
+        preceding = orm.load_node(preceding_uuid)
+        if preceding.process_label not in {
+            "Cp2kReplicaWorkChain",
+            "Cp2kNebWorkChain",
+        }:
+            continue
+        matches = list(
+            openbis_session.get_objects(
+                type=OPENBIS_SIMULATION_TYPES["Minimum Energy Path"],
+                space=target_space,
+                where={
+                    "AIIDA_SOURCE_UUID": str(preceding.uuid),
+                },
+            )
+            or []
+        )
+        for match in matches:
+            permid = str(match.permId)
+            if permid not in seen:
+                objects.append(match)
+                seen.add(permid)
+    return objects
+
+
+def Cp2kMepWorkChain_export(
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
+    preview_overrides=None,
+    property_overrides=None,
+):
+    """Export a replica-chain or NEB WorkChain as one minimum-energy path."""
+    workchain = orm.load_node(workchain_uuid)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
+    definition = _cp2k_mep_property_definition(
+        workchain,
+        aiida_node_id=aiida_node_id,
+        executable_ids=executable_ids,
+    )["minimum_energy_path"]
+    properties = _apply_property_overrides(
+        definition["properties"],
+        property_overrides,
+        workchain,
+        "minimum_energy_path",
+    )
+    if workchain.process_label == "Cp2kReplicaWorkChain":
+        _energies, _values, start_structure, end_structure = (
+            _replica_chain_profile(workchain)
+        )
+    else:
+        start_structure, end_structure = _neb_input_endpoints(workchain)
+
+    parents = [
+        structure_to_atomistic_model(openbis_session, start_structure.uuid, uuids),
+        structure_to_atomistic_model(openbis_session, end_structure.uuid, uuids),
+    ]
+    parents.extend(_preceding_mep_objects(openbis_session, experiment_id, workchain))
+    return _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        definition["object_type"],
+        properties,
+        parents,
+        lambda path: _render_mep_preview(workchain, path),
+        "minimum_energy_path",
+        preview_override=_preview_override(
+            preview_overrides,
+            workchain,
+            "minimum_energy_path",
+        ),
+    )
+
+
 def Cp2kStmWorkChain_export(
     openbis_session,
     experiment_id,
@@ -2003,6 +2824,7 @@ def Cp2kStmWorkChain_export(
     aiida_node_id,
     executable_ids=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
@@ -2018,6 +2840,9 @@ def Cp2kStmWorkChain_export(
         executable_ids=executable_ids,
     )
     properties["spm_mode"] = "STM"
+    properties = _apply_property_overrides(
+        properties, property_overrides, workchain, "stm"
+    )
     structure_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
     )
@@ -2040,8 +2865,243 @@ workchain_exporters = {
     "PdosWorkChain": PdosWorkChain_export,
     "VibroWorkChain": VibroWorkChain_export,
     "Cp2kGeoOptWorkChain": Cp2kGeoOptWorkChain_export,
+    "Cp2kScfWorkChain": Cp2kScfWorkChain_export,
     "Cp2kStmWorkChain": Cp2kStmWorkChain_export,
+    "Cp2kReplicaWorkChain": Cp2kMepWorkChain_export,
+    "Cp2kNebWorkChain": Cp2kMepWorkChain_export,
 }
+
+
+def _result_property_definitions(workchain):
+    """Return schema-valid automatic properties for each exported result role."""
+    process_label = workchain.process_label
+    definitions = {}
+
+    if process_label == "NanoribbonWorkChain":
+        calculations = _find_nanoribbon_calculations(workchain)
+        scf = calculations["scf"]
+        output_parameters = scf.outputs.output_parameters.get_dict()
+        dft_parameters = _qe_dft_from_calculation(scf)
+        band_properties, dos_properties = _band_and_dos_properties(
+            workchain,
+            dft_parameters,
+            output_parameters,
+            calculations["bands"].outputs.output_band,
+            None,
+            None,
+            "Orbital-projected density of states generated from the AiiDA workflow. "
+            "Full arrays are stored in the linked AiiDA archive.",
+        )
+        definitions["bands"] = {
+            "object_type": OPENBIS_SIMULATION_TYPES["Band Structure"],
+            "properties": band_properties,
+        }
+        definitions["pdos"] = {
+            "object_type": OPENBIS_SIMULATION_TYPES["DOS"],
+            "properties": dos_properties,
+        }
+        cell_opt = calculations["cell_opt2"]
+        if cell_opt is not None:
+            cell_output = cell_opt.outputs.output_parameters.get_dict()
+            properties = _simulation_properties(
+                workchain,
+                "Geometry optimization",
+                dft_parameters,
+                None,
+                method_label=False,
+            )
+            properties.update(
+                {
+                    "constrained": False,
+                    "cell_optimization": True,
+                    "final_energy_hartree": _energy_in_hartree(cell_output),
+                }
+            )
+            cell_dofree = (
+                cell_opt.inputs.parameters.get_dict().get("CELL", {}).get("cell_dofree")
+            )
+            if cell_dofree:
+                properties["cell_constraints"] = str(cell_dofree)
+            definitions["geometry_optimization"] = {
+                "object_type": OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
+                "properties": properties,
+            }
+        return definitions
+
+    if process_label == "PwRelaxWorkChain":
+        input_parameters = workchain.inputs.base.pw.parameters.get_dict()
+        output_parameters = workchain.outputs.output_parameters.get_dict()
+        dft_parameters = get_dft_parameters_qe(workchain.inputs.base, output_parameters)
+        calculation = str(
+            input_parameters.get("CONTROL", {}).get("calculation", "relax")
+        ).lower()
+        properties = _simulation_properties(
+            workchain,
+            "Geometry optimization",
+            dft_parameters,
+            None,
+            method_label=False,
+        )
+        properties.update(
+            {
+                "constrained": False,
+                "cell_optimization": calculation == "vc-relax",
+                "final_energy_hartree": _energy_in_hartree(output_parameters),
+            }
+        )
+        cell_constraints = input_parameters.get("CELL", {}).get("cell_dofree")
+        if cell_constraints:
+            properties["cell_constraints"] = str(cell_constraints)
+        return {
+            "geometry_optimization": {
+                "object_type": OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
+                "properties": properties,
+            }
+        }
+
+    if process_label == "BandsWorkChain":
+        try:
+            root_in = workchain.inputs.bands
+            root_out = workchain.outputs.bands
+        except NotExistentAttributeError:
+            root_in = workchain.inputs.bands_projwfc
+            root_out = workchain.outputs.bands_projwfc
+        output_parameters = root_out.scf_parameters.get_dict()
+        dft_parameters = get_dft_parameters_qe(root_in.bands, output_parameters)
+        band_properties, dos_properties = _band_and_dos_properties(
+            workchain,
+            dft_parameters,
+            output_parameters,
+            root_out.band_structure,
+            None,
+            None,
+            "Orbital-projected density of states generated from the AiiDA workflow. "
+            "Full arrays are stored in the linked AiiDA archive.",
+        )
+        return {
+            "bands": {
+                "object_type": OPENBIS_SIMULATION_TYPES["Band Structure"],
+                "properties": band_properties,
+            },
+            "pdos": {
+                "object_type": OPENBIS_SIMULATION_TYPES["DOS"],
+                "properties": dos_properties,
+            },
+        }
+
+    if process_label == "PdosWorkChain":
+        output_parameters = workchain.outputs.nscf.output_parameters.get_dict()
+        dft_parameters = get_dft_parameters_qe(workchain.inputs.scf, output_parameters)
+        properties = _simulation_properties(workchain, "PDOS", dft_parameters, None)
+        properties.update(
+            {
+                "pdos": True,
+                "projection_description": (
+                    "Orbital-projected density of states generated by projwfc.x. "
+                    "Full arrays are stored in the linked AiiDA archive."
+                ),
+            }
+        )
+        fermi = _fermi_energy(output_parameters)
+        if fermi is not None:
+            properties["fermi_energy_ev"] = fermi
+        return {
+            "pdos": {
+                "object_type": OPENBIS_SIMULATION_TYPES["DOS"],
+                "properties": properties,
+            }
+        }
+
+    if process_label == "VibroWorkChain":
+        pw_base = next(
+            (
+                node
+                for node in workchain.called_descendants
+                if node.process_label == "PwBaseWorkChain"
+            ),
+            None,
+        )
+        if pw_base is None:
+            raise ValueError(
+                "The vibrational workflow does not contain a PwBaseWorkChain."
+            )
+        output_parameters = pw_base.outputs.output_parameters.get_dict()
+        dft_parameters = get_dft_parameters_qe(pw_base.inputs, output_parameters)
+        properties = _simulation_properties(
+            workchain, "Vibrational spectroscopy", dft_parameters, None
+        )
+        properties["vibrational_mode"] = "PHONONS"
+        return {
+            "vibrational_spectroscopy": {
+                "object_type": OPENBIS_SIMULATION_TYPES["Vibrational Spectroscopy"],
+                "properties": properties,
+            }
+        }
+
+    if process_label == "Cp2kGeoOptWorkChain":
+        system_parameters = workchain.inputs.sys_params.get_dict()
+        dft_parameters = get_dft_parameters_cp2k(
+            workchain.inputs.code.description, workchain.inputs.dft_params.get_dict()
+        )
+        output_parameters = _cp2k_output_parameters(workchain)
+        motion = output_parameters.get("motion_step_info", {})
+        cell_optimization = workchain.label == "CP2K_CellOpt"
+        properties = _simulation_properties(
+            workchain,
+            "Geometry optimization",
+            dft_parameters,
+            None,
+            method_label=False,
+        )
+        properties.update(
+            {
+                "constrained": bool(system_parameters.get("constraints")),
+                "cell_optimization": cell_optimization,
+                "final_energy_hartree": _energy_in_hartree(output_parameters),
+            }
+        )
+        if system_parameters.get("constraints"):
+            properties["constraints_description"] = str(
+                system_parameters["constraints"]
+            )
+        if cell_optimization and system_parameters.get("cell_opt_constraint"):
+            properties["cell_constraints"] = str(
+                system_parameters["cell_opt_constraint"]
+            )
+        if motion.get("max_grad_au"):
+            properties["final_max_force_hartree_per_bohr"] = float(
+                motion["max_grad_au"][-1]
+            )
+        if motion.get("step"):
+            properties["number_of_steps"] = int(motion["step"][-1])
+        return {
+            "geometry_optimization": {
+                "object_type": OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
+                "properties": properties,
+            }
+        }
+
+    if process_label == "Cp2kScfWorkChain":
+        return _cp2k_scf_property_definitions(workchain)
+
+    if process_label == "Cp2kStmWorkChain":
+        dft_parameters = get_dft_parameters_cp2k(
+            workchain.inputs.spm_code.description,
+            workchain.inputs.dft_params.get_dict(),
+        )
+        properties = _simulation_properties(workchain, "STM", dft_parameters, None)
+        properties["spm_mode"] = "STM"
+        return {
+            "stm": {
+                "object_type": OPENBIS_SIMULATION_TYPES["SPM Simulation"],
+                "properties": properties,
+            }
+        }
+
+    if process_label in {"Cp2kReplicaWorkChain", "Cp2kNebWorkChain"}:
+        return _cp2k_mep_property_definition(workchain)
+
+    return definitions
 
 
 def _preview_definitions(workchain):
@@ -2102,6 +3162,40 @@ def _preview_definitions(workchain):
             )
         ]
 
+    if process_label == "Cp2kScfWorkChain":
+        definitions = [
+            (
+                "energy_calculation",
+                "Energy calculation",
+                "energy_calculation",
+                lambda path: _render_structure_preview(
+                    workchain.inputs.structure, path
+                ),
+            )
+        ]
+        properties = _cp2k_scf_property_definitions(workchain)
+        if "charge_analysis" in properties:
+            definitions.append(
+                (
+                    "charge_analysis",
+                    "Charge analysis",
+                    "charge_analysis",
+                    lambda path: _render_structure_preview(
+                        workchain.inputs.structure, path
+                    ),
+                )
+            )
+        if "band_unfolding" in properties:
+            definitions.append(
+                (
+                    "band_unfolding",
+                    "Unfolded band structure",
+                    "band_unfolding",
+                    lambda path: _render_unfolding_preview(workchain, path),
+                )
+            )
+        return definitions
+
     if process_label == "BandsWorkChain":
         try:
             root_out = workchain.outputs.bands
@@ -2157,6 +3251,16 @@ def _preview_definitions(workchain):
             )
         ]
 
+    if process_label in {"Cp2kReplicaWorkChain", "Cp2kNebWorkChain"}:
+        return [
+            (
+                "minimum_energy_path",
+                "Minimum energy path",
+                "minimum_energy_path",
+                lambda path: _render_mep_preview(workchain, path),
+            )
+        ]
+
     if process_label == "Cp2kStmWorkChain":
         return [
             (
@@ -2201,7 +3305,9 @@ def render_workchain_preview_suggestions(workchain_uuid):
     with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-suggestions-") as dirname:
         directory = Path(dirname)
         for target in _exportable_workchains(workchain):
+            property_definitions = _result_property_definitions(target)
             for role, title, stem, renderer in _preview_definitions(target):
+                definition = property_definitions[role]
                 path = directory / f"{target.uuid}-{stem}.png"
                 error = None
                 try:
@@ -2220,6 +3326,8 @@ def render_workchain_preview_suggestions(workchain_uuid):
                         "source_uuid": str(target.uuid),
                         "result_role": role,
                         "title": title,
+                        "object_type": definition["object_type"],
+                        "properties": definition["properties"],
                         "name": f"{stem}.png",
                         "content": content,
                         "error": error,
@@ -2236,6 +3344,7 @@ def _run_exporter(
     aiida_archive,
     resolved_executables,
     preview_overrides=None,
+    property_overrides=None,
 ):
     exporter = workchain_exporters[workchain.process_label]
     executable_ids = [
@@ -2249,6 +3358,7 @@ def _run_exporter(
         aiida_archive.permId,
         executable_ids=executable_ids,
         preview_overrides=preview_overrides,
+        property_overrides=property_overrides,
     )
 
 
@@ -2259,6 +3369,7 @@ def export_workchain(
     create_missing_executables=False,
     provenance_overrides=None,
     preview_overrides=None,
+    property_overrides=None,
 ):
     workchain = orm.load_node(workchain_uuid)
     workchains_to_export = get_all_preceding_main_workchains(workchain.uuid)
@@ -2295,6 +3406,7 @@ def export_workchain(
                 aiida_archive,
                 resolved_executables,
                 preview_overrides=preview_overrides,
+                property_overrides=property_overrides,
             )
             exported_objects.extend(normalize_exported_objects(export))
             continue
@@ -2311,6 +3423,7 @@ def export_workchain(
                 aiida_archive,
                 resolved_executables,
                 preview_overrides=preview_overrides,
+                property_overrides=property_overrides,
             )
             exported_objects.extend(normalize_exported_objects(export))
 

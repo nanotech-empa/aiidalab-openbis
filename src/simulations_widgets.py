@@ -157,9 +157,9 @@ class ImportSimulationsWidget(ipw.VBox):
             style=search_text_style,
             layout=search_text_layout,
         )
-        self.description_search_text = ipw.Text(
-            description="Description",
-            placeholder="Optional description search",
+        self.comments_search_text = ipw.Text(
+            description="Comments",
+            placeholder="Optional comments search",
             style=search_text_style,
             layout=search_text_layout,
         )
@@ -196,7 +196,7 @@ class ImportSimulationsWidget(ipw.VBox):
         self.search_filters_box = ipw.VBox(
             [
                 self.name_search_text,
-                self.description_search_text,
+                self.comments_search_text,
                 self.text_match_mode_dropdown,
                 self.simulation_type_search_dropdown,
                 self.archive_status_dropdown,
@@ -417,7 +417,7 @@ class ImportSimulationsWidget(ipw.VBox):
         cls,
         simulations,
         name_query="",
-        description_query="",
+        comments_query="",
         match_mode="fuzzy",
         simulation_type="",
         archive_status="all",
@@ -426,7 +426,7 @@ class ImportSimulationsWidget(ipw.VBox):
         scores = {}
         fuzzy_search_active = match_mode == "fuzzy" and (
             cls._normalize_search_text(name_query)
-            or cls._normalize_search_text(description_query)
+            or cls._normalize_search_text(comments_query)
         )
 
         for simulation in simulations:
@@ -443,12 +443,12 @@ class ImportSimulationsWidget(ipw.VBox):
                 continue
 
             name = aiida_utils._openbis_property(simulation, "name") or ""
-            description = aiida_utils._openbis_property(simulation, "description") or ""
+            comments = aiida_utils._openbis_property(simulation, "comments") or ""
             name_matches, name_score = cls._text_matches(name_query, name, match_mode)
-            description_matches, description_score = cls._text_matches(
-                description_query, description, match_mode
+            comments_match, comments_score = cls._text_matches(
+                comments_query, comments, match_mode
             )
-            if not name_matches or not description_matches:
+            if not name_matches or not comments_match:
                 continue
 
             filtered.append(simulation)
@@ -456,8 +456,8 @@ class ImportSimulationsWidget(ipw.VBox):
                 active_scores = []
                 if cls._normalize_search_text(name_query):
                     active_scores.append(name_score)
-                if cls._normalize_search_text(description_query):
-                    active_scores.append(description_score)
+                if cls._normalize_search_text(comments_query):
+                    active_scores.append(comments_score)
                 scores[str(simulation.permId)] = round(
                     sum(active_scores) / len(active_scores)
                 )
@@ -647,6 +647,43 @@ class ImportSimulationsWidget(ipw.VBox):
             for simulation_permid in self.found_simulations_select_multiple.value
         ]
 
+    def _simulation_dependencies(self, selected_simulations):
+        """Return selected simulations plus archive-bearing scientific ancestors."""
+        simulation_types = set(SIMULATION_TYPES.values())
+        traversable_types = simulation_types | {
+            OPENBIS_OBJECT_TYPES["Atomistic Model"]
+        }
+        ordered = []
+        visited = set()
+
+        def visit(openbis_object):
+            permid = str(openbis_object.permId)
+            if permid in visited:
+                return
+            visited.add(permid)
+            type_code = ImportSimulationsWidget._simulation_type_code(
+                openbis_object
+            )
+            if type_code not in traversable_types:
+                return
+
+            for parent in getattr(openbis_object, "parents", ()) or ():
+                if hasattr(parent, "permId"):
+                    parent_object = parent
+                else:
+                    parent_object = utils.get_openbis_object(
+                        self.openbis_session,
+                        sample_ident=str(parent),
+                    )
+                visit(parent_object)
+
+            if type_code in simulation_types:
+                ordered.append(openbis_object)
+
+        for simulation in selected_simulations:
+            visit(simulation)
+        return ordered
+
     def search_simulations(self, _button=None):
         parent_permids = self._selected_parent_permids()
         logical_operator = self.search_logical_operator_dropdown.value
@@ -663,7 +700,7 @@ class ImportSimulationsWidget(ipw.VBox):
         simulations, scores = self._filter_simulations(
             simulations,
             name_query=self.name_search_text.value,
-            description_query=self.description_search_text.value,
+            comments_query=self.comments_search_text.value,
             match_mode=self.text_match_mode_dropdown.value,
             simulation_type=simulation_type,
             archive_status=self.archive_status_dropdown.value,
@@ -771,6 +808,9 @@ class ImportSimulationsWidget(ipw.VBox):
             _popup("Select at least one simulation.")
             self.import_simulations_message_html.value = ""
             return
+        selected_simulations = ImportSimulationsWidget._simulation_dependencies(
+            self, selected_simulations
+        )
 
         archives, data_only = self._partition_simulations_by_archive(
             selected_simulations
@@ -1393,9 +1433,9 @@ class ExportSimulationsWidget(ipw.VBox):
         if selected == _CREATE_NEW:
             name = pending["name"].value.strip()
             if not name:
-                pending[
-                    "status"
-                ].value = "<p style='color:#b00020'>Name is required.</p>"
+                pending["status"].value = (
+                    "<p style='color:#b00020'>Name is required.</p>"
+                )
                 return False
             exact_name_matches = list(
                 self.openbis_session.get_objects(
@@ -1436,9 +1476,7 @@ class ExportSimulationsWidget(ipw.VBox):
             else:
                 location = pending["location"].value
                 if not location:
-                    pending[
-                        "status"
-                    ].value = (
+                    pending["status"].value = (
                         "<p style='color:#b00020'>A computer location is required.</p>"
                     )
                     return False
@@ -1514,9 +1552,9 @@ class ExportSimulationsWidget(ipw.VBox):
             if selector.value == _CREATE_NEW:
                 create_missing = True
             else:
-                self._provenance_overrides["Executable"][aiida_code_uuid] = (
-                    selector.value
-                )
+                self._provenance_overrides["Executable"][
+                    aiida_code_uuid
+                ] = selector.value
         return True, create_missing
 
     def _clear_resolution_controls(self):
@@ -1592,6 +1630,9 @@ class ExportSimulationsWidget(ipw.VBox):
                         preview_overrides = (
                             self.simulation_details_vbox.preview_overrides()
                         )
+                        property_overrides = (
+                            self.simulation_details_vbox.property_overrides()
+                        )
                         exported = aiida_utils.export_workchain(
                             self.openbis_session,
                             selected_experiment_id,
@@ -1599,6 +1640,7 @@ class ExportSimulationsWidget(ipw.VBox):
                             create_missing_executables=create_missing,
                             provenance_overrides=self._provenance_overrides,
                             preview_overrides=preview_overrides,
+                            property_overrides=property_overrides,
                         )
                     except aiida_utils.MissingExecutablesError as error:
                         self._show_missing_executables(error)
@@ -1609,7 +1651,9 @@ class ExportSimulationsWidget(ipw.VBox):
                     except aiida_utils.ExecutableResolutionError as error:
                         _popup(f"Cannot map AiiDA provenance to openBIS: {error}")
                         return
-                    except Exception as error:  # noqa: BLE001 - show export errors in UI
+                    except (
+                        Exception
+                    ) as error:  # noqa: BLE001 - show export errors in UI
                         _popup(f"Could not export the simulation: {error}")
                         return
 
@@ -1701,7 +1745,9 @@ class ExportSimulationsWidget(ipw.VBox):
                     return
 
                 try:
-                    simulation_props = self.simulation_details_vbox.simulation_properties_widget.values()
+                    simulation_props = (
+                        self.simulation_details_vbox.simulation_properties_widget.values()
+                    )
                     selected_executables = list(
                         self.simulation_details_vbox.executables_multi_selector.value
                     )
@@ -1810,45 +1856,28 @@ class SimulationDetailsWidget(ipw.VBox):
 
         self.material_details_vbox = ipw.VBox()
 
-        self.simulations_label = ipw.Label(value="Simulation")
-        self.simulations_dropdown = ipw.Dropdown()
-        self.load_aiida_simulations()
-        self.sort_simulations_label = ipw.Label(value="Sort by:")
-
-        self.sort_name_label = ipw.Label(
-            value="Name",
-            layout=ipw.Layout(margin="2px", width="50px"),
-            style={"description_width": "initial"},
+        # The dropdown remains an internal selected-value carrier so the
+        # export path stays unchanged; users identify the workflow directly.
+        self.simulations_dropdown = ipw.Dropdown(
+            options=[("No checked simulation", "-1")],
+            value="-1",
         )
-
-        self.sort_name_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
+        self.simulation_pk_input = ipw.IntText(
+            value=0,
+            description="Workflow PK",
+            style={"description_width": "100px"},
         )
-
-        self.sort_pk_label = ipw.Label(
-            value="PK",
-            layout=ipw.Layout(margin="2px", width="110px"),
-            style={"description_width": "initial"},
+        self.check_simulation_button = ipw.Button(
+            description="Check",
+            icon="check",
+            tooltip="Validate this AiiDA workflow PK",
         )
-
-        self.sort_pk_checkbox = ipw.Checkbox(
-            indent=False, layout=ipw.Layout(margin="2px", width="20px")
-        )
-
-        self.sort_simulations_hbox = ipw.HBox(
-            children=[
-                self.sort_simulations_label,
-                self.sort_name_checkbox,
-                self.sort_name_label,
-                self.sort_pk_checkbox,
-                self.sort_pk_label,
-            ]
-        )
+        self.simulation_check_status = ipw.HTML()
 
         self.simulations_dropdown_hbox = ipw.HBox(
             children=[
-                self.simulations_label,
-                self.simulations_dropdown,
+                self.simulation_pk_input,
+                self.check_simulation_button,
             ]
         )
 
@@ -1928,6 +1957,7 @@ class SimulationDetailsWidget(ipw.VBox):
 
         self.upload_datasets_uploader = ipw.FileUpload(multiple=True)
 
+        self.check_simulation_button.on_click(self.check_aiida_simulation)
         self.simulations_dropdown.observe(
             self.load_aiida_preview_suggestions, names="value"
         )
@@ -1939,6 +1969,73 @@ class SimulationDetailsWidget(ipw.VBox):
         )
         self.add_molecule_button.on_click(self.add_molecule)
         self.add_reacprod_concept_button.on_click(self.add_reacprod_concept)
+
+    @staticmethod
+    def _exportable_ancestor(node):
+        """Return this node or its nearest caller supported by the exporter."""
+        candidate = node
+        if not getattr(candidate, "process_label", None):
+            candidate = getattr(candidate, "creator", None)
+        visited = set()
+        while candidate is not None:
+            uuid = str(getattr(candidate, "uuid", ""))
+            if uuid in visited:
+                break
+            visited.add(uuid)
+            if getattr(candidate, "process_label", "") in aiida_utils.workchain_exporters:
+                return candidate
+            candidate = getattr(candidate, "caller", None)
+        return None
+
+    def check_aiida_simulation(self, _button=None):
+        """Validate a PK and prepare previews only for supported WorkChains."""
+        self.simulation_check_status.value = ""
+        self.simulations_dropdown.options = [("No checked simulation", "-1")]
+        self.simulations_dropdown.value = "-1"
+        pk = int(self.simulation_pk_input.value or 0)
+        if pk <= 0:
+            self.simulation_check_status.value = (
+                "<p style='color:#b00020'>Enter a valid positive PK.</p>"
+            )
+            return
+        try:
+            node = orm.load_node(pk)
+        except Exception:  # noqa: BLE001 - AiiDA backend-specific not-found errors
+            self.simulation_check_status.value = (
+                f"<p style='color:#b00020'>No AiiDA node exists with PK {pk}.</p>"
+            )
+            return
+
+        workchain = self._exportable_ancestor(node)
+        if workchain is None:
+            self.simulation_check_status.value = (
+                f"<p style='color:#b00020'>PK {pk} is an intermediate step or "
+                "belongs to an unsupported workflow, and no supported parent "
+                "WorkChain was found.</p>"
+            )
+            return
+        if not workchain.is_finished_ok:
+            self.simulation_check_status.value = (
+                f"<p style='color:#b00020'>Workflow PK {workchain.pk} is not "
+                "finished successfully and cannot be exported.</p>"
+            )
+            return
+
+        description = aiida_utils._workchain_description(workchain)
+        suffix = f": {html.escape(description)}" if description else ""
+        if workchain.pk != pk:
+            prefix = (
+                f"PK {pk} is an intermediate step. Use supported parent "
+                f"WorkChain PK {workchain.pk}"
+            )
+        else:
+            prefix = f"Supported {html.escape(workchain.process_label)} PK {pk}"
+        self.simulation_check_status.value = (
+            f"<p style='color:#237804'>{prefix}{suffix}</p>"
+        )
+        label = f"{workchain.process_label} (PK: {workchain.pk})"
+        self.simulations_dropdown.options = [(label, workchain.pk)]
+        self.simulations_dropdown.value = workchain.pk
 
     def load_aiida_preview_suggestions(self, change=None):
         self._preview_entries = {}
@@ -1962,6 +2059,9 @@ class SimulationDetailsWidget(ipw.VBox):
 
         cards = []
         for suggestion in suggestions:
+            property_widget = SimulationPropertiesWidget(self.openbis_session)
+            property_widget.load_widgets(suggestion["object_type"])
+            property_widget.set_values(suggestion["properties"])
             content = suggestion["content"]
             preview = (
                 ipw.Image(
@@ -2006,11 +2106,18 @@ class SimulationDetailsWidget(ipw.VBox):
             self._preview_entries[suggestion["key"]] = {
                 "suggestion": suggestion,
                 "uploader": uploader,
+                "property_widget": property_widget,
             }
             cards.append(
                 ipw.VBox(
                     [
                         ipw.HTML(f"<b>{html.escape(suggestion['title'])}</b>"),
+                        ipw.HTML(
+                            "<p>Review or edit the automatically derived openBIS "
+                            "fields below.</p>"
+                        ),
+                        property_widget,
+                        ipw.HTML("<b>ELN preview</b>"),
                         preview_box,
                         uploader,
                         status,
@@ -2052,64 +2159,20 @@ class SimulationDetailsWidget(ipw.VBox):
             previews[key] = selected
         return previews
 
+    def property_overrides(self):
+        if not self._preview_entries:
+            raise ValueError(
+                "No simulation field suggestions are ready. Reselect the simulation "
+                "to prepare them."
+            )
+        return {
+            key: entry["property_widget"].values(include_empty=True)
+            for key, entry in self._preview_entries.items()
+        }
+
     def load_simulation_type_properties(self, change):
         simulation_type = self.simulation_type_dropdown.value
         self.simulation_properties_widget.load_widgets(simulation_type)
-
-    def load_aiida_simulations(self):
-        qb = orm.QueryBuilder()
-        qb.append(orm.WorkChainNode)
-        results = qb.all()
-
-        # List of calculations that can be exported
-        labels = list(WORKCHAIN_VIEWERS.keys())
-
-        # Create the QueryBuilder
-        qb = orm.QueryBuilder()
-        qb.append(
-            orm.WorkChainNode,
-            filters={
-                "attributes.process_label": {"in": labels},  # Filter by process_label
-                "attributes.process_state": {"in": ["finished"]},
-            },
-            project=[
-                "id",
-                "uuid",
-                "attributes.process_label",
-                "attributes.metadata_inputs.metadata.description",
-                "attributes.metadata_inputs.metadata.label",
-            ],  # Project the PK (id) and process_label
-        )
-        # Execute the query
-        results = qb.all()
-        options = []
-        for result in results:
-            if result[3]:
-                name_pk_string = f"{result[3][:20]} - {result[2]} (PK: {result[0]})"
-            else:
-                name_pk_string = f"{result[2]} (PK: {result[0]})"
-
-            name_pk_tuple = (name_pk_string, result[0])
-            options.append(name_pk_tuple)
-
-        options.insert(0, ("Select a simulation...", "-1"))
-        self.simulations_dropdown.options = options
-        self.simulations_dropdown.value = "-1"
-
-    def sort_simulations_dropdown(self, change):
-        options = self.simulations_dropdown.options[1:]
-
-        df = pd.DataFrame(options, columns=["name", "PK"])
-        if self.sort_name_checkbox.value and not self.sort_pk_checkbox.value:
-            df = df.sort_values(by="name", ascending=True)
-        elif not self.sort_name_checkbox.value and self.sort_pk_checkbox.value:
-            df = df.sort_values(by="PK", ascending=False)
-        elif self.sort_name_checkbox.value and self.sort_pk_checkbox.value:
-            df = df.sort_values(by=["name", "PK"], ascending=[True, False])
-
-        options = list(df.itertuples(index=False, name=None))
-        options.insert(0, self.simulations_dropdown.options[0])
-        self.simulations_dropdown.options = options
 
     def load_widgets(self, used_aiida):
         self.used_aiida = used_aiida
@@ -2126,7 +2189,7 @@ class SimulationDetailsWidget(ipw.VBox):
                 self.material_details_vbox,
                 self.select_simulation_title,
                 self.simulations_dropdown_hbox,
-                self.sort_simulations_hbox,
+                self.simulation_check_status,
                 self.preview_suggestions_title,
                 self.preview_suggestions_status,
                 self.preview_suggestions_box,
@@ -2286,7 +2349,6 @@ class SimulationPropertiesWidget(ipw.VBox):
             "EXECUTABLES",
             "AIIDA_NODE",
             "AIIDA_SOURCE_UUID",
-            "AIIDA_RESULT_ROLE",
         }
     )
 
@@ -2305,8 +2367,8 @@ class SimulationPropertiesWidget(ipw.VBox):
     def _vocabulary_options(property_definition):
         vocabulary = property_definition.get("vocabulary")
         return [
-            (label, label)
-            for _code, label in simulation_schema.VOCABULARIES.get(vocabulary, [])
+            (label, code)
+            for code, label in simulation_schema.VOCABULARIES.get(vocabulary, [])
         ]
 
     @classmethod
@@ -2373,7 +2435,25 @@ class SimulationPropertiesWidget(ipw.VBox):
             children.extend(section_fields)
         self.children = children
 
-    def values(self):
+    def set_values(self, properties):
+        """Populate assigned fields from lower-case pyBIS property values."""
+        for code, widget in self.fields.items():
+            definition = simulation_schema.PROPERTY_TYPES[code]
+            key = code.lower()
+            if key not in properties or properties[key] is None:
+                continue
+            value = properties[key]
+            if definition.get("multiValue"):
+                if definition["dataType"] == "REAL":
+                    widget.value = ", ".join(str(item) for item in value)
+                else:
+                    widget.value = tuple(value)
+            elif definition["dataType"] == "BOOLEAN":
+                widget.value = bool(value)
+            else:
+                widget.value = str(value)
+
+    def values(self, include_empty=False):
         """Validate widgets and return lower-case pyBIS property values."""
         properties = {}
         missing = []
@@ -2385,7 +2465,7 @@ class SimulationPropertiesWidget(ipw.VBox):
             data_type = definition["dataType"]
 
             if data_type == "BOOLEAN":
-                if assignment["mandatory"] or value:
+                if assignment["mandatory"] or value or include_empty:
                     properties[code.lower()] = bool(value)
                 continue
             if definition.get("multiValue"):
@@ -2421,9 +2501,29 @@ class SimulationPropertiesWidget(ipw.VBox):
             if value in ("", [], ()):  # optional fields are omitted from pyBIS
                 if assignment["mandatory"]:
                     missing.append(definition["label"])
+                elif include_empty:
+                    properties[code.lower()] = None
                 continue
             properties[code.lower()] = value
 
         if missing:
             raise ValueError("Complete the required fields: " + ", ".join(missing))
+        if self.simulation_type == "MINIMUM_ENERGY_PATH":
+            method = properties.get("mep_method")
+            conditional = {
+                "NEB": ("neb_variant", "NEB variant"),
+                "REPLICA_CHAIN": (
+                    "collective_variables",
+                    "Collective variables",
+                ),
+                "OTHER": (
+                    "other_method_description",
+                    "Other MEP method description",
+                ),
+            }
+            required = conditional.get(method)
+            if required and not properties.get(required[0]):
+                raise ValueError(
+                    f"{required[1]} is required when MEP method is {method}."
+                )
         return properties

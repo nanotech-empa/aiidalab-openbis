@@ -39,7 +39,7 @@
             "Band Structure": "BAND_STRUCTURE",
             "Charge Analysis": "CHARGE_ANALYSIS",
             "DOS": "DOS",
-            "Reaction Barrier": "REACTION_BARRIER",
+            "Minimum Energy Path": "MINIMUM_ENERGY_PATH",
             "SPM Simulation": "SPM_SIMULATION",
             "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
             "Molecular Dynamics": "MOLECULAR_DYNAMICS",
@@ -52,7 +52,7 @@
         "Band Structure": "BAND_STRUCTURE",
         "Charge Analysis": "CHARGE_ANALYSIS",
         "DOS": "DOS",
-        "Reaction Barrier": "REACTION_BARRIER",
+        "Minimum Energy Path": "MINIMUM_ENERGY_PATH",
         "SPM Simulation": "SPM_SIMULATION",
         "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
         "Molecular Dynamics": "MOLECULAR_DYNAMICS",
@@ -61,6 +61,7 @@
     "Workchain Viewers": {
         "QeAppWorkChain": "/apps/apps/quantum-espresso/qe.ipynb",
         "Cp2kGeoOptWorkChain": "/apps/apps/surfaces/view_geometry_optimization.ipynb",
+        "Cp2kNebWorkChain": "/apps/apps/surfaces/view_neb.ipynb",
         "Cp2kStmWorkChain": "/apps/apps/surfaces/view_stm.ipynb",
         "NanoribbonWorkChain": "/apps/apps/nanoribbons/show.ipynb"
     },

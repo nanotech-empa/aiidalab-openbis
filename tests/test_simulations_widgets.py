@@ -224,13 +224,13 @@ def _simulation(
     type_code,
     aiida_node=None,
     datasets=None,
-    description="",
+    comments="",
     registration_date="",
 ):
     return SimpleNamespace(
         props={
             "name": name,
-            "description": description,
+            "comments": comments,
             "aiida_node": aiida_node,
         },
         permId=permid,
@@ -275,26 +275,26 @@ def test_simulation_filter_combines_text_type_and_archive_status(
         "test export",
         "simulation-1",
         "GEOMETRY_OPTIMISATION",
-        description="A very good pear calculation",
+        comments="A very good pear calculation",
     )
     archived = _simulation(
         "test archive",
         "simulation-2",
         "GEOMETRY_OPTIMISATION",
         aiida_node="archive-1",
-        description="A very good pear calculation",
+        comments="A very good pear calculation",
     )
     wrong_type = _simulation(
         "test export",
         "simulation-3",
         "DOS",
-        description="A very good pear calculation",
+        comments="A very good pear calculation",
     )
 
     filtered, scores = simulations_widgets.ImportSimulationsWidget._filter_simulations(
         [data_only, archived, wrong_type],
         name_query="tset exprt",
-        description_query="god pearr",
+        comments_query="god pearr",
         match_mode="fuzzy",
         simulation_type="GEOMETRY_OPTIMISATION",
         archive_status="data_only",
@@ -329,7 +329,7 @@ def test_search_without_material_filters_searches_all_simulation_types(
         "test export",
         "simulation-1",
         "GEOMETRY_OPTIMISATION",
-        description="Manually uploaded geometry",
+        comments="Manually uploaded geometry",
         registration_date="2026-09-08 06:38:37",
     )
     queried_types = []
@@ -771,7 +771,8 @@ def test_manual_simulation_fields_follow_new_schema(simulations_widgets):
     assert "BAND_GAP" not in widget.fields
     assert "AIIDA_NODE" not in widget.fields
     widget.fields["NAME"].value = "Band result"
-    widget.fields["METHOD_FAMILY"].value = "DFT"
+    widget.fields["METHOD_FAMILY"].value = "MFH_TB"
+    widget.fields["METHOD_MODIFIERS"].value = ("DFT_U", "SPIN_ORBIT")
     widget.fields["METHOD_LABEL"].value = "PBE"
     widget.fields["CHARGE"].value = "0"
     widget.fields["BAND_GAP_EV"].value = "1.25"
@@ -781,8 +782,72 @@ def test_manual_simulation_fields_follow_new_schema(simulations_widgets):
     assert values["band_gap_ev"] == pytest.approx(1.25)
     assert values["charge"] == pytest.approx(0.0)
     assert values["converged"] is False
+    assert values["method_family"] == "MFH_TB"
+    assert values["method_modifiers"] == ["DFT_U", "SPIN_ORBIT"]
+    assert widget.fields["METHOD_FAMILY"].description == "Method family *"
+    assert dict(widget.fields["METHOD_FAMILY"].options)["MFH-TB"] == "MFH_TB"
     widget.load_widgets("-1")
     assert widget.children == ()
+
+
+def test_manual_simulation_editor_covers_every_schema_assignment(
+    simulations_widgets,
+):
+    excluded = simulations_widgets.SimulationPropertiesWidget._EXCLUDED_PROPERTIES
+    for (
+        object_type,
+        definition,
+    ) in simulations_widgets.simulation_schema.OBJECT_TYPES.items():
+        widget = simulations_widgets.SimulationPropertiesWidget(object())
+        widget.load_widgets(object_type)
+        expected = {
+            assignment["code"]
+            for assignment in definition["assignments"]
+            if assignment["code"] not in excluded
+        }
+        assert set(widget.fields) == expected
+
+
+def test_property_review_populates_codes_and_reports_cleared_optional_values(
+    simulations_widgets,
+):
+    widget = simulations_widgets.SimulationPropertiesWidget(object())
+    widget.load_widgets("BAND_STRUCTURE")
+    widget.set_values(
+        {
+            "name": "Reviewed bands",
+            "method_family": "MFH_TB",
+            "method_modifiers": ["DFT_U"],
+            "method_label": "PBE+U",
+            "charge": 0.0,
+            "band_gap_ev": 1.0,
+            "converged": True,
+            "comments": "Workflow description",
+        }
+    )
+    widget.fields["COMMENTS"].value = ""
+
+    values = widget.values(include_empty=True)
+
+    assert widget.fields["METHOD_FAMILY"].value == "MFH_TB"
+    assert widget.fields["METHOD_MODIFIERS"].value == ("DFT_U",)
+    assert values["comments"] is None
+
+
+def test_property_overrides_are_collected_per_result(simulations_widgets):
+    widget = SimpleNamespace(
+        _preview_entries={
+            "source:bands": {
+                "property_widget": SimpleNamespace(
+                    values=lambda include_empty: {"name": "Edited bands"}
+                )
+            }
+        }
+    )
+
+    assert simulations_widgets.SimulationDetailsWidget.property_overrides(widget) == {
+        "source:bands": {"name": "Edited bands"}
+    }
 
 
 def test_viewer_link_opens_new_tab(simulations_widgets):
@@ -901,3 +966,129 @@ def test_upload_datasets_supports_ipywidgets_7_and_8(
         "props": {"kind": "test"},
     }
     assert removed == [filename]
+
+
+def test_import_expands_mep_and_atomistic_model_ancestors(
+    monkeypatch, simulations_widgets
+):
+    geometry = _simulation(
+        "Geometry",
+        "geometry",
+        "GEOMETRY_OPTIMISATION",
+        aiida_node="archive-geometry",
+    )
+    replica = _simulation(
+        "Replica path",
+        "replica",
+        "MINIMUM_ENERGY_PATH",
+        aiida_node="archive-replica",
+    )
+    neb = _simulation(
+        "NEB path",
+        "neb",
+        "MINIMUM_ENERGY_PATH",
+        aiida_node="archive-neb",
+    )
+    endpoint = SimpleNamespace(
+        permId="endpoint",
+        type=SimpleNamespace(code="ATOMISTIC_MODEL"),
+        parents=["geometry"],
+    )
+    geometry.parents = []
+    replica.parents = ["endpoint"]
+    neb.parents = ["endpoint", "replica"]
+    objects = {
+        "geometry": geometry,
+        "replica": replica,
+        "neb": neb,
+        "endpoint": endpoint,
+    }
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "get_openbis_object",
+        lambda _session, sample_ident: objects[str(sample_ident)],
+    )
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        _simulation_type_code=(
+            simulations_widgets.ImportSimulationsWidget._simulation_type_code
+        ),
+    )
+
+    expanded = (
+        simulations_widgets.ImportSimulationsWidget._simulation_dependencies(
+            widget, [neb]
+        )
+    )
+
+    assert expanded == [geometry, replica, neb]
+
+
+@pytest.mark.parametrize(
+    ("method", "field", "message"),
+    [
+        ("NEB", "NEB_VARIANT", "NEB variant"),
+        ("REPLICA_CHAIN", "COLLECTIVE_VARIABLES", "Collective variables"),
+        ("OTHER", "OTHER_METHOD_DESCRIPTION", "Other MEP method description"),
+    ],
+)
+def test_manual_mep_requires_method_specific_field(
+    simulations_widgets, method, field, message
+):
+    widget = simulations_widgets.SimulationPropertiesWidget(object())
+    widget.load_widgets("MINIMUM_ENERGY_PATH")
+    required_values = {
+        "NAME": "Methane path",
+        "METHOD_FAMILY": "DFT",
+        "METHOD_LABEL": "PBE",
+        "CHARGE": "0",
+        "MEP_METHOD": method,
+        "RELATIVE_ENERGIES_EV": "0, 0.1",
+        "FORWARD_BARRIER_EV": "0.1",
+        "BACKWARD_BARRIER_EV": "0",
+        "NUMBER_OF_IMAGES": "2",
+    }
+    for code, value in required_values.items():
+        widget.fields[code].value = value
+
+    with pytest.raises(ValueError, match=message):
+        widget.values()
+
+    if field == "NEB_VARIANT":
+        widget.fields[field].value = "CI_NEB"
+    else:
+        widget.fields[field].value = "specified"
+    values = widget.values()
+
+    assert values[field.lower()]
+
+
+def test_intermediate_pk_resolves_to_supported_parent(simulations_widgets):
+    parent = SimpleNamespace(
+        uuid="parent",
+        pk=10,
+        process_label="Cp2kGeoOptWorkChain",
+        caller=None,
+    )
+    intermediate = SimpleNamespace(
+        uuid="intermediate",
+        pk=11,
+        process_label="Cp2kBaseWorkChain",
+        caller=parent,
+    )
+
+    resolved = simulations_widgets.SimulationDetailsWidget._exportable_ancestor(
+        intermediate
+    )
+
+    assert resolved is parent
+    assert (
+        simulations_widgets.SimulationDetailsWidget._exportable_ancestor(
+            SimpleNamespace(
+                uuid="unsupported",
+                process_label="UnsupportedWorkChain",
+                caller=None,
+            )
+        )
+        is None
+    )
