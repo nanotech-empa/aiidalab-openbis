@@ -1,5 +1,4 @@
 import os
-import pathlib
 import sys
 import unittest
 from unittest.mock import MagicMock
@@ -8,10 +7,6 @@ from unittest.mock import MagicMock
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
-
-# Ensure logs folder exists where sample_preparation_widgets expects it
-(pathlib.Path.cwd().parent / "logs").mkdir(parents=True, exist_ok=True)
-(pathlib.Path.cwd() / "logs").mkdir(parents=True, exist_ok=True)
 
 # Mock external packages that might not be installed or configured in the test
 # environment. Restore sys.modules after importing the unit under test so these
