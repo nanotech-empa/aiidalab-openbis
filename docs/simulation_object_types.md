@@ -560,6 +560,155 @@ full projected-band arrays
 
 ---
 
+# BAND_UNFOLDING
+
+## Object type
+
+`BAND_UNFOLDING`
+
+## Definition
+
+Electronic spectral weights unfolded from a supercell calculation onto a
+primitive-cell k-path. This is distinct from `BAND_STRUCTURE`: the latter is a
+direct band calculation, while this object records an unfolding result.
+
+The same object type is used for QE/BandUPpy and CP2K sparse-atomic-orbital
+unfolding. The implementation is recorded explicitly.
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+```
+
+## Parent objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+The parent is the supercell structure used as input to the unfolding workflow.
+Reference-cell structures generated internally remain in the AiiDA archive and
+are not created as extra openBIS objects solely for unfolding.
+
+Relation:
+
+```text
+ATOMISTIC_MODEL → BAND_UNFOLDING
+```
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+For QE this includes `pw.x` and BandUPpy; for CP2K it includes CP2K and the
+unfolding executable when it is represented by a distinct AiiDA Code.
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+unfolded-band spectral-weight plot
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+method_label: string
+charge: number
+unfolding_implementation: enum
+supercell_matrix: text containing a JSON matrix
+k_path: string
+converged: boolean
+```
+
+## Optional properties
+
+```text
+fermi_energy_ev: float[] (eV)
+energy_min_ev: float (eV relative to the stored reference)
+energy_max_ev: float (eV relative to the stored reference)
+projection_description: text
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+comments: text
+```
+
+## `unfolding_implementation` vocabulary
+
+```text
+BANDUPPY
+CP2K_SPARSE_AO
+OTHER
+```
+
+## AiiDA mapping
+
+- `QeBanduppyUnfoldingWorkChain` maps to `BANDUPPY`.
+- A `Cp2kScfWorkChain` with `unfolding_retrieved` maps to `CP2K_SPARSE_AO`.
+- Charge, spin, exchange-correlation method, hybrid/vdW modifiers, supercell
+  matrix, k-path, reference/Fermi level, and plotted energy window are extracted
+  automatically when available.
+- `AIIDA_SOURCE_UUID` is the UUID of the concrete unfolding-producing WorkChain.
+
+## Required linked content
+
+```text
+parent: input supercell ATOMISTIC_MODEL
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full unfolded-band arrays
+full spectral-weight arrays
+full k-point arrays
+full eigenvalue arrays
+projection matrices and sparse-overlap data
+input and output files
+restart files
+stdout/stderr
+```
+
+---
+
+
 # CHARGE_ANALYSIS
 
 ## Object type
@@ -1531,6 +1680,7 @@ Use only when the simulation cannot be cleanly classified as:
 ENERGY_CALCULATION
 GEOMETRY_OPTIMISATION
 BAND_STRUCTURE
+BAND_UNFOLDING
 CHARGE_ANALYSIS
 DOS
 MINIMUM_ENERGY_PATH
@@ -1580,6 +1730,7 @@ Optional, if the unclassified simulation derives from another simulation:
 ENERGY_CALCULATION
 GEOMETRY_OPTIMISATION
 BAND_STRUCTURE
+BAND_UNFOLDING
 CHARGE_ANALYSIS
 DOS
 MINIMUM_ENERGY_PATH

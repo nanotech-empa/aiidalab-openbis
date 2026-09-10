@@ -404,13 +404,32 @@ def get_qe_input_parameters(outputs):
     }
 
 
+def _node_mapping(node):
+    """Return mapping data from modern Dict or legacy ParameterData nodes."""
+    get_dict = getattr(node, "get_dict", None)
+    if callable(get_dict):
+        return get_dict()
+    try:
+        return dict(node.base.attributes.all)
+    except AttributeError as exception:
+        raise TypeError(f"{node!r} does not expose mapping data") from exception
+
+
+def _pw_relax_base(workchain):
+    """Return the QE relax input namespace across aiida-quantumespresso versions."""
+    try:
+        return workchain.inputs.base
+    except (AttributeError, NotExistentAttributeError):
+        return workchain.inputs.base_relax
+
+
 def get_dft_parameters_qe(inputs, outputs):
     """Retrieves from QE workchains the parameters needed to create the DFT object
     in input the inputs of QE workchain and the output_parameters. Will be simplified when QeAppWorkchain
     bugs for not exposing some of the outputs will be fixed
     """
 
-    system = inputs.pw.parameters.get_dict().get("SYSTEM", {})
+    system = _node_mapping(inputs.pw.parameters).get("SYSTEM", {})
     return {
         "xc_functional": outputs.get("dft_exchange_correlation", "unknown"),
         "plus_u": bool(outputs.get("lda_plus_u_calculation", False)),
@@ -432,6 +451,7 @@ def get_dft_parameters_cp2k(code_description, dft_para):
         "non_collinear": bool(dft_para.get("non_collinear", False)),
         "uks": bool(dft_para.get("uks", False)),
         "charge": float(dft_para.get("charge", 0.0)),
+        "multiplicity": dft_para.get("multiplicity"),
         "vdw_corr": dft_para.get("vdw", ""),
         "hfx_fraction": float(dft_para.get("hfx_fraction", 0.0)),
     }
@@ -1447,6 +1467,133 @@ def _scf_executable_ids(workchain, executable_ids, purpose):
     return executable_ids
 
 
+def _unfolding_archive_data(workchain):
+    """Load the compact metadata and arrays retained by an unfolding workflow."""
+    retrieved = _get_optional_output(workchain.outputs, "unfolding_retrieved")
+    if retrieved is None:
+        retrieved = _get_optional_output(workchain.outputs, "banduppy_retrieved")
+    if retrieved is None:
+        raise ValueError("The workflow does not contain unfolding output data.")
+    with retrieved.base.repository.open("unfolding_bands.npz", mode="rb") as handle:
+        with np.load(handle, allow_pickle=True) as archive:
+            return {key: np.array(archive[key], copy=True) for key in archive.files}
+
+
+def _unfolding_supercell_matrix(workchain, data):
+    """Return the integer supercell matrix as JSON for openBIS."""
+    matrix = data.get("supercell_matrix")
+    parameters = _get_optional_output(workchain.inputs, "unfolding_parameters")
+    if matrix is None and parameters is not None:
+        matrix = parameters.get_dict().get("supercell_matrix")
+    if matrix is None:
+        raise ValueError("The unfolding result does not define a supercell matrix.")
+    return json.dumps(np.asarray(matrix, dtype=int).tolist())
+
+
+def _unfolding_k_path(workchain, data):
+    """Return a compact high-symmetry path label for either implementation."""
+    labels = None
+    parameters = _get_optional_output(workchain.inputs, "unfolding_parameters")
+    if parameters is not None:
+        labels = parameters.get_dict().get("labels")
+    if labels is None:
+        labels = data.get("path_labels")
+    if labels is None:
+        labels = data.get("x_tick_labels")
+    if labels is None:
+        labels = _input_value(workchain, "unfolding_path")
+    if isinstance(labels, np.ndarray):
+        labels = labels.tolist()
+    if isinstance(labels, (list, tuple)):
+        return "-".join(str(label) for label in labels)
+    if labels:
+        return str(labels)
+    raise ValueError("The unfolding result does not define a k-path.")
+
+
+def _unfolding_energy_window(data):
+    """Return the energy range relative to the stored reference energy."""
+    if "unfolded_bandstructure" in data:
+        bands = np.asarray(data["unfolded_bandstructure"], dtype=float)
+        reference = float(np.asarray(data.get("fermi_energy", 0.0)).reshape(-1)[0])
+        energies = bands[:, 2] - reference
+    else:
+        reference = float(np.asarray(data.get("ref_energy_ev", 0.0)).reshape(-1)[0])
+        channels = [
+            np.asarray(value, dtype=float).reshape(-1) - reference
+            for key, value in data.items()
+            if key.startswith("evals_ev_spin_")
+        ]
+        if not channels:
+            return None
+        energies = np.concatenate(channels)
+    finite = energies[np.isfinite(energies)]
+    if not finite.size:
+        return None
+    return float(np.min(finite)), float(np.max(finite))
+
+
+def _qe_banduppy_property_definition(
+    workchain, aiida_node_id=None, executable_ids=None
+):
+    """Build the common BAND_UNFOLDING metadata for QE/BandUPpy."""
+    output_parameters_node = _get_optional_output(
+        workchain.outputs, "reference_bands_parameters"
+    )
+    output_parameters = (
+        output_parameters_node.get_dict() if output_parameters_node is not None else {}
+    )
+    system = workchain.inputs.parameters.get_dict().get("SYSTEM", {})
+    dft_parameters = {
+        "xc_functional": output_parameters.get(
+            "dft_exchange_correlation", "unknown"
+        ),
+        "plus_u": bool(output_parameters.get("lda_plus_u_calculation", False)),
+        "spin_orbit_coupling": bool(
+            output_parameters.get("spin_orbit_calculation", False)
+        ),
+        "non_collinear": bool(
+            output_parameters.get("non_colinear_calculation", False)
+        ),
+        "uks": bool(output_parameters.get("lsda", False)),
+        "charge": float(system.get("tot_charge", 0.0)),
+        "vdw_corr": system.get("vdw_corr", ""),
+    }
+    data = _unfolding_archive_data(workchain)
+    properties = _simulation_properties(
+        workchain,
+        "Band unfolding",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+        result_role="band_unfolding",
+    )
+    properties.update(
+        {
+            "unfolding_implementation": "BANDUPPY",
+            "supercell_matrix": _unfolding_supercell_matrix(workchain, data),
+            "k_path": _unfolding_k_path(workchain, data),
+            "projection_description": (
+                "BandUPpy spectral weights. Full unfolded arrays are stored in "
+                "the linked AiiDA archive."
+            ),
+        }
+    )
+    if "fermi_energy" in data:
+        properties["fermi_energy_ev"] = [
+            float(np.asarray(data["fermi_energy"]).reshape(-1)[0])
+        ]
+    energy_window = _unfolding_energy_window(data)
+    if energy_window is not None:
+        properties["energy_min_ev"], properties["energy_max_ev"] = energy_window
+    return {
+        "band_unfolding": {
+            "object_type": OPENBIS_SIMULATION_TYPES["Band Unfolding"],
+            "properties": properties,
+        }
+    }
+
+
 def _cp2k_scf_property_definitions(
     workchain, aiida_node_id=None, executable_ids=None
 ):
@@ -1455,7 +1602,7 @@ def _cp2k_scf_property_definitions(
         workchain.inputs.cp2k_code.description,
         workchain.inputs.dft_params.get_dict(),
     )
-    output_parameters = workchain.outputs.output_parameters.get_dict()
+    output_parameters = _node_mapping(workchain.outputs.output_parameters)
     output_text = _cp2k_scf_output_text(workchain)
     fermi_energies = _cp2k_fermi_energies(output_parameters, output_text)
     electronic_gaps = _cp2k_electronic_gaps(output_parameters)
@@ -1520,6 +1667,7 @@ def _cp2k_scf_property_definitions(
 
     unfolding = _get_optional_output(workchain.outputs, "unfolding_retrieved")
     if unfolding is not None:
+        data = _unfolding_archive_data(workchain)
         band = _simulation_properties(
             workchain,
             "Band unfolding",
@@ -1532,18 +1680,24 @@ def _cp2k_scf_property_definitions(
         )
         band.update(
             {
-                "band_gap_ev": min(electronic_gaps or [0.0]),
-                "electronic_gap_type": "unknown",
+                "unfolding_implementation": "CP2K_SPARSE_AO",
+                "supercell_matrix": _unfolding_supercell_matrix(workchain, data),
+                "k_path": _unfolding_k_path(workchain, data),
                 "converged": converged,
+                "projection_description": (
+                    "Sparse atomic-orbital spectral weights generated by the CP2K "
+                    "unfolding workflow. Full arrays are stored in the linked "
+                    "AiiDA archive."
+                ),
             }
         )
         if fermi_energies is not None:
             band["fermi_energy_ev"] = fermi_energies
-        k_path = _input_value(workchain, "unfolding_path")
-        if k_path:
-            band["k_path"] = str(k_path)
+        energy_window = _unfolding_energy_window(data)
+        if energy_window is not None:
+            band["energy_min_ev"], band["energy_max_ev"] = energy_window
         definitions["band_unfolding"] = {
-            "object_type": OPENBIS_SIMULATION_TYPES["Band Structure"],
+            "object_type": OPENBIS_SIMULATION_TYPES["Band Unfolding"],
             "properties": band,
         }
 
@@ -1860,51 +2014,89 @@ def _render_mep_preview(workchain, path):
 
 
 def _render_unfolding_preview(workchain, path):
-    """Render the compact unfolded-band view stored by Cp2kScfWorkChain."""
+    """Render either QE/BandUPpy or CP2K sparse-AO unfolding data."""
     from matplotlib.figure import Figure
 
-    retrieved = workchain.outputs.unfolding_retrieved
-    with retrieved.base.repository.open("unfolding_bands.npz", mode="rb") as handle:
-        with np.load(handle, allow_pickle=True) as archive:
-            data = {key: archive[key] for key in archive.files}
-
-    path_indices = np.asarray(data["path_k_indices"], dtype=int)
-    path_x = np.asarray(data["path_x"], dtype=float)
-    reference = float(data["ref_energy_ev"])
-    spin_indices = sorted(
-        int(key.rsplit("_", 1)[-1])
-        for key in data
-        if key.startswith("weights_spin_")
-    )
-    if not spin_indices:
-        raise ValueError("The unfolding archive contains no spectral weights.")
-
+    data = _unfolding_archive_data(workchain)
     figure = Figure(figsize=(7, 4.5), constrained_layout=True)
     axis = figure.subplots()
     plotted_energies = []
-    for spin in spin_indices:
-        energies = np.asarray(data[f"evals_ev_spin_{spin}"], dtype=float) - reference
-        weights = np.asarray(data[f"weights_spin_{spin}"], dtype=float)
-        for k_index, x_value in zip(path_indices, path_x):
-            sizes = 150.0 * np.maximum(weights[k_index], 0.0)
-            mask = sizes > 1.0e-8
-            axis.scatter(
-                np.full(np.count_nonzero(mask), x_value),
-                energies[mask],
-                s=sizes[mask],
-                alpha=0.65,
-                color="black",
-            )
-            plotted_energies.extend(energies[mask].tolist())
 
-    x_ticks = np.asarray(data["x_ticks"], dtype=float)
-    x_labels = [str(label) for label in data["x_tick_labels"]]
+    if "unfolded_bandstructure" in data:
+        bands = np.asarray(data["unfolded_bandstructure"], dtype=float)
+        reference = float(np.asarray(data.get("fermi_energy", 0.0)).reshape(-1)[0])
+        x_values = bands[:, 1]
+        energies = bands[:, 2] - reference
+        weights = np.maximum(bands[:, 3], 0.0)
+        mask = weights > 1.0e-8
+        axis.scatter(
+            x_values[mask],
+            energies[mask],
+            s=80.0 * weights[mask],
+            alpha=0.65,
+            color="black",
+        )
+        plotted_energies.extend(energies[mask].tolist())
+        raw_labels = data.get("special_labels")
+        if isinstance(raw_labels, np.ndarray) and raw_labels.shape == ():
+            raw_labels = raw_labels.item()
+        if isinstance(raw_labels, bytes):
+            raw_labels = raw_labels.decode()
+        if isinstance(raw_labels, str):
+            try:
+                raw_labels = json.loads(raw_labels)
+            except json.JSONDecodeError:
+                raw_labels = None
+        if isinstance(raw_labels, dict):
+            kline = np.asarray(data.get("kline", []), dtype=float)
+            labels = sorted(
+                (int(index), str(label)) for index, label in raw_labels.items()
+            )
+            labels = [item for item in labels if item[0] < len(kline)]
+            x_ticks = np.asarray([kline[index] for index, _label in labels])
+            x_labels = [label for _index, label in labels]
+        else:
+            x_ticks = np.asarray([np.min(x_values), np.max(x_values)])
+            x_labels = ["", ""]
+        ylabel = "Energy - Fermi level (eV)"
+    else:
+        path_indices = np.asarray(data["path_k_indices"], dtype=int)
+        path_x = np.asarray(data["path_x"], dtype=float)
+        reference = float(np.asarray(data["ref_energy_ev"]).reshape(-1)[0])
+        spin_indices = sorted(
+            int(key.rsplit("_", 1)[-1])
+            for key in data
+            if key.startswith("weights_spin_")
+        )
+        if not spin_indices:
+            raise ValueError("The unfolding archive contains no spectral weights.")
+        for spin in spin_indices:
+            energies = (
+                np.asarray(data[f"evals_ev_spin_{spin}"], dtype=float) - reference
+            )
+            weights = np.asarray(data[f"weights_spin_{spin}"], dtype=float)
+            for k_index, x_value in zip(path_indices, path_x):
+                sizes = 150.0 * np.maximum(weights[k_index], 0.0)
+                mask = sizes > 1.0e-8
+                axis.scatter(
+                    np.full(np.count_nonzero(mask), x_value),
+                    energies[mask],
+                    s=sizes[mask],
+                    alpha=0.65,
+                    color="black",
+                )
+                plotted_energies.extend(energies[mask].tolist())
+        x_ticks = np.asarray(data["x_ticks"], dtype=float)
+        x_labels = [str(label) for label in data["x_tick_labels"]]
+        ylabel = "Energy - reference (eV)"
+
     for x_tick in x_ticks:
         axis.axvline(x_tick, linewidth=0.8, alpha=0.35)
     axis.axhline(0.0, linestyle="--", linewidth=1.0)
     axis.set_xticks(x_ticks)
     axis.set_xticklabels(x_labels)
-    axis.set_xlim(x_ticks[0], x_ticks[-1])
+    if len(x_ticks) > 1:
+        axis.set_xlim(x_ticks[0], x_ticks[-1])
     if plotted_energies:
         low, high = np.percentile(plotted_energies, [2.0, 98.0])
         low = max(float(low), -15.0)
@@ -1912,7 +2104,7 @@ def _render_unfolding_preview(workchain, path):
         if low < high:
             axis.set_ylim(low, high)
     axis.set_xlabel("Primitive-cell k-path")
-    axis.set_ylabel("Energy - reference (eV)")
+    axis.set_ylabel(ylabel)
     axis.set_title("Unfolded band structure")
     figure.savefig(path, dpi=160)
 
@@ -2134,8 +2326,8 @@ def _create_simulation_object(
 
 
 def _qe_dft_from_calculation(calculation):
-    outputs = calculation.outputs.output_parameters.get_dict()
-    system = calculation.inputs.parameters.get_dict().get("SYSTEM", {})
+    outputs = _node_mapping(calculation.outputs.output_parameters)
+    system = _node_mapping(calculation.inputs.parameters).get("SYSTEM", {})
     return {
         "xc_functional": outputs.get("dft_exchange_correlation", "unknown"),
         "plus_u": bool(outputs.get("lda_plus_u_calculation", False)),
@@ -2145,6 +2337,12 @@ def _qe_dft_from_calculation(calculation):
         "charge": float(system.get("tot_charge", 0.0)),
         "vdw_corr": system.get("vdw_corr", ""),
     }
+
+
+def _bands_dos_node(root_output):
+    """Return an optional projwfc DOS from combined or bands-only workflows."""
+    projwfc = _get_optional_output(root_output, "projwfc")
+    return _get_optional_output(projwfc, "Dos")
 
 
 def _band_and_dos_properties(
@@ -2228,6 +2426,9 @@ def _create_band_and_dos_objects(
         preview_override=_preview_override(preview_overrides, workchain, "bands"),
     )
 
+    if dos_node is None:
+        return (bands_object,)
+
     dos_properties = _apply_property_overrides(
         dos_properties, property_overrides, workchain, "pdos"
     )
@@ -2264,7 +2465,7 @@ def NanoribbonWorkChain_export(
     bands = calculations["bands"]
     export_pdos = calculations["export_pdos"]
 
-    output_parameters = scf.outputs.output_parameters.get_dict()
+    output_parameters = _node_mapping(scf.outputs.output_parameters)
     dft_parameters = _qe_dft_from_calculation(scf)
     final_structure = (
         cell_opt.outputs.output_structure
@@ -2355,9 +2556,9 @@ def PwRelaxWorkChain_export(
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
         executable_ids = _ensure_executables(openbis_session, workchain)
-    input_parameters = workchain.inputs.base.pw.parameters.get_dict()
-    output_parameters = workchain.outputs.output_parameters.get_dict()
-    dft_parameters = get_dft_parameters_qe(workchain.inputs.base, output_parameters)
+    input_parameters = _node_mapping(_pw_relax_base(workchain).pw.parameters)
+    output_parameters = _node_mapping(workchain.outputs.output_parameters)
+    dft_parameters = get_dft_parameters_qe(_pw_relax_base(workchain), output_parameters)
     control = input_parameters.get("CONTROL", {})
     calculation = str(control.get("calculation", "relax")).lower()
     cell_optimization = calculation == "vc-relax"
@@ -2430,11 +2631,12 @@ def BandsWorkChain_export(
         root_in = workchain.inputs.bands_projwfc
         root_out = workchain.outputs.bands_projwfc
 
-    output_parameters = root_out.scf_parameters.get_dict()
+    output_parameters = _node_mapping(root_out.scf_parameters)
     dft_parameters = get_dft_parameters_qe(root_in.bands, output_parameters)
     structure_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
     )
+    dos_node = _bands_dos_node(root_out)
     return _create_band_and_dos_objects(
         openbis_session,
         experiment_id,
@@ -2442,7 +2644,7 @@ def BandsWorkChain_export(
         dft_parameters,
         output_parameters,
         root_out.band_structure,
-        root_out.projwfc.Dos,
+        dos_node,
         structure_object,
         aiida_node_id,
         executable_ids,
@@ -2464,7 +2666,7 @@ def PdosWorkChain_export(
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
         executable_ids = _ensure_executables(openbis_session, workchain)
-    output_parameters = workchain.outputs.nscf.output_parameters.get_dict()
+    output_parameters = _node_mapping(workchain.outputs.nscf.output_parameters)
     dft_parameters = get_dft_parameters_qe(workchain.inputs.scf, output_parameters)
     structure_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
@@ -2527,7 +2729,7 @@ def VibroWorkChain_export(
     )
     if pw_base is None:
         raise ValueError("The vibrational workflow does not contain a PwBaseWorkChain.")
-    output_parameters = pw_base.outputs.output_parameters.get_dict()
+    output_parameters = _node_mapping(pw_base.outputs.output_parameters)
     dft_parameters = get_dft_parameters_qe(pw_base.inputs, output_parameters)
     properties = _simulation_properties(
         workchain,
@@ -2643,6 +2845,45 @@ def Cp2kGeoOptWorkChain_export(
     return geometry_object
 
 
+def QeBanduppyUnfoldingWorkChain_export(
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
+    preview_overrides=None,
+    property_overrides=None,
+):
+    """Export QE/BandUPpy output as a dedicated band-unfolding result."""
+    workchain = orm.load_node(workchain_uuid)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
+    definition = _qe_banduppy_property_definition(
+        workchain,
+        aiida_node_id=aiida_node_id,
+        executable_ids=executable_ids,
+    )["band_unfolding"]
+    properties = _apply_property_overrides(
+        definition["properties"], property_overrides, workchain, "band_unfolding"
+    )
+    structure_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
+    )
+    return _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        OPENBIS_SIMULATION_TYPES["Band Unfolding"],
+        properties,
+        [structure_object],
+        lambda path: _render_unfolding_preview(workchain, path),
+        "band_unfolding",
+        preview_override=_preview_override(
+            preview_overrides, workchain, "band_unfolding"
+        ),
+    )
+
+
 def Cp2kScfWorkChain_export(
     openbis_session,
     experiment_id,
@@ -2717,7 +2958,7 @@ def Cp2kScfWorkChain_export(
         band_object = _create_simulation_object(
             openbis_session,
             experiment_id,
-            OPENBIS_SIMULATION_TYPES["Band Structure"],
+            OPENBIS_SIMULATION_TYPES["Band Unfolding"],
             band_properties,
             [structure_object],
             lambda path: _render_unfolding_preview(workchain, path),
@@ -2866,6 +3107,7 @@ workchain_exporters = {
     "VibroWorkChain": VibroWorkChain_export,
     "Cp2kGeoOptWorkChain": Cp2kGeoOptWorkChain_export,
     "Cp2kScfWorkChain": Cp2kScfWorkChain_export,
+    "QeBanduppyUnfoldingWorkChain": QeBanduppyUnfoldingWorkChain_export,
     "Cp2kStmWorkChain": Cp2kStmWorkChain_export,
     "Cp2kReplicaWorkChain": Cp2kMepWorkChain_export,
     "Cp2kNebWorkChain": Cp2kMepWorkChain_export,
@@ -2880,7 +3122,7 @@ def _result_property_definitions(workchain):
     if process_label == "NanoribbonWorkChain":
         calculations = _find_nanoribbon_calculations(workchain)
         scf = calculations["scf"]
-        output_parameters = scf.outputs.output_parameters.get_dict()
+        output_parameters = _node_mapping(scf.outputs.output_parameters)
         dft_parameters = _qe_dft_from_calculation(scf)
         band_properties, dos_properties = _band_and_dos_properties(
             workchain,
@@ -2929,9 +3171,9 @@ def _result_property_definitions(workchain):
         return definitions
 
     if process_label == "PwRelaxWorkChain":
-        input_parameters = workchain.inputs.base.pw.parameters.get_dict()
-        output_parameters = workchain.outputs.output_parameters.get_dict()
-        dft_parameters = get_dft_parameters_qe(workchain.inputs.base, output_parameters)
+        input_parameters = _node_mapping(_pw_relax_base(workchain).pw.parameters)
+        output_parameters = _node_mapping(workchain.outputs.output_parameters)
+        dft_parameters = get_dft_parameters_qe(_pw_relax_base(workchain), output_parameters)
         calculation = str(
             input_parameters.get("CONTROL", {}).get("calculation", "relax")
         ).lower()
@@ -2966,7 +3208,7 @@ def _result_property_definitions(workchain):
         except NotExistentAttributeError:
             root_in = workchain.inputs.bands_projwfc
             root_out = workchain.outputs.bands_projwfc
-        output_parameters = root_out.scf_parameters.get_dict()
+        output_parameters = _node_mapping(root_out.scf_parameters)
         dft_parameters = get_dft_parameters_qe(root_in.bands, output_parameters)
         band_properties, dos_properties = _band_and_dos_properties(
             workchain,
@@ -2978,19 +3220,21 @@ def _result_property_definitions(workchain):
             "Orbital-projected density of states generated from the AiiDA workflow. "
             "Full arrays are stored in the linked AiiDA archive.",
         )
-        return {
+        definitions = {
             "bands": {
                 "object_type": OPENBIS_SIMULATION_TYPES["Band Structure"],
                 "properties": band_properties,
-            },
-            "pdos": {
+            }
+        }
+        if _bands_dos_node(root_out) is not None:
+            definitions["pdos"] = {
                 "object_type": OPENBIS_SIMULATION_TYPES["DOS"],
                 "properties": dos_properties,
-            },
-        }
+            }
+        return definitions
 
     if process_label == "PdosWorkChain":
-        output_parameters = workchain.outputs.nscf.output_parameters.get_dict()
+        output_parameters = _node_mapping(workchain.outputs.nscf.output_parameters)
         dft_parameters = get_dft_parameters_qe(workchain.inputs.scf, output_parameters)
         properties = _simulation_properties(workchain, "PDOS", dft_parameters, None)
         properties.update(
@@ -3025,7 +3269,7 @@ def _result_property_definitions(workchain):
             raise ValueError(
                 "The vibrational workflow does not contain a PwBaseWorkChain."
             )
-        output_parameters = pw_base.outputs.output_parameters.get_dict()
+        output_parameters = _node_mapping(pw_base.outputs.output_parameters)
         dft_parameters = get_dft_parameters_qe(pw_base.inputs, output_parameters)
         properties = _simulation_properties(
             workchain, "Vibrational spectroscopy", dft_parameters, None
@@ -3081,6 +3325,9 @@ def _result_property_definitions(workchain):
             }
         }
 
+    if process_label == "QeBanduppyUnfoldingWorkChain":
+        return _qe_banduppy_property_definition(workchain)
+
     if process_label == "Cp2kScfWorkChain":
         return _cp2k_scf_property_definitions(workchain)
 
@@ -3111,7 +3358,7 @@ def _preview_definitions(workchain):
         calculations = _find_nanoribbon_calculations(workchain)
         cell_opt = calculations["cell_opt2"]
         scf = calculations["scf"]
-        output_parameters = scf.outputs.output_parameters.get_dict()
+        output_parameters = _node_mapping(scf.outputs.output_parameters)
         dos_node = _get_optional_output(calculations["export_pdos"].outputs, "Dos")
         if dos_node is None:
             raise ValueError(
@@ -3162,6 +3409,15 @@ def _preview_definitions(workchain):
             )
         ]
 
+    if process_label == "QeBanduppyUnfoldingWorkChain":
+        return [
+            (
+                "band_unfolding",
+                "Unfolded band structure",
+                "band_unfolding",
+                lambda path: _render_unfolding_preview(workchain, path),
+            )
+        ]
     if process_label == "Cp2kScfWorkChain":
         definitions = [
             (
@@ -3201,8 +3457,8 @@ def _preview_definitions(workchain):
             root_out = workchain.outputs.bands
         except NotExistentAttributeError:
             root_out = workchain.outputs.bands_projwfc
-        output_parameters = root_out.scf_parameters.get_dict()
-        return [
+        output_parameters = _node_mapping(root_out.scf_parameters)
+        definitions = [
             (
                 "bands",
                 "Electronic band structure",
@@ -3212,16 +3468,21 @@ def _preview_definitions(workchain):
                     path,
                     output_parameters.get("fermi_energy"),
                 ),
-            ),
-            (
-                "pdos",
-                "Projected density of states",
-                "pdos",
-                lambda path: _render_xy_preview(
-                    root_out.projwfc.Dos, path, "Projected density of states"
-                ),
-            ),
+            )
         ]
+        dos_node = _bands_dos_node(root_out)
+        if dos_node is not None:
+            definitions.append(
+                (
+                    "pdos",
+                    "Projected density of states",
+                    "pdos",
+                    lambda path: _render_xy_preview(
+                        dos_node, path, "Projected density of states"
+                    ),
+                )
+            )
+        return definitions
 
     if process_label == "PdosWorkChain":
         return [

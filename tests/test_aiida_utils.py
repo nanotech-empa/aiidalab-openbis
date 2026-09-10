@@ -1,8 +1,11 @@
+import io
+import json
 import importlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 
@@ -257,6 +260,27 @@ def test_fermi_energy_matches_multivalue_schema(aiida_utils):
     assert len(quantities) == 1
     assert quantities == [-3.2]
     assert aiida_utils._fermi_energy({}) is None
+
+
+def test_legacy_qe_mapping_and_namespace_compatibility(aiida_utils):
+    legacy = SimpleNamespace(
+        base=SimpleNamespace(attributes=SimpleNamespace(all={"value": 7}))
+    )
+    old_relax = SimpleNamespace(
+        inputs=SimpleNamespace(base_relax=SimpleNamespace(pw="legacy-pw"))
+    )
+
+    assert aiida_utils._node_mapping(FakeDict({"value": 3})) == {"value": 3}
+    assert aiida_utils._node_mapping(legacy) == {"value": 7}
+    assert aiida_utils._pw_relax_base(old_relax).pw == "legacy-pw"
+
+
+def test_bands_only_output_does_not_invent_pdos(aiida_utils):
+    bands_only = SimpleNamespace(band_structure=object())
+    with_pdos = SimpleNamespace(projwfc=SimpleNamespace(Dos="dos-node"))
+
+    assert aiida_utils._bands_dos_node(bands_only) is None
+    assert aiida_utils._bands_dos_node(with_pdos) == "dos-node"
 
 
 def test_executables_require_confirmation_and_reuse_openbis_links(
@@ -932,6 +956,12 @@ def test_mark_export_result_bypasses_pybis_attribute_validation(aiida_utils):
     assert obj._aiidalab_created is True
 
 
+def make_npz_bytes(**arrays):
+    buffer = io.BytesIO()
+    np.savez(buffer, **arrays)
+    return buffer.getvalue()
+
+
 class FakeRepository:
     def __init__(self, text_files=None, object_names=None):
         self.text_files = dict(text_files or {})
@@ -999,7 +1029,21 @@ def make_cp2k_scf_workchain(include_bader=True, include_unfolding=False):
         )
     if include_unfolding:
         outputs["unfolding_retrieved"] = SimpleNamespace(
-            base=SimpleNamespace(repository=FakeRepository())
+            base=SimpleNamespace(repository=FakeRepository(
+                {
+                    "unfolding_bands.npz": make_npz_bytes(
+                        supercell_matrix=[[2, 0, 0], [0, 2, 0], [0, 0, 1]],
+                        path_labels=["G", "K", "M", "G"],
+                        path_k_indices=[0, 1],
+                        path_x=[0.0, 1.0],
+                        ref_energy_ev=-5.0,
+                        evals_ev_spin_0=[-6.0, -4.0],
+                        weights_spin_0=[[1.0, 0.2], [0.4, 0.8]],
+                        x_ticks=[0.0, 1.0],
+                        x_tick_labels=["G", "K"],
+                    )
+                }
+            ))
         )
     return SimpleNamespace(
         uuid="cp2k-scf-uuid",
@@ -1010,13 +1054,131 @@ def make_cp2k_scf_workchain(include_bader=True, include_unfolding=False):
             structure=structure,
             cp2k_code=SimpleNamespace(description="CP2K"),
             dft_params=FakeDict(
-                {"charge": 0, "uks": False, "vdw": True, "xc_functional": "PBE"}
+                {"charge": 0, "multiplicity": 1, "uks": False, "vdw": True, "xc_functional": "PBE"}
             ),
             unfolding_path=SimpleNamespace(value="G-K-M-G"),
         ),
         outputs=SimpleNamespace(**outputs),
         called_descendants=[],
     )
+
+
+def make_qe_banduppy_workchain():
+    structure = SimpleNamespace(
+        uuid="mos2-supercell",
+        get_formula=lambda: "MoS2",
+    )
+    archive = make_npz_bytes(
+        unfolded_bandstructure=[
+            [0.0, 0.0, -4.0, 1.0],
+            [0.0, 0.0, -2.0, 0.5],
+            [1.0, 1.0, -3.5, 0.7],
+            [1.0, 1.0, -2.5, 0.8],
+        ],
+        kline=[0.0, 1.0],
+        special_labels=json.dumps({"0": "G", "1": "M"}),
+        supercell_matrix=[[6, 0, 0], [0, 6, 0], [0, 0, 1]],
+        fermi_energy=-3.0,
+    )
+    return SimpleNamespace(
+        uuid="qe-banduppy-uuid",
+        process_label="QeBanduppyUnfoldingWorkChain",
+        description="charged MoS2 unfolding",
+        is_finished_ok=True,
+        inputs=SimpleNamespace(
+            structure=structure,
+            parameters=FakeDict(
+                {"SYSTEM": {"tot_charge": -1.0, "vdw_corr": "grimme-d3"}}
+            ),
+            unfolding_parameters=FakeDict(
+                {
+                    "supercell_matrix": [[6, 0, 0], [0, 6, 0], [0, 0, 1]],
+                    "labels": ["G", "M", "K", "G"],
+                }
+            ),
+        ),
+        outputs=SimpleNamespace(
+            reference_bands_parameters=FakeDict(
+                {
+                    "dft_exchange_correlation": "PBE",
+                    "lsda": True,
+                    "non_colinear_calculation": False,
+                }
+            ),
+            banduppy_retrieved=SimpleNamespace(
+                base=SimpleNamespace(
+                    repository=FakeRepository({"unfolding_bands.npz": archive})
+                )
+            ),
+        ),
+        called_descendants=[],
+    )
+
+
+def test_qe_banduppy_properties_use_common_unfolding_schema(aiida_utils):
+    definition = aiida_utils._qe_banduppy_property_definition(
+        make_qe_banduppy_workchain(),
+        aiida_node_id="archive-permid",
+        executable_ids=["pw-executable", "banduppy-executable"],
+    )["band_unfolding"]
+
+    properties = definition["properties"]
+    assert definition["object_type"] == "BAND_UNFOLDING"
+    assert properties["unfolding_implementation"] == "BANDUPPY"
+    assert properties["charge"] == pytest.approx(-1.0)
+    assert properties["method_modifiers"] == ["VDW", "SPIN_COLLINEAR"]
+    assert json.loads(properties["supercell_matrix"]) == [
+        [6, 0, 0],
+        [0, 6, 0],
+        [0, 0, 1],
+    ]
+    assert properties["k_path"] == "G-M-K-G"
+    assert properties["fermi_energy_ev"] == pytest.approx([-3.0])
+    assert properties["energy_min_ev"] == pytest.approx(-1.0)
+    assert properties["energy_max_ev"] == pytest.approx(1.0)
+    assert properties["executables"] == [
+        "pw-executable",
+        "banduppy-executable",
+    ]
+
+
+@pytest.mark.parametrize(
+    "workchain",
+    [
+        make_cp2k_scf_workchain(include_bader=False, include_unfolding=True),
+        make_qe_banduppy_workchain(),
+    ],
+)
+def test_unfolding_preview_supports_cp2k_and_banduppy(
+    aiida_utils, tmp_path, workchain
+):
+    output = tmp_path / f"{workchain.process_label}.png"
+    aiida_utils._render_unfolding_preview(workchain, output)
+    assert output.is_file()
+    assert output.stat().st_size > 0
+
+
+def test_qe_banduppy_export_uses_input_supercell_as_parent(
+    monkeypatch, aiida_utils
+):
+    workchain = make_qe_banduppy_workchain()
+    created, previews, structures, session = configure_export_mocks(
+        monkeypatch, aiida_utils, workchain
+    )
+
+    result = aiida_utils.QeBanduppyUnfoldingWorkChain_export(
+        session,
+        "/PROJECT/EXPERIMENT",
+        workchain.uuid,
+        [],
+        "archive-permid",
+        executable_ids=["pw-executable", "banduppy-executable"],
+    )
+
+    assert [obj.type for obj in created] == ["BAND_UNFOLDING"]
+    assert result.parents == [structures["mos2-supercell"]]
+    assert result.props["aiida_node"] == "archive-permid"
+    assert [stem for _obj, stem in previews] == ["band_unfolding"]
 
 
 def test_cp2k_fermi_and_gap_values_preserve_spin_channels(aiida_utils):
@@ -1090,9 +1252,20 @@ def test_cp2k_scf_properties_add_unfolding_band_without_duplicate_arrays(
         executable_ids=["cp2k-executable", "unfolding-executable"],
     )
 
-    band = definitions["band_unfolding"]["properties"]
-    assert band["band_gap_ev"] == pytest.approx(11.176662)
+    definition = definitions["band_unfolding"]
+    band = definition["properties"]
+    assert definition["object_type"] == "BAND_UNFOLDING"
+    assert band["unfolding_implementation"] == "CP2K_SPARSE_AO"
+    assert band["spin_multiplicity"] == 1
+    assert json.loads(band["supercell_matrix"]) == [
+        [2, 0, 0],
+        [0, 2, 0],
+        [0, 0, 1],
+    ]
     assert band["k_path"] == "G-K-M-G"
+    assert band["fermi_energy_ev"] == pytest.approx([-9.320618])
+    assert band["energy_min_ev"] == pytest.approx(-1.0)
+    assert band["energy_max_ev"] == pytest.approx(1.0)
     assert band["executables"] == [
         "cp2k-executable",
         "unfolding-executable",

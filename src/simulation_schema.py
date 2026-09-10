@@ -74,6 +74,11 @@ VOCABULARIES = {
         ("NEB", "NEB"),
         ("CI_NEB", "CI-NEB"),
     ],
+    "UNFOLDING_IMPLEMENTATION_ENUM": [
+        ("BANDUPPY", "BandUPpy"),
+        ("CP2K_SPARSE_AO", "CP2K sparse-AO"),
+        ("OTHER", "Other"),
+    ],
     "SPM_MODE_ENUM": [
         ("STM", "STM"),
         ("STS", "STS"),
@@ -195,6 +200,17 @@ PROPERTY_TYPES = {
         ),
         prop("ENERGY_MIN_EV", "Minimum energy (eV)", "REAL"),
         prop("ENERGY_MAX_EV", "Maximum energy (eV)", "REAL"),
+        prop(
+            "UNFOLDING_IMPLEMENTATION",
+            "Unfolding implementation",
+            "CONTROLLEDVOCABULARY",
+            vocabulary="UNFOLDING_IMPLEMENTATION_ENUM",
+        ),
+        prop(
+            "SUPERCELL_MATRIX",
+            "Supercell matrix",
+            "MULTILINE_VARCHAR",
+        ),
         prop(
             "MEP_METHOD",
             "MEP method",
@@ -358,6 +374,26 @@ OBJECT_TYPES = {
             assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
             assignment("K_PATH", False, "Results"),
             assignment("ELECTRONIC_GAP_TYPE", False, "Results"),
+        ]
+        + SPIN
+        + [assignment("COMMENTS", False, "General information")]
+        + PROVENANCE,
+    ),
+    "BAND_UNFOLDING": object_type(
+        "UNFD",
+        "Electronic band unfolding from a supercell to a primitive-cell path.",
+        [assignment("NAME", True, "General information")]
+        + METHOD
+        + [
+            assignment("METHOD_LABEL", True, "Method"),
+            assignment("UNFOLDING_IMPLEMENTATION", True, "Method"),
+            assignment("SUPERCELL_MATRIX", True, "Unfolding settings"),
+            assignment("K_PATH", True, "Unfolding settings"),
+            assignment("CONVERGED", True, "Results"),
+            assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
+            assignment("ENERGY_MIN_EV", False, "Results"),
+            assignment("ENERGY_MAX_EV", False, "Results"),
+            assignment("PROJECTION_DESCRIPTION", False, "Results"),
         ]
         + SPIN
         + [assignment("COMMENTS", False, "General information")]
