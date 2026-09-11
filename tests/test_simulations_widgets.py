@@ -1006,7 +1006,13 @@ def test_manual_simulation_fields_follow_new_schema(simulations_widgets):
     assert values["converged"] is False
     assert values["method_family"] == "MFH_TB"
     assert values["method_modifiers"] == ["DFT_U", "SPIN_ORBIT"]
+    assert isinstance(
+        widget.fields["METHOD_MODIFIERS"], simulations_widgets.MultiCheckboxWidget
+    )
+    assert widget.fields["METHOD_MODIFIERS"]._checkboxes["DFT_U"].value is True
+    assert widget.fields["METHOD_MODIFIERS"]._checkboxes["SPIN_ORBIT"].value is True
     assert widget.fields["METHOD_FAMILY"].description == "Method family *"
+    assert widget.fields["METHOD_LABEL"].description == "Method label"
     assert dict(widget.fields["METHOD_FAMILY"].options)["MFH-TB"] == "MFH_TB"
     widget.load_widgets("-1")
     assert widget.children == ()

@@ -472,7 +472,7 @@ def get_dft_parameters_cp2k(code_description, dft_para):
     """Retrieves from CP2K workchains teh parameters to define the DFT object. Very preliminary"""
 
     return {
-        "xc_functional": dft_para.get("xc_functional", dft_para.get("xc", "PBE")),
+        "xc_functional": dft_para.get("xc_functional", dft_para.get("xc", "")),
         "plus_u": bool(dft_para.get("plus_u", False)),
         "spin_orbit_coupling": bool(dft_para.get("spin_orbit_coupling", False)),
         "non_collinear": bool(dft_para.get("non_collinear", False)),
@@ -1375,7 +1375,9 @@ def _simulation_properties(
     if description:
         properties["comments"] = description
     if method_label:
-        properties["method_label"] = str(dft_parameters.get("xc_functional", "unknown"))
+        label = str(dft_parameters.get("xc_functional", "")).strip()
+        if label.lower() not in {"", "unknown", "none", "n/a"}:
+            properties["method_label"] = label
     if executable_ids is not None:
         properties["executables"] = list(executable_ids)
     multiplicity = dft_parameters.get("multiplicity")
@@ -1389,6 +1391,175 @@ def _fermi_energy(output_parameters):
     if value is None:
         return None
     return [float(value)]
+
+
+def _namespace_value(namespace, label):
+    """Return one value from an AiiDA namespace or a plain mapping."""
+    if isinstance(namespace, dict):
+        return namespace.get(label)
+    return _get_optional_output(namespace, label)
+
+
+def _nested_array_data(value, seen=None):
+    """Yield array-data leaves from a nested AiiDA output namespace."""
+    if value is None:
+        return
+    if seen is None:
+        seen = set()
+    identity = id(value)
+    if identity in seen:
+        return
+    seen.add(identity)
+    if callable(getattr(value, "get_arraynames", None)):
+        yield value
+        return
+    values = value.values if isinstance(value, dict) else getattr(value, "values", None)
+    if callable(values):
+        for child in values():
+            yield from _nested_array_data(child, seen)
+
+
+def _qe_vibrational_mode(workchain):
+    """Classify all spectra represented by one QE VibroWorkChain object."""
+    has_ir = False
+    has_raman = False
+    output_namespaces = []
+    for branch_name in ("harmonic", "iraman"):
+        branch = _namespace_value(workchain.outputs, branch_name)
+        output_namespaces.append(_namespace_value(branch, "vibrational_data"))
+    output_namespaces.append(
+        _namespace_value(workchain.outputs, "vibrational_data")
+    )
+
+    for namespace in output_namespaces:
+        for node in _nested_array_data(namespace):
+            array_names = set(node.get_arraynames())
+            try:
+                attributes = node.base.attributes.all
+            except AttributeError:
+                attributes = {}
+            has_ir = has_ir or (
+                "born_charges" in array_names and "dielectric" in attributes
+            )
+            has_raman = has_raman or "raman_tensors" in array_names
+
+    if has_ir and has_raman:
+        return "PHONONS_IR_RAMAN"
+    if has_ir:
+        return "PHONONS_IR"
+    if has_raman:
+        return "PHONONS_RAMAN"
+    return "PHONONS"
+
+
+def _qe_relax_number_of_steps(workchain, output_parameters):
+    """Return the total number of ionic steps across direct QE relax blocks."""
+    steps = 0
+    found = False
+    for child in getattr(workchain, "called", ()) or ():
+        if getattr(child, "process_label", "") != "PwBaseWorkChain":
+            continue
+        child_output = _get_optional_output(child.outputs, "output_parameters")
+        if child_output is None:
+            continue
+        child_parameters = _node_mapping(child_output)
+        child_steps = child_parameters.get("number_ionic_steps")
+        if child_steps is None:
+            child_steps = (
+                child_parameters.get("convergence_info", {})
+                .get("opt_conv", {})
+                .get("n_opt_steps")
+            )
+        if child_steps is not None:
+            steps += int(child_steps)
+            found = True
+    if found:
+        return steps
+    fallback = output_parameters.get("number_ionic_steps")
+    return int(fallback) if fallback is not None else None
+
+
+def _qe_relax_metadata(workchain, output_parameters):
+    """Extract optional scientific metadata from a QE relaxation result."""
+    metadata = {}
+    trajectory = _get_optional_output(workchain.outputs, "output_trajectory")
+    if trajectory is not None:
+        try:
+            forces = np.asarray(trajectory.get_array("forces"), dtype=float)
+            final_forces = forces[-1]
+            max_force = float(np.linalg.norm(final_forces, axis=-1).max())
+            units = str(output_parameters.get("forces_units", "")).lower()
+            normalized_units = re.sub(r"\s+", "", units)
+            if normalized_units in {"ev/angstrom", "ev/ang", "ev/a"}:
+                max_force *= Bohr / Hartree
+            elif normalized_units in {"ry/bohr", "rydberg/bohr"}:
+                max_force *= 0.5
+            elif normalized_units not in {
+                "ha/bohr",
+                "hartree/bohr",
+                "a.u.",
+                "au",
+            }:
+                max_force = None
+            if max_force is not None:
+                metadata["final_max_force_hartree_per_bohr"] = max_force
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+
+    number_of_steps = _qe_relax_number_of_steps(workchain, output_parameters)
+    if number_of_steps is not None:
+        metadata["number_of_steps"] = number_of_steps
+
+    fermi = _fermi_energy(output_parameters)
+    if fermi is not None:
+        metadata["fermi_energy_ev"] = fermi
+
+    bands = _get_optional_output(workchain.outputs, "output_band")
+    electron_count = output_parameters.get("number_of_electrons")
+    if bands is not None and electron_count is not None:
+        try:
+            _is_insulator, gap, _homo, _lumo = find_bandgap(
+                bands.uuid, number_electrons=electron_count
+            )
+        except (AttributeError, TypeError, ValueError):
+            gap = None
+        if gap is not None:
+            metadata["electronic_gap_ev"] = [float(gap)]
+
+    magnetization = output_parameters.get("total_magnetization")
+    if magnetization is not None:
+        metadata["total_magnetization_bohr_magneton"] = float(magnetization)
+    return metadata
+
+
+def _qe_relax_properties(workchain, aiida_node_id=None, executable_ids=None):
+    """Build the shared openBIS properties for a QE relaxation."""
+    base = _pw_relax_base(workchain)
+    input_parameters = _node_mapping(base.pw.parameters)
+    output_parameters = _node_mapping(workchain.outputs.output_parameters)
+    dft_parameters = get_dft_parameters_qe(base, output_parameters)
+    calculation = str(
+        input_parameters.get("CONTROL", {}).get("calculation", "relax")
+    ).lower()
+    properties = _simulation_properties(
+        workchain,
+        "Geometry optimization",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    properties.update(
+        {
+            "constrained": False,
+            "cell_optimization": calculation == "vc-relax",
+            "final_energy_hartree": _energy_in_hartree(output_parameters),
+        }
+    )
+    cell_constraints = input_parameters.get("CELL", {}).get("cell_dofree")
+    if cell_constraints:
+        properties["cell_constraints"] = str(cell_constraints)
+    properties.update(_qe_relax_metadata(workchain, output_parameters))
+    return properties
 
 
 def _input_value(workchain, label, default=None):
@@ -1664,7 +1835,6 @@ def _cp2k_scf_property_definitions(
         "Energy calculation",
         dft_parameters,
         aiida_node_id,
-        method_label=False,
         executable_ids=_scf_executable_ids(workchain, executable_ids, "energy"),
         result_role="energy_calculation",
     )
@@ -2548,7 +2718,6 @@ def NanoribbonWorkChain_export(
             "Geometry optimization",
             dft_parameters,
             aiida_node_id,
-            method_label=False,
             executable_ids=executable_ids,
         )
         properties.update(
@@ -2602,31 +2771,9 @@ def PwRelaxWorkChain_export(
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
         executable_ids = _ensure_executables(openbis_session, workchain)
-    input_parameters = _node_mapping(_pw_relax_base(workchain).pw.parameters)
-    output_parameters = _node_mapping(workchain.outputs.output_parameters)
-    dft_parameters = get_dft_parameters_qe(_pw_relax_base(workchain), output_parameters)
-    control = input_parameters.get("CONTROL", {})
-    calculation = str(control.get("calculation", "relax")).lower()
-    cell_optimization = calculation == "vc-relax"
-
-    properties = _simulation_properties(
-        workchain,
-        "Geometry optimization",
-        dft_parameters,
-        aiida_node_id,
-        method_label=False,
-        executable_ids=executable_ids,
+    properties = _qe_relax_properties(
+        workchain, aiida_node_id, executable_ids=executable_ids
     )
-    properties.update(
-        {
-            "constrained": False,
-            "cell_optimization": cell_optimization,
-            "final_energy_hartree": _energy_in_hartree(output_parameters),
-        }
-    )
-    cell_constraints = input_parameters.get("CELL", {}).get("cell_dofree")
-    if cell_constraints:
-        properties["cell_constraints"] = str(cell_constraints)
 
     properties = _apply_property_overrides(
         properties, property_overrides, workchain, "geometry_optimization"
@@ -2784,7 +2931,7 @@ def VibroWorkChain_export(
         aiida_node_id,
         executable_ids=executable_ids,
     )
-    properties["vibrational_mode"] = "PHONONS"
+    properties["vibrational_mode"] = _qe_vibrational_mode(workchain)
     properties = _apply_property_overrides(
         properties, property_overrides, workchain, "vibrational_spectroscopy"
     )
@@ -2841,7 +2988,6 @@ def Cp2kGeoOptWorkChain_export(
         "Geometry optimization",
         dft_parameters,
         aiida_node_id,
-        method_label=False,
         executable_ids=executable_ids,
     )
     properties.update(
@@ -3196,7 +3342,6 @@ def _result_property_definitions(workchain):
                 "Geometry optimization",
                 dft_parameters,
                 None,
-                method_label=False,
             )
             properties.update(
                 {
@@ -3217,29 +3362,7 @@ def _result_property_definitions(workchain):
         return definitions
 
     if process_label == "PwRelaxWorkChain":
-        input_parameters = _node_mapping(_pw_relax_base(workchain).pw.parameters)
-        output_parameters = _node_mapping(workchain.outputs.output_parameters)
-        dft_parameters = get_dft_parameters_qe(_pw_relax_base(workchain), output_parameters)
-        calculation = str(
-            input_parameters.get("CONTROL", {}).get("calculation", "relax")
-        ).lower()
-        properties = _simulation_properties(
-            workchain,
-            "Geometry optimization",
-            dft_parameters,
-            None,
-            method_label=False,
-        )
-        properties.update(
-            {
-                "constrained": False,
-                "cell_optimization": calculation == "vc-relax",
-                "final_energy_hartree": _energy_in_hartree(output_parameters),
-            }
-        )
-        cell_constraints = input_parameters.get("CELL", {}).get("cell_dofree")
-        if cell_constraints:
-            properties["cell_constraints"] = str(cell_constraints)
+        properties = _qe_relax_properties(workchain)
         return {
             "geometry_optimization": {
                 "object_type": OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
@@ -3320,7 +3443,7 @@ def _result_property_definitions(workchain):
         properties = _simulation_properties(
             workchain, "Vibrational spectroscopy", dft_parameters, None
         )
-        properties["vibrational_mode"] = "PHONONS"
+        properties["vibrational_mode"] = _qe_vibrational_mode(workchain)
         return {
             "vibrational_spectroscopy": {
                 "object_type": OPENBIS_SIMULATION_TYPES["Vibrational Spectroscopy"],
@@ -3341,7 +3464,6 @@ def _result_property_definitions(workchain):
             "Geometry optimization",
             dft_parameters,
             None,
-            method_label=False,
         )
         properties.update(
             {

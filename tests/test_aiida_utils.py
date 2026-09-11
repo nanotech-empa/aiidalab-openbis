@@ -262,6 +262,107 @@ def test_fermi_energy_matches_multivalue_schema(aiida_utils):
     assert aiida_utils._fermi_energy({}) is None
 
 
+@pytest.mark.parametrize(
+    ("arrays", "attributes", "expected"),
+    [
+        (("force_constants",), {}, "PHONONS"),
+        (("force_constants", "born_charges"), {"dielectric": [[1.0]]}, "PHONONS_IR"),
+        (("force_constants", "raman_tensors"), {}, "PHONONS_RAMAN"),
+        (
+            ("force_constants", "born_charges", "raman_tensors"),
+            {"dielectric": [[1.0]]},
+            "PHONONS_IR_RAMAN",
+        ),
+    ],
+)
+def test_qe_vibrational_mode_follows_single_vibro_workchain(
+    aiida_utils, arrays, attributes, expected
+):
+    data = SimpleNamespace(
+        get_arraynames=lambda: arrays,
+        base=SimpleNamespace(attributes=SimpleNamespace(all=attributes)),
+    )
+    workchain = SimpleNamespace(
+        outputs={"harmonic": {"vibrational_data": {"result": data}}}
+    )
+
+    assert aiida_utils._qe_vibrational_mode(workchain) == expected
+
+
+def test_qe_relax_metadata_uses_final_forces_and_direct_ionic_steps(
+    monkeypatch, aiida_utils
+):
+    trajectory = SimpleNamespace(
+        get_array=lambda name: np.asarray(
+            [
+                [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+                [[0.003, 0.004, 0.0], [0.0, 0.0, 0.0]],
+            ]
+        )
+        if name == "forces"
+        else None
+    )
+    called = [
+        SimpleNamespace(
+            process_label="PwBaseWorkChain",
+            outputs=SimpleNamespace(
+                output_parameters=FakeDict({"number_ionic_steps": 2})
+            ),
+        ),
+        SimpleNamespace(
+            process_label="PwBaseWorkChain",
+            outputs=SimpleNamespace(
+                output_parameters=FakeDict({"number_ionic_steps": 0})
+            ),
+        ),
+    ]
+    workchain = SimpleNamespace(
+        called=called,
+        outputs=SimpleNamespace(
+            output_trajectory=trajectory,
+            output_band=SimpleNamespace(uuid="bands-uuid"),
+        ),
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "find_bandgap",
+        lambda *_args, **_kwargs: (True, 0.47, 6.1, 6.57),
+    )
+
+    metadata = aiida_utils._qe_relax_metadata(
+        workchain,
+        {
+            "forces_units": "eV / angstrom",
+            "fermi_energy": 6.166,
+            "number_of_electrons": 8.0,
+            "total_magnetization": 0.0,
+        },
+    )
+
+    assert metadata["final_max_force_hartree_per_bohr"] == pytest.approx(
+        0.005 * aiida_utils.Bohr / aiida_utils.Hartree
+    )
+    assert metadata["number_of_steps"] == 2
+    assert metadata["fermi_energy_ev"] == [6.166]
+    assert metadata["electronic_gap_ev"] == [0.47]
+    assert metadata["total_magnetization_bohr_magneton"] == 0.0
+
+
+def test_unknown_method_label_is_omitted(aiida_utils):
+    workchain = SimpleNamespace(
+        uuid="workflow-uuid",
+        description="",
+        is_finished_ok=True,
+        inputs=SimpleNamespace(),
+    )
+
+    properties = aiida_utils._simulation_properties(
+        workchain, "Energy calculation", {"xc_functional": "unknown"}, None
+    )
+
+    assert "method_label" not in properties
+
+
 def test_legacy_qe_mapping_and_namespace_compatibility(aiida_utils):
     legacy = SimpleNamespace(
         base=SimpleNamespace(attributes=SimpleNamespace(all={"value": 7}))

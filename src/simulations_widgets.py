@@ -2492,6 +2492,54 @@ class SimulationDetailsWidget(ipw.VBox):
         self.reacprod_concepts_accordion.children = reacprod_concepts_accordion_children
 
 
+class MultiCheckboxWidget(ipw.HBox):
+    """Explicit multi-value controlled-vocabulary editor."""
+
+    def __init__(self, options, description):
+        self.description = description
+        self.options = tuple(options)
+        self._checkboxes = {
+            code: ipw.Checkbox(
+                value=False,
+                description=label,
+                indent=False,
+                layout=ipw.Layout(width="195px"),
+            )
+            for label, code in self.options
+        }
+        label_widget = ipw.Label(
+            value=description, layout=ipw.Layout(width="220px")
+        )
+        options_widget = ipw.Box(
+            children=tuple(self._checkboxes.values()),
+            layout=ipw.Layout(
+                display="flex", flex_flow="row wrap", width="630px"
+            ),
+        )
+        super().__init__(
+            children=(label_widget, options_widget),
+            layout=ipw.Layout(width="850px", align_items="flex-start"),
+        )
+
+    @property
+    def value(self):
+        return tuple(
+            code for code, checkbox in self._checkboxes.items() if checkbox.value
+        )
+
+    @value.setter
+    def value(self, selected):
+        selected = set(selected or ())
+        unknown = selected.difference(self._checkboxes)
+        if unknown:
+            raise ValueError(
+                "Unknown controlled-vocabulary values: "
+                + ", ".join(sorted(unknown))
+            )
+        for code, checkbox in self._checkboxes.items():
+            checkbox.value = code in selected
+
+
 class SimulationPropertiesWidget(ipw.VBox):
     """Schema-driven editor for manual, non-AiiDA simulation records."""
 
@@ -2535,12 +2583,7 @@ class SimulationPropertiesWidget(ipw.VBox):
         if data_type == "CONTROLLEDVOCABULARY":
             options = cls._vocabulary_options(property_definition)
             if property_definition.get("multiValue"):
-                return ipw.SelectMultiple(
-                    options=options,
-                    description=label,
-                    style=style,
-                    layout=ipw.Layout(width="850px", height="100px"),
-                )
+                return MultiCheckboxWidget(options=options, description=label)
             return ipw.Dropdown(
                 options=[("Select...", "")] + options,
                 description=label,

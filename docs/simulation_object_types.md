@@ -270,6 +270,7 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
 fermi_energy_ev: float[] (eV)
@@ -410,6 +411,7 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 constraints_description: text
 cell_constraints: string
 final_max_force_hartree_per_bohr: float (Hartree/bohr)
@@ -537,7 +539,6 @@ tar.gz or zip with relevant input/output files
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 band_gap_ev: float (eV)
 converged: boolean
@@ -546,6 +547,7 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 fermi_energy_ev: float[] (eV)
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
@@ -681,7 +683,6 @@ input_output_bundle
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 unfolding_implementation: enum
 supercell_matrix: text containing a JSON matrix
@@ -692,6 +693,7 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 fermi_energy_ev: float[] (eV)
 energy_min_ev: float (eV relative to the stored reference)
 energy_max_ev: float (eV relative to the stored reference)
@@ -840,7 +842,6 @@ tar.gz or zip with relevant input/output files, including a file containing the 
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 charge_analysis_method: string
 converged: boolean
@@ -849,6 +850,7 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
 fermi_energy_ev: float[] (eV)
@@ -991,7 +993,6 @@ tar.gz or zip with relevant input/output files, including a file containing the 
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 PDOS: boolean
 converged: boolean
@@ -1006,6 +1007,7 @@ projection_description: text
 ## Optional properties
 
 ```text
+method_label: string
 fermi_energy_ev: float[] (eV)
 energy_min_ev: float (eV)
 energy_max_ev: float (eV)
@@ -1150,7 +1152,6 @@ tar.gz or zip with relevant input/output files, including a file containing the 
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 mep_method: enum
 relative_energies_ev: float[] (eV, relative to the initial endpoint)
@@ -1163,6 +1164,7 @@ number_of_images: integer
 ## Optional properties
 
 ```text
+method_label: string
 neb_variant: enum
 other_method_description: text
 collective_variables: text
@@ -1329,7 +1331,6 @@ tar.gz or zip with relevant input/output files, including the simulated SPM imag
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 spm_mode: enum
 converged: boolean
@@ -1338,6 +1339,7 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 bias_voltage_v: float (V)
 height_angstrom: float (angstrom)
 isovalue_au: float (a.u.)
@@ -1472,7 +1474,6 @@ tar.gz or zip with relevant input/output files, including vibrational frequencie
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 vibrational_mode: enum
 converged: boolean
@@ -1481,6 +1482,7 @@ converged: boolean
 ## Optional properties
 
 ```text
+method_label: string
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
@@ -1490,10 +1492,18 @@ comments: text
 
 ```text
 Phonons
-IR
-Raman
-IR+Raman
+Phonons + IR
+Phonons + Raman
+Phonons + IR + Raman
 ```
+
+## AiiDA mapping
+
+The QE app launches one `VibroWorkChain`. Export one
+`VIBRATIONAL_SPECTROSCOPY` object for that workchain. Its mode records all
+results present in the shared vibrational data: `Phonons`, `Phonons + IR`,
+`Phonons + Raman`, or `Phonons + IR + Raman`. Do not split that single workflow
+into separate phonon, IR, and Raman objects.
 
 ## Required linked content
 
@@ -1634,7 +1644,6 @@ tar.gz or zip with relevant input/output files, including the trajectory or traj
 name: string
 method_family: enum
 method_modifiers: enum[]
-method_label: string
 charge: number
 time_step_fs: float (fs)
 total_time_fs: float (fs)
@@ -1644,6 +1653,7 @@ completed: boolean
 ## Optional properties
 
 ```text
+method_label: string
 ensemble: enum
 temperature_k: float (K)
 pressure_bar: float (bar)

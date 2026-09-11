@@ -87,9 +87,9 @@ VOCABULARIES = {
     ],
     "VIBRATIONAL_MODE_ENUM": [
         ("PHONONS", "Phonons"),
-        ("IR", "IR"),
-        ("RAMAN", "Raman"),
-        ("IR_RAMAN", "IR+Raman"),
+        ("PHONONS_IR", "Phonons + IR"),
+        ("PHONONS_RAMAN", "Phonons + Raman"),
+        ("PHONONS_IR_RAMAN", "Phonons + IR + Raman"),
     ],
     "MD_ENSEMBLE_ENUM": [
         ("NVE", "NVE"),
@@ -312,6 +312,9 @@ METHOD = [
     # Empty modifier lists are valid, so this cannot be mandatory in openBIS.
     assignment("METHOD_MODIFIERS", False, "Method"),
     assignment("CHARGE", True, "Method"),
+    # A concise method name is useful when AiiDA exposes one (for example
+    # PBESOL or PBE0), but manual and legacy simulations may not provide it.
+    assignment("METHOD_LABEL", False, "Method"),
 ]
 PROVENANCE = [
     assignment("EXECUTABLES", False, "Provenance"),
@@ -384,7 +387,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("BAND_GAP_EV", True, "Results"),
             assignment("CONVERGED", True, "Results"),
             assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
@@ -401,7 +403,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("UNFOLDING_IMPLEMENTATION", True, "Method"),
             assignment("SUPERCELL_MATRIX", True, "Unfolding settings"),
             assignment("K_PATH", True, "Unfolding settings"),
@@ -421,7 +422,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("CHARGE_ANALYSIS_METHOD", True, "Method"),
             assignment("CONVERGED", True, "Results"),
             assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
@@ -437,7 +437,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("PDOS", True, "Results"),
             assignment("PROJECTION_DESCRIPTION", False, "Results"),
             assignment("CONVERGED", True, "Results"),
@@ -456,7 +455,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("MEP_METHOD", True, "Method"),
             assignment("NEB_VARIANT", False, "Method"),
             assignment("OTHER_METHOD_DESCRIPTION", False, "Method"),
@@ -479,7 +477,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("SPM_MODE", True, "Method"),
             assignment("CONVERGED", True, "Results"),
             assignment("BIAS_VOLTAGE_V", False, "Simulation settings"),
@@ -499,7 +496,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("VIBRATIONAL_MODE", True, "Method"),
             assignment("CONVERGED", True, "Results"),
         ]
@@ -513,7 +509,6 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("METHOD_LABEL", True, "Method"),
             assignment("TIME_STEP_FS", True, "Simulation settings"),
             assignment("TOTAL_TIME_FS", True, "Simulation settings"),
             assignment("COMPLETED", True, "Results"),
@@ -657,9 +652,28 @@ def audit(session) -> dict[str, Any]:
     for code, terms in VOCABULARIES.items():
         existing = existing_or_none(session.get_vocabulary, code)
         differences = validate_vocabulary(existing, terms)
+        action = "reuse" if existing else "create"
         if differences:
-            errors.append(f"Vocabulary {code}: {'; '.join(differences)}")
-        vocabulary_actions.append((code, "reuse" if existing else "create"))
+            property_codes = [
+                property_code
+                for property_code, definition in PROPERTY_TYPES.items()
+                if definition.get("vocabulary") == code
+            ]
+            owners = sorted(
+                {
+                    owner
+                    for property_code in property_codes
+                    for owner in unsafe_assignment_owners(session, property_code)
+                }
+            )
+            if owners:
+                errors.append(
+                    f"Vocabulary {code} cannot be synchronized because these "
+                    f"assigned object types contain instances: {owners!r}"
+                )
+            else:
+                action = "synchronize terms"
+        vocabulary_actions.append((code, action))
 
     for code, expected in PROPERTY_TYPES.items():
         existing = existing_or_none(session.get_property_type, code)
@@ -769,6 +783,59 @@ def create_vocabulary(session, code: str, terms):
         )
         vocabulary.save()
     return vocabulary
+
+
+def synchronize_vocabulary(session, code: str, expected_terms):
+    """Synchronize one controlled vocabulary when none of its terms are in use."""
+    vocabulary = existing_or_none(session.get_vocabulary, code)
+    if vocabulary is None:
+        return create_vocabulary(session, code, expected_terms)
+
+    expected = dict(expected_terms)
+    current = {
+        str(row["code"]): row
+        for row in vocabulary.get_terms().df.to_dict("records")
+    }
+    if {term: str(row.get("label") or term) for term, row in current.items()} == expected:
+        return vocabulary
+
+    property_codes = [
+        property_code
+        for property_code, definition in PROPERTY_TYPES.items()
+        if definition.get("vocabulary") == code
+    ]
+    owners = sorted(
+        {
+            owner
+            for property_code in property_codes
+            for owner in unsafe_assignment_owners(session, property_code)
+        }
+    )
+    if owners:
+        raise RuntimeError(
+            f"Refusing to synchronize populated vocabulary {code}; "
+            f"assigned object types contain instances: {owners!r}"
+        )
+
+    for term_code in set(current).difference(expected):
+        session.get_term(term_code, code).delete(
+            reason=f"Synchronize simulation vocabulary {code}"
+        )
+    for term_code, label in expected_terms:
+        if term_code not in current:
+            session.new_term(
+                code=term_code,
+                vocabularyCode=code,
+                label=label,
+                description=label,
+            ).save()
+            continue
+        term = session.get_term(term_code, code)
+        if str(term.label or term_code) != label:
+            term.label = label
+            term.description = label
+            term.save()
+    return session.get_vocabulary(code, use_cache=False)
 
 
 def create_property_type(session, expected: dict[str, Any]):
@@ -938,7 +1005,7 @@ def apply_additive_object_type_assignments(session):
 
 def apply_schema(session):
     for code, terms in VOCABULARIES.items():
-        create_vocabulary(session, code, terms)
+        synchronize_vocabulary(session, code, terms)
 
     for code in IMMUTABLE_PROPERTY_MIGRATIONS:
         expected = PROPERTY_TYPES[code]
