@@ -1353,3 +1353,26 @@ def test_intermediate_pk_resolves_to_supported_parent(simulations_widgets):
         )
         is None
     )
+
+
+def test_container_workchain_with_exportable_descendants_is_supported(
+    simulations_widgets,
+):
+    child = SimpleNamespace(
+        uuid="bands",
+        pk=12,
+        process_label="BandsWorkChain",
+    )
+    container = SimpleNamespace(
+        uuid="qe-app",
+        pk=11,
+        process_label="QeAppWorkChain",
+        caller=None,
+        called_descendants=[child],
+    )
+
+    resolved = simulations_widgets.SimulationDetailsWidget._exportable_ancestor(
+        container
+    )
+
+    assert resolved is container

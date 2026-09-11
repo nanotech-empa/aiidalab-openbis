@@ -2113,7 +2113,7 @@ class SimulationDetailsWidget(ipw.VBox):
 
     @staticmethod
     def _exportable_ancestor(node):
-        """Return this node or its nearest caller supported by the exporter."""
+        """Return the nearest directly or indirectly exportable WorkChain."""
         candidate = node
         if not getattr(candidate, "process_label", None):
             candidate = getattr(candidate, "creator", None)
@@ -2124,6 +2124,16 @@ class SimulationDetailsWidget(ipw.VBox):
                 break
             visited.add(uuid)
             if getattr(candidate, "process_label", "") in aiida_utils.workchain_exporters:
+                return candidate
+            # Container workflows such as QeAppWorkChain do not have a direct
+            # exporter: one export action dispatches their supported child
+            # WorkChains while keeping a single archive for the container.
+            descendants = getattr(candidate, "called_descendants", ()) or ()
+            if any(
+                getattr(descendant, "process_label", "")
+                in aiida_utils.workchain_exporters
+                for descendant in descendants
+            ):
                 return candidate
             candidate = getattr(candidate, "caller", None)
         return None
