@@ -719,7 +719,11 @@ def create_and_export_AiiDA_archive(openbis_session, uuid):
         openbis_object = utils.create_openbis_object(
             openbis_session,
             type=aiida_node_type,
-            props={"wfms_uuid": str(uuid), "comments": ""},
+            props={
+                "wfms_uuid": str(uuid),
+                "aiida_root_uuids": [str(uuid)],
+                "comments": "",
+            },
             collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
         )
         utils.create_openbis_dataset(

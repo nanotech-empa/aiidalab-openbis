@@ -315,6 +315,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `aiida_root_uuids` | AiiDA root UUIDs | UUIDs of all root ProcessNodes contained in an AiiDA archive | VARCHAR | False | True | False |
 
 ### Analyser
 * **Code:** `ANALYSER`

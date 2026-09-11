@@ -617,6 +617,46 @@ def test_export_workchain_preflights_before_archive(monkeypatch, aiida_utils):
     assert archives == []
 
 
+def test_generated_archive_records_canonical_and_all_root_uuids(
+    monkeypatch,
+    aiida_utils,
+):
+    created = []
+    datasets = []
+    aiida_node = SimpleNamespace(permId="aiida-node-permid")
+
+    monkeypatch.setattr(aiida_utils, "_objects_by_property", lambda *_args: [])
+
+    def run(command, **kwargs):
+        Path(command[3]).write_bytes(b"archive")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(aiida_utils.subprocess, "run", run)
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "create_openbis_object",
+        lambda session, **kwargs: created.append((session, kwargs)) or aiida_node,
+    )
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "create_openbis_dataset",
+        lambda session, **kwargs: datasets.append((session, kwargs)),
+    )
+
+    result = aiida_utils.create_and_export_AiiDA_archive(
+        "session",
+        "11111111-1111-1111-1111-111111111111",
+    )
+
+    assert result is aiida_node
+    assert created[0][1]["props"] == {
+        "wfms_uuid": "11111111-1111-1111-1111-111111111111",
+        "aiida_root_uuids": ["11111111-1111-1111-1111-111111111111"],
+        "comments": "",
+    }
+    assert datasets[0][1]["sample"] is aiida_node
+
+
 def test_export_workchain_passes_preflight_executables_to_exporter(
     monkeypatch, aiida_utils
 ):

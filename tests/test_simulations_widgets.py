@@ -638,6 +638,10 @@ def test_declared_archive_roots_support_single_and_multiple_records(
     aiida_node = SimpleNamespace(
         props={
             "wfms_uuid": "11111111-1111-1111-1111-111111111111",
+            "aiida_root_uuids": [
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+            ],
             "comments": (
                 "AiiDA root process UUID: "
                 "11111111-1111-1111-1111-111111111111\n"
@@ -651,6 +655,46 @@ def test_declared_archive_roots_support_single_and_multiple_records(
         "11111111-1111-1111-1111-111111111111",
         "22222222-2222-2222-2222-222222222222",
     )
+
+
+def test_declared_archive_roots_support_legacy_comment_records(
+    simulations_widgets,
+):
+    aiida_node = SimpleNamespace(
+        props={
+            "comments": (
+                "AiiDA root process UUID: "
+                "33333333-3333-3333-3333-333333333333"
+            ),
+        }
+    )
+
+    assert simulations_widgets._declared_archive_root_uuids(aiida_node) == (
+        "33333333-3333-3333-3333-333333333333",
+    )
+
+
+def test_aiida_root_uuids_schema_is_multivalued_and_additive(
+    simulations_widgets,
+):
+    definition = simulations_widgets.simulation_schema.PROPERTY_TYPES[
+        "AIIDA_ROOT_UUIDS"
+    ]
+    assignments = (
+        simulations_widgets.simulation_schema.ADDITIVE_OBJECT_TYPE_ASSIGNMENTS
+    )
+
+    assert definition["dataType"] == "VARCHAR"
+    assert definition["multiValue"] is True
+    assert assignments == {
+        "AIIDA_NODE": [
+            {
+                "code": "AIIDA_ROOT_UUIDS",
+                "mandatory": False,
+                "section": "Provenance",
+            }
+        ]
+    }
 
 
 def test_multiple_archive_roots_are_listed_in_import_message(
@@ -778,8 +822,10 @@ def test_manual_archive_creates_one_aiida_node(
     )
     properties = created[0][1]["props"]
     assert properties.get("wfms_uuid") == expected_workflow_uuid
-    for root in roots:
-        assert root["uuid"] in properties["comments"]
+    assert properties.get("aiida_root_uuids", []) == [
+        root["uuid"] for root in roots
+    ]
+    assert properties["comments"] == ""
     assert datasets[0][1]["sample"] is aiida_node
 
 

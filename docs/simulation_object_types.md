@@ -79,13 +79,17 @@ Before writing to openBIS, the app opens the archive through AiiDA's read-only
 SQLite ZIP backend and identifies every `ProcessNode` without an incoming
 `CALL_CALC` or `CALL_WORK` link. These are the archive root processes.
 
-For one root, `WFMS_UUID` stores its UUID. For zero or more than one root,
-`WFMS_UUID` is left empty because it is a singular legacy property.
-`COMMENTS` contains one line per identified root in this stable form:
+`AIIDA_ROOT_UUIDS` stores every identified root UUID. For one root,
+`WFMS_UUID` also stores that UUID as the canonical archive root used by existing
+viewer and duplicate-detection code. For zero or more than one root,
+`WFMS_UUID` is left empty because it is a singular legacy property. Earlier
+records that stored root UUID markers in `COMMENTS` remain readable, but new
+records use the structured `AIIDA_ROOT_UUIDS` property.
 
-```text
-AiiDA root process UUID: <uuid>
-```
+Automatically generated archives contain one main/root WorkChain, so both
+properties contain its UUID. UUIDs of result-producing descendants are not
+added to `AIIDA_ROOT_UUIDS`; each simulation object records its concrete
+producer in `AIIDA_SOURCE_UUID` instead.
 
 On import, the archive is inspected again and all root UUIDs are reported. A
 viewer link is offered independently for every root process type supported by

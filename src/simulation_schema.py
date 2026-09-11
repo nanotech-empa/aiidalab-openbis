@@ -170,6 +170,15 @@ PROPERTY_TYPES = {
             sample_type="AIIDA_NODE",
         ),
         prop("AIIDA_SOURCE_UUID", "AiiDA source UUID", "VARCHAR"),
+        prop(
+            "AIIDA_ROOT_UUIDS",
+            "AiiDA root UUIDs",
+            "VARCHAR",
+            description=(
+                "UUIDs of all root ProcessNodes contained in an AiiDA archive"
+            ),
+            multi_value=True,
+        ),
         prop("CELL_OPTIMIZATION", "Cell optimization", "BOOLEAN"),
         prop("FINAL_ENERGY_HARTREE", "Final energy (Hartree)", "REAL"),
         prop(
@@ -309,6 +318,13 @@ PROVENANCE = [
     assignment("AIIDA_NODE", False, "Provenance"),
     assignment("AIIDA_SOURCE_UUID", False, "Provenance"),
 ]
+
+# AIIDA_NODE predates the simulation schema and already contains records. New
+# optional assignments must therefore be added without replacing or reordering
+# the existing externally managed object-type definition.
+ADDITIVE_OBJECT_TYPE_ASSIGNMENTS = {
+    "AIIDA_NODE": [assignment("AIIDA_ROOT_UUIDS", False, "Provenance")],
+}
 SPIN = [
     assignment("SPIN_MULTIPLICITY", False, "Electronic properties"),
     assignment("TOTAL_MAGNETIZATION_BOHR_MAGNETON", False, "Electronic properties"),
@@ -636,6 +652,7 @@ def audit(session) -> dict[str, Any]:
     vocabulary_actions = []
     property_actions = []
     object_actions = []
+    additive_assignment_actions = []
 
     for code, terms in VOCABULARIES.items():
         existing = existing_or_none(session.get_vocabulary, code)
@@ -684,6 +701,37 @@ def audit(session) -> dict[str, Any]:
         else:
             object_actions.append((code, "reuse"))
 
+    for object_code, additions in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.items():
+        object_type = existing_or_none(session.get_object_type, object_code)
+        if object_type is None:
+            errors.append(
+                f"Object type {object_code} is required for additive assignments"
+            )
+            continue
+        current = assignment_state(object_type)
+        for item in additions:
+            code = item["code"]
+            row = current.get(code)
+            if row is None:
+                additive_assignment_actions.append((object_code, code, "assign"))
+                continue
+            differences = []
+            if bool(row.get("mandatory")) != bool(item["mandatory"]):
+                differences.append(
+                    f"mandatory={bool(row.get('mandatory'))!r}, "
+                    f"expected {bool(item['mandatory'])!r}"
+                )
+            if clean_assignment_value(row.get("section")) != item["section"]:
+                differences.append(
+                    f"section={clean_assignment_value(row.get('section'))!r}, "
+                    f"expected {item['section']!r}"
+                )
+            if differences:
+                errors.append(
+                    f"Assignment {object_code}.{code}: {'; '.join(differences)}"
+                )
+            additive_assignment_actions.append((object_code, code, "reuse"))
+
     obsolete_actions = []
     for code in OBSOLETE_OBJECT_TYPES:
         existing = existing_or_none(session.get_object_type, code)
@@ -703,6 +751,7 @@ def audit(session) -> dict[str, Any]:
         "vocabularies": vocabulary_actions,
         "property_types": property_actions,
         "object_types": object_actions,
+        "additive_object_type_assignments": additive_assignment_actions,
         "obsolete_object_types": obsolete_actions,
     }
 
@@ -866,6 +915,27 @@ def apply_object_type_assignments(session, code: str, expected: dict[str, Any]):
         )
 
 
+def apply_additive_object_type_assignments(session):
+    """Add optional properties to populated, externally managed object types."""
+    for object_code, additions in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.items():
+        object_type = session.get_object_type(object_code, use_cache=False)
+        current = assignment_state(object_type)
+        next_ordinal = max(
+            (int(row["ordinal"]) for row in current.values()),
+            default=0,
+        )
+        for item in additions:
+            if item["code"] in current:
+                continue
+            next_ordinal += 1
+            object_type.assign_property(
+                session.get_property_type(item["code"], use_cache=False),
+                section=item["section"],
+                ordinal=next_ordinal,
+                mandatory=item["mandatory"],
+            )
+
+
 def apply_schema(session):
     for code, terms in VOCABULARIES.items():
         create_vocabulary(session, code, terms)
@@ -881,6 +951,8 @@ def apply_schema(session):
 
     for code, expected in OBJECT_TYPES.items():
         apply_object_type_assignments(session, code, expected)
+
+    apply_additive_object_type_assignments(session)
 
     for code in OBSOLETE_OBJECT_TYPES:
         delete_obsolete_object_type(session, code)

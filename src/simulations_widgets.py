@@ -106,6 +106,15 @@ def _declared_archive_root_uuids(aiida_node_object):
     workflow_uuid = aiida_utils._openbis_property(aiida_node_object, "wfms_uuid")
     if workflow_uuid:
         roots.append(str(workflow_uuid))
+    root_uuids = aiida_utils._openbis_property(
+        aiida_node_object, "aiida_root_uuids"
+    )
+    if isinstance(root_uuids, str):
+        roots.append(root_uuids)
+    elif root_uuids:
+        roots.extend(str(uuid) for uuid in root_uuids)
+    # Records created before AIIDA_ROOT_UUIDS was introduced stored roots in
+    # COMMENTS. Keep this read-only fallback until those records are migrated.
     comments = aiida_utils._openbis_property(aiida_node_object, "comments") or ""
     roots.extend(_AIIDA_ROOT_UUID_RE.findall(str(comments)))
     return tuple(dict.fromkeys(roots))
@@ -1655,16 +1664,15 @@ class ExportSimulationsWidget(ipw.VBox):
             archive_path.write_bytes(archive_file["content"])
             roots = _archive_root_processes(archive_path)
 
-            comments = "\n".join(
-                f'AiiDA root process UUID: {root["uuid"]}' for root in roots
-            )
             properties = {
                 "name": f"AiiDA archive for {simulation_name}",
                 "description": (
                     "AiiDA provenance archive uploaded with a simulation record."
                 ),
-                "comments": comments,
+                "comments": "",
             }
+            if roots:
+                properties["aiida_root_uuids"] = [root["uuid"] for root in roots]
             if len(roots) == 1:
                 properties["wfms_uuid"] = roots[0]["uuid"]
 
