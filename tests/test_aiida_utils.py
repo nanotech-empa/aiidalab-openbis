@@ -266,12 +266,17 @@ def test_legacy_qe_mapping_and_namespace_compatibility(aiida_utils):
     legacy = SimpleNamespace(
         base=SimpleNamespace(attributes=SimpleNamespace(all={"value": 7}))
     )
+    modern_scalar = SimpleNamespace(value=3)
+    plain_value = "already-unwrapped"
     old_relax = SimpleNamespace(
         inputs=SimpleNamespace(base_relax=SimpleNamespace(pw="legacy-pw"))
     )
 
     assert aiida_utils._node_mapping(FakeDict({"value": 3})) == {"value": 3}
     assert aiida_utils._node_mapping(legacy) == {"value": 7}
+    assert aiida_utils._node_value(modern_scalar) == 3
+    assert aiida_utils._node_value(legacy) == 7
+    assert aiida_utils._node_value(plain_value) == plain_value
     assert aiida_utils._pw_relax_base(old_relax).pw == "legacy-pw"
 
 
@@ -357,7 +362,32 @@ def test_executables_require_confirmation_and_reuse_openbis_links(
     assert "AiiDA plugin: cp2k" in executable.props["comments"]
 
 
-def test_code_matching_is_strictly_label_based(monkeypatch, aiida_utils):
+@pytest.mark.parametrize(
+    "plugin",
+    (
+        "quantumespresso.pw",
+        "quantumespresso.pp",
+        "quantumespresso.dos",
+        "quantumespresso.projwfc",
+        "quantumespresso.ph",
+        "quantumespresso.q2r",
+        "quantumespresso.matdyn",
+        "quantumespresso.dynmat",
+    ),
+)
+def test_qe_plugin_family_maps_to_quantum_espresso(plugin, aiida_utils):
+    code = SimpleNamespace(
+        label=f"{plugin.rpartition('.')[2]}-7.4",
+        default_calc_job_plugin=plugin,
+    )
+
+    assert aiida_utils._software_search_names(code) == (
+        "Quantum ESPRESSO",
+        code.label,
+    )
+
+
+def test_qe_code_matches_software_suite(monkeypatch, aiida_utils):
     computer = SimpleNamespace(
         uuid="computer-uuid",
         label="localhost",
@@ -385,8 +415,11 @@ def test_code_matching_is_strictly_label_based(monkeypatch, aiida_utils):
         lambda _session, type: objects[type],
     )
 
-    with pytest.raises(aiida_utils.OpenbisNameMatchError, match="pw-7.4"):
+    with pytest.raises(aiida_utils.MissingExecutablesError) as error:
         aiida_utils._ensure_executables(session, object())
+
+    assert error.value.requirements[0]["code_name"] == "Quantum ESPRESSO"
+    assert error.value.requirements[0]["properties"]["name"] == "pw-7.4"
 
 
 def test_manual_code_and_computer_selection_override_failed_name_match(

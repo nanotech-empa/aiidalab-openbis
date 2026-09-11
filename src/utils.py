@@ -159,21 +159,39 @@ def find_openbis_simulations(ob_session, root_obj, simulation_types):
     return simulation_objects
 
 
-def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
+def uploaded_files(files_widget):
+    """Return uploaded files in one immutable ipywidgets-version-neutral form."""
     value = files_widget.value
     # ipywidgets 7 exposes a filename-keyed mapping, whereas ipywidgets 8
     # exposes a tuple of uploaded-file mappings. Supporting both shapes keeps
     # uploads working in the Python 3.9 and 3.12 AiiDAlab environments.
     if isinstance(value, dict):
-        uploaded_files = value.items()
+        items = value.items()
     else:
-        uploaded_files = (
-            (file_info.get("name", "uploaded-file"), file_info) for file_info in value
+        items = (
+            (file_info.get("name", "uploaded-file"), file_info)
+            for file_info in value
         )
+    return tuple(
+        {"name": str(filename), "content": bytes(file_info["content"])}
+        for filename, file_info in items
+    )
 
+
+def upload_datasets(
+    ob_session,
+    ob_object,
+    files_widget,
+    props,
+    dataset_type,
+    filename_filter=None,
+):
     with contextlib.redirect_stdout(string_io):
-        for filename, file_info in uploaded_files:
-            write_file(file_info["content"], filename)
+        for uploaded_file in uploaded_files(files_widget):
+            filename = uploaded_file["name"]
+            if filename_filter is not None and not filename_filter(filename):
+                continue
+            write_file(uploaded_file["content"], filename)
             try:
                 create_openbis_dataset(
                     ob_session,

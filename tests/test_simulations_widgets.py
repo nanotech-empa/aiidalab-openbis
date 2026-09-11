@@ -484,6 +484,7 @@ def test_import_selected_simulations_imports_each_archive_once(
     workchain = SimpleNamespace(
         process_label="UnmappedWorkChain",
         pk=42,
+        uuid="workflow-uuid",
     )
     monkeypatch.setattr(simulations_widgets, "WORKCHAIN_VIEWERS", {})
     popups = []
@@ -508,7 +509,7 @@ def test_import_selected_simulations_imports_each_archive_once(
             simulations_widgets.ImportSimulationsWidget._simulation_names
         ),
         _import_aiida_archive=lambda archive_id: (
-            imported.append(archive_id) or workchain
+            imported.append(archive_id) or (workchain,)
         ),
         _import_success_message=(
             simulations_widgets.ImportSimulationsWidget._import_success_message
@@ -588,6 +589,16 @@ def test_import_aiida_archive_uses_temporary_download(
         "get_openbis_object",
         lambda *_args, **_kwargs: aiida_node,
     )
+    monkeypatch.setattr(
+        simulations_widgets,
+        "_archive_root_processes",
+        lambda _path: (
+            {
+                "uuid": "workflow-uuid",
+                "process_label": "TestWorkChain",
+            },
+        ),
+    )
 
     def run(command, **kwargs):
         assert command[:3] == ["verdi", "archive", "import"]
@@ -616,9 +627,174 @@ def test_import_aiida_archive_uses_temporary_download(
         "archive-1",
     )
 
-    assert result is workchain
+    assert result == (workchain,)
     assert len(destinations) == 1
     assert not destinations[0].exists()
+
+
+def test_declared_archive_roots_support_single_and_multiple_records(
+    simulations_widgets,
+):
+    aiida_node = SimpleNamespace(
+        props={
+            "wfms_uuid": "11111111-1111-1111-1111-111111111111",
+            "comments": (
+                "AiiDA root process UUID: "
+                "11111111-1111-1111-1111-111111111111\n"
+                "AiiDA root process UUID: "
+                "22222222-2222-2222-2222-222222222222"
+            ),
+        }
+    )
+
+    assert simulations_widgets._declared_archive_root_uuids(aiida_node) == (
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+    )
+
+
+def test_multiple_archive_roots_are_listed_in_import_message(
+    monkeypatch,
+    simulations_widgets,
+):
+    monkeypatch.setattr(
+        simulations_widgets,
+        "WORKCHAIN_VIEWERS",
+        {"SupportedWorkChain": "viewer.ipynb"},
+    )
+    simulations = [
+        _simulation(
+            "Manual archive",
+            "simulation-1",
+            "UNCLASSIFIED_SIMULATION",
+        )
+    ]
+    roots = (
+        SimpleNamespace(
+            process_label="SupportedWorkChain",
+            pk=11,
+            uuid="11111111-1111-1111-1111-111111111111",
+        ),
+        SimpleNamespace(
+            process_label="OtherWorkChain",
+            pk=12,
+            uuid="22222222-2222-2222-2222-222222222222",
+        ),
+    )
+
+    message = (
+        simulations_widgets.ImportSimulationsWidget._import_success_message(
+            simulations,
+            roots,
+        )
+    )
+
+    assert "Root processes (2)" in message
+    assert "11111111-1111-1111-1111-111111111111" in message
+    assert "22222222-2222-2222-2222-222222222222" in message
+    assert "viewer.ipynb?pk=11" in message
+
+
+@pytest.mark.parametrize(
+    ("roots", "expected_workflow_uuid"),
+    [
+        ((), None),
+        (
+            (
+                {
+                    "uuid": "11111111-1111-1111-1111-111111111111",
+                    "process_label": "OneWorkChain",
+                },
+            ),
+            "11111111-1111-1111-1111-111111111111",
+        ),
+        (
+            (
+                {
+                    "uuid": "11111111-1111-1111-1111-111111111111",
+                    "process_label": "FirstWorkChain",
+                },
+                {
+                    "uuid": "22222222-2222-2222-2222-222222222222",
+                    "process_label": "SecondWorkChain",
+                },
+            ),
+            None,
+        ),
+    ],
+)
+def test_manual_archive_creates_one_aiida_node(
+    roots,
+    expected_workflow_uuid,
+    tmp_path,
+    monkeypatch,
+    simulations_widgets,
+):
+    created = []
+    datasets = []
+    aiida_node = SimpleNamespace(permId="aiida-node-1")
+
+    monkeypatch.setattr(
+        simulations_widgets,
+        "_archive_root_processes",
+        lambda archive_path: (
+            tuple(roots)
+            if archive_path.read_bytes() == b"valid archive"
+            else ()
+        ),
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "create_openbis_object",
+        lambda session, **kwargs: created.append((session, kwargs)) or aiida_node,
+    )
+
+    def create_dataset(session, **kwargs):
+        assert Path(kwargs["files"][0]).is_file()
+        assert Path(kwargs["files"][0]).read_bytes() == b"valid archive"
+        datasets.append((session, kwargs))
+
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "create_openbis_dataset",
+        create_dataset,
+    )
+    widget = SimpleNamespace(openbis_session="session")
+
+    result = (
+        simulations_widgets.ExportSimulationsWidget._create_manual_aiida_node(
+            widget,
+            {"name": "../archive.aiida", "content": b"valid archive"},
+            "Manual simulation",
+        )
+    )
+
+    assert result is aiida_node
+    assert created[0][1]["type"] == simulations_widgets.OPENBIS_OBJECT_TYPES[
+        "AiiDA Node"
+    ]
+    assert created[0][1]["collection"] == (
+        simulations_widgets.OPENBIS_COLLECTIONS_PATHS["AiiDA Node"]
+    )
+    properties = created[0][1]["props"]
+    assert properties.get("wfms_uuid") == expected_workflow_uuid
+    for root in roots:
+        assert root["uuid"] in properties["comments"]
+    assert datasets[0][1]["sample"] is aiida_node
+
+
+def test_manual_upload_rejects_multiple_aiida_archives(simulations_widgets):
+    uploader = SimpleNamespace(
+        value=(
+            {"name": "first.aiida", "content": b"one"},
+            {"name": "second.AIIDA", "content": b"two"},
+        )
+    )
+
+    with pytest.raises(ValueError, match="at most one"):
+        simulations_widgets.ExportSimulationsWidget._uploaded_aiida_archive(
+            uploader
+        )
 
 
 def test_prepare_data_download_excludes_previews(
@@ -966,6 +1142,45 @@ def test_upload_datasets_supports_ipywidgets_7_and_8(
         "props": {"kind": "test"},
     }
     assert removed == [filename]
+
+
+def test_upload_datasets_can_filter_uploaded_files(
+    monkeypatch,
+    simulations_widgets,
+):
+    created = []
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "write_file",
+        lambda _content, _filename: None,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "create_openbis_dataset",
+        lambda _session, **kwargs: created.append(kwargs),
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils.os,
+        "remove",
+        lambda _filename: None,
+    )
+    uploader = SimpleNamespace(
+        value=(
+            {"name": "archive.aiida", "content": b"archive"},
+            {"name": "results.tar.gz", "content": b"results"},
+        )
+    )
+
+    simulations_widgets.utils.upload_datasets(
+        "session",
+        "simulation",
+        uploader,
+        props={},
+        dataset_type="RAW_DATA",
+        filename_filter=lambda filename: not filename.endswith(".aiida"),
+    )
+
+    assert [item["files"] for item in created] == [["results.tar.gz"]]
 
 
 def test_import_expands_mep_and_atomistic_model_ancestors(

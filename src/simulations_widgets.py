@@ -62,23 +62,53 @@ def _popup(message):
 
 def _first_uploaded_file(files_widget):
     """Return one uploaded file in a stable internal representation."""
-    value = files_widget.value
-    if not value:
-        return None
-
-    # ipywidgets 7 exposes a filename-keyed mapping, whereas ipywidgets 8
-    # exposes a tuple of uploaded-file mappings.  Supporting both shapes keeps
-    # the app usable in the current Python 3.9 and 3.12 AiiDAlab images.
-    if isinstance(value, dict):
-        name, file_info = next(iter(value.items()))
-    else:
-        file_info = value[0]
-        name = file_info.get("name", "preview.png")
-    return {"name": str(name), "content": bytes(file_info["content"])}
+    uploaded = utils.uploaded_files(files_widget)
+    return uploaded[0] if uploaded else None
 
 
 def _image_format(filename):
     return "jpeg" if Path(filename).suffix.lower() in {".jpg", ".jpeg"} else "png"
+
+
+_AIIDA_ROOT_UUID_RE = re.compile(
+    r"^AiiDA root process UUID:\s*([0-9a-fA-F-]{36})\s*$",
+    re.MULTILINE,
+)
+
+
+def _archive_root_processes(archive_path):
+    """Return process roots stored in an AiiDA archive without importing it."""
+    from aiida.storage.sqlite_zip.backend import SqliteZipBackend
+
+    storage = SqliteZipBackend(SqliteZipBackend.create_profile(str(archive_path)))
+    try:
+        processes = (
+            orm.QueryBuilder(backend=storage)
+            .append(orm.ProcessNode, project="*")
+            .all(flat=True)
+        )
+        roots = [
+            {
+                "uuid": str(process.uuid),
+                "process_label": str(process.process_label or process.node_type),
+            }
+            for process in processes
+            if process.caller is None
+        ]
+        return tuple(sorted(roots, key=lambda item: item["uuid"]))
+    finally:
+        storage.close()
+
+
+def _declared_archive_root_uuids(aiida_node_object):
+    """Read root UUID markers from an AIIDA_NODE, including older records."""
+    roots = []
+    workflow_uuid = aiida_utils._openbis_property(aiida_node_object, "wfms_uuid")
+    if workflow_uuid:
+        roots.append(str(workflow_uuid))
+    comments = aiida_utils._openbis_property(aiida_node_object, "comments") or ""
+    roots.extend(_AIIDA_ROOT_UUID_RE.findall(str(comments)))
+    return tuple(dict.fromkeys(roots))
 
 
 class ImportSimulationsWidget(ipw.VBox):
@@ -772,6 +802,9 @@ class ImportSimulationsWidget(ipw.VBox):
                 dataset,
                 filename,
             )
+            archive_roots = tuple(
+                item["uuid"] for item in _archive_root_processes(archive_path)
+            )
             result = subprocess.run(
                 ["verdi", "archive", "import", str(archive_path)],
                 capture_output=True,
@@ -782,24 +815,61 @@ class ImportSimulationsWidget(ipw.VBox):
                 message = result.stderr.strip() or result.stdout.strip()
                 raise RuntimeError(message or "AiiDA archive import failed.")
 
-        workchain_uuid = aiida_utils._openbis_property(aiida_node_object, "wfms_uuid")
-        if not workchain_uuid:
-            raise ValueError("The linked AIIDA_NODE has no workflow UUID.")
-        return orm.load_node(workchain_uuid)
+        root_uuids = archive_roots or _declared_archive_root_uuids(aiida_node_object)
+        return tuple(orm.load_node(uuid) for uuid in root_uuids)
 
     @classmethod
-    def _import_success_message(cls, simulations, workchain):
+    def _import_success_message(cls, simulations, workchains):
         simulation_names = cls._simulation_names(simulations)
-        viewer_link = WORKCHAIN_VIEWERS.get(workchain.process_label)
-        if viewer_link:
-            notebook_link = f"{viewer_link}?pk={workchain.pk}"
+        if workchains is None:
+            workchains = ()
+        elif not isinstance(workchains, (list, tuple)):
+            workchains = (workchains,)
+        else:
+            workchains = tuple(workchains)
+        if not workchains:
             return (
-                f'<a href="{html.escape(notebook_link, quote=True)}" target="_blank">'
-                f"Imported AiiDA archive for {simulation_names}.</a>"
+                f"Imported AiiDA archive for {simulation_names}. "
+                "No root process was identified."
             )
+
+        if len(workchains) == 1:
+            workchain = workchains[0]
+            viewer_link = WORKCHAIN_VIEWERS.get(workchain.process_label)
+            if viewer_link:
+                notebook_link = f"{viewer_link}?pk={workchain.pk}"
+                return (
+                    f'<a href="{html.escape(notebook_link, quote=True)}" target="_blank">'
+                    f"Imported AiiDA archive for {simulation_names}.</a>"
+                )
+            return (
+                f"Imported AiiDA archive for {simulation_names}. "
+                f"Root UUID: {html.escape(str(workchain.uuid))}. "
+                f"No viewer is configured for "
+                f"{html.escape(workchain.process_label)}."
+            )
+
+        root_items = []
+        for workchain in workchains:
+            label = html.escape(workchain.process_label)
+            uuid = html.escape(str(workchain.uuid))
+            viewer_link = WORKCHAIN_VIEWERS.get(workchain.process_label)
+            if viewer_link:
+                notebook_link = html.escape(
+                    f"{viewer_link}?pk={workchain.pk}",
+                    quote=True,
+                )
+                root_items.append(
+                    f'<li><a href="{notebook_link}" target="_blank">'
+                    f"{label} - {uuid}</a></li>"
+                )
+            else:
+                root_items.append(f"<li>{label} - {uuid}</li>")
         return (
             f"Imported AiiDA archive for {simulation_names}. "
-            f"No viewer is configured for {html.escape(workchain.process_label)}."
+            f"Root processes ({len(workchains)}):<ul>"
+            + "".join(root_items)
+            + "</ul>"
         )
 
     def import_aiida_nodes(self, b):
@@ -1564,6 +1634,54 @@ class ExportSimulationsWidget(ipw.VBox):
         self.executable_resolution_box.children = []
         self.executable_confirmation_message.value = ""
 
+    @staticmethod
+    def _uploaded_aiida_archive(files_widget):
+        archives = [
+            uploaded_file
+            for uploaded_file in utils.uploaded_files(files_widget)
+            if Path(uploaded_file["name"]).suffix.lower() == ".aiida"
+        ]
+        if len(archives) > 1:
+            raise ValueError(
+                "Upload at most one .aiida archive in the input/output data bundle."
+            )
+        return archives[0] if archives else None
+
+    def _create_manual_aiida_node(self, archive_file, simulation_name):
+        with tempfile.TemporaryDirectory(
+            prefix="aiidalab-openbis-manual-archive-"
+        ) as dirname:
+            archive_path = Path(dirname) / Path(archive_file["name"]).name
+            archive_path.write_bytes(archive_file["content"])
+            roots = _archive_root_processes(archive_path)
+
+            comments = "\n".join(
+                f'AiiDA root process UUID: {root["uuid"]}' for root in roots
+            )
+            properties = {
+                "name": f"AiiDA archive for {simulation_name}",
+                "description": (
+                    "AiiDA provenance archive uploaded with a simulation record."
+                ),
+                "comments": comments,
+            }
+            if len(roots) == 1:
+                properties["wfms_uuid"] = roots[0]["uuid"]
+
+            aiida_node = utils.create_openbis_object(
+                self.openbis_session,
+                type=OPENBIS_OBJECT_TYPES["AiiDA Node"],
+                collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+                props=properties,
+            )
+            utils.create_openbis_dataset(
+                self.openbis_session,
+                type="RAW_DATA",
+                sample=aiida_node,
+                files=[archive_path],
+            )
+            return aiida_node
+
     def export_simulation_to_openbis(self, b):
         selected_experiment_id = self.select_experiment_widget.experiment_dropdown.value
         if selected_experiment_id in (None, "", "-1"):
@@ -1753,6 +1871,18 @@ class ExportSimulationsWidget(ipw.VBox):
                     )
                     if selected_executables:
                         simulation_props["executables"] = selected_executables
+
+                    data_uploader = (
+                        self.simulation_details_vbox.upload_datasets_uploader
+                    )
+                    archive_file = self._uploaded_aiida_archive(data_uploader)
+                    if archive_file is not None:
+                        aiida_node = self._create_manual_aiida_node(
+                            archive_file,
+                            simulation_props.get("name") or simulation_type,
+                        )
+                        simulation_props["aiida_node"] = str(aiida_node.permId)
+
                     simulation_obj = utils.create_openbis_object(
                         self.openbis_session,
                         type=simulation_type,
@@ -1770,9 +1900,12 @@ class ExportSimulationsWidget(ipw.VBox):
                     utils.upload_datasets(
                         self.openbis_session,
                         simulation_obj,
-                        self.simulation_details_vbox.upload_datasets_uploader,
+                        data_uploader,
                         props={},
                         dataset_type="RAW_DATA",
+                        filename_filter=lambda filename: (
+                            Path(filename).suffix.lower() != ".aiida"
+                        ),
                     )
                 except Exception as error:  # noqa: BLE001 - show openBIS errors in UI
                     _popup(f"Could not export the simulation: {error}")

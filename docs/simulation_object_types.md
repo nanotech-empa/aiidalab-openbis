@@ -13,10 +13,13 @@ ELN_PREVIEW
 Each simulation object must have one provenance path:
 
 ```text
-AiiDA simulation:
+AiiDA simulation exported from the local database:
     aiida_node → AIIDA_NODE object containing the .aiida archive
 
-Non-AiiDA simulation:
+Simulation uploaded manually with an AiiDA archive:
+    aiida_node → AIIDA_NODE object containing the uploaded .aiida archive
+
+Simulation without an AiiDA archive:
     input_output_bundle dataset containing relevant input/output files
 ```
 
@@ -65,6 +68,34 @@ the provenance traversal. Multiple result objects from that block share its
 created from one `Cp2kScfWorkChain` share one archive, while a preceding
 `Cp2kGeoOptWorkChain` has a separate archive. Shared inventory objects,
 including `AIIDA_NODE`, remain globally reusable.
+
+### Root processes in manually uploaded archives
+
+A manually uploaded `.aiida` file always belongs to one automatically
+created `AIIDA_NODE`; it is not attached directly to the simulation object.
+Other uploaded input/output files remain datasets of the simulation object.
+
+Before writing to openBIS, the app opens the archive through AiiDA's read-only
+SQLite ZIP backend and identifies every `ProcessNode` without an incoming
+`CALL_CALC` or `CALL_WORK` link. These are the archive root processes.
+
+For one root, `WFMS_UUID` stores its UUID. For zero or more than one root,
+`WFMS_UUID` is left empty because it is a singular legacy property.
+`COMMENTS` contains one line per identified root in this stable form:
+
+```text
+AiiDA root process UUID: <uuid>
+```
+
+On import, the archive is inspected again and all root UUIDs are reported. A
+viewer link is offered independently for every root process type supported by
+the receiving AiiDAlab installation. Importing still restores the complete
+archive provenance graph and relies on AiiDA's UUID deduplication.
+
+A manually uploaded archive can describe an unsupported or unclassified AiiDA
+workflow. In that case the simulation may omit `AIIDA_SOURCE_UUID`, because
+the app cannot reliably assign the simulation result to one concrete producing
+process, but it must still link to its `AIIDA_NODE`.
 
 ## AiiDA export resolution
 

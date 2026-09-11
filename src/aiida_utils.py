@@ -25,6 +25,17 @@ OPENBIS_OBJECT_TYPES = OPENBIS_CONFIG["OpenBIS Types"]
 OPENBIS_SIMULATION_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
 OPENBIS_SESSION, SESSION_DATA = utils.connect_openbis_aiida()
 
+# AiiDA calculation entry points identify executables (pw.x, pp.x, dos.x,
+# projwfc.x, and so on), while an openBIS CODE identifies the software suite.
+# EXECUTABLE objects retain the distinction between the individual programs.
+AIIDA_PLUGIN_FAMILY_TO_OPENBIS_SOFTWARE = {
+    "cp2k": "CP2K",
+    "gaussian": "GAUSSIAN",
+    "lammps": "LAMMPS",
+    "orca": "ORCA",
+    "quantumespresso": "Quantum ESPRESSO",
+}
+
 
 utils.LOG_DIR.mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
@@ -297,7 +308,7 @@ def get_all_preceding_main_workchains(node_uuid):
         }:
             try:
                 restart_from = getattr(n.inputs, "restart_from")
-                restart_uuid = getattr(restart_from, "value", restart_from)
+                restart_uuid = _node_value(restart_from)
                 if restart_uuid:
                     trace_back_main_workchains(orm.load_node(str(restart_uuid)))
             except (AttributeError, NotExistentAttributeError, TypeError, ValueError):
@@ -405,14 +416,30 @@ def get_qe_input_parameters(outputs):
 
 
 def _node_mapping(node):
-    """Return mapping data from modern Dict or legacy ParameterData nodes."""
+    """Return mapping data from modern Dict or legacy pythonjob Dict nodes."""
     get_dict = getattr(node, "get_dict", None)
     if callable(get_dict):
         return get_dict()
+    # Archives produced by older aiida-pythonjob versions can expose built-in
+    # Dict nodes as generic Data. Their mapping survives in node attributes.
     try:
         return dict(node.base.attributes.all)
     except AttributeError as exception:
         raise TypeError(f"{node!r} does not expose mapping data") from exception
+
+
+def _node_value(node):
+    """Return a scalar from modern AiiDA data or legacy pythonjob Data."""
+    value_marker = object()
+    value = getattr(node, "value", value_marker)
+    if value is not value_marker:
+        return value
+    # Old aiida-pythonjob Bool, Float, Int, and Str nodes may be loaded as
+    # generic Data while retaining their scalar in the value attribute.
+    try:
+        return node.base.attributes.all.get("value", node)
+    except AttributeError:
+        return node
 
 
 def _pw_relax_base(workchain):
@@ -505,14 +532,14 @@ def is_structure_optimized(structure_uuid):
         geo_opt = True
         cell_opt = creator.label == "CP2K_CellOpt"
         if cell_opt:
-            cell_free = creator.inputs.sys_params.get_dict()["cell_opt_constraint"]
+            cell_free = _node_mapping(creator.inputs.sys_params)["cell_opt_constraint"]
         return geo_opt, cell_opt, cell_free
     if creator.process_label == "QeAppWorkChain":
         for wc in creator.called_descendants:
             if wc.process_label == "PwRelaxWorkChain":
                 geo_opt = True
                 cell_free = (
-                    wc.inputs.base.pw.parameters.get_dict()
+                    _node_mapping(wc.inputs.base.pw.parameters)
                     .get("CELL", {})
                     .get("cell_dofree", "")
                 )
@@ -883,6 +910,17 @@ def _normalize_object_name(value):
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
+def _software_search_names(aiida_code):
+    """Return ordered openBIS software names for an AiiDA executable."""
+    plugin = str(getattr(aiida_code, "default_calc_job_plugin", "") or "")
+    plugin_family = plugin.partition(".")[0].lower()
+    software_name = AIIDA_PLUGIN_FAMILY_TO_OPENBIS_SOFTWARE.get(plugin_family)
+    executable_label = str(aiida_code.label or "")
+    if software_name:
+        return (software_name, executable_label)
+    return (executable_label,)
+
+
 def _match_named_openbis_object(aiida_name, objects, object_kind, additional_names=()):
     """Match an openBIS name within ordered AiiDA identifiers."""
     search_names = (str(aiida_name or ""),) + tuple(
@@ -1098,9 +1136,13 @@ def _ensure_executables_for_workchains(
             openbis_session, provenance_overrides, "Code", aiida_code_uuid
         )
         if software is None:
+            software_names = _software_search_names(aiida_code)
             try:
                 software = _match_named_openbis_object(
-                    aiida_code.label, code_objects, "Code"
+                    software_names[0],
+                    code_objects,
+                    "Code",
+                    additional_names=software_names[1:],
                 )
             except OpenbisNameMatchError as error:
                 raise _add_resolution_context(
@@ -1351,7 +1393,7 @@ def _input_value(workchain, label, default=None):
         value = getattr(workchain.inputs, label)
     except (AttributeError, NotExistentAttributeError):
         return default
-    return getattr(value, "value", value)
+    return _node_value(value)
 
 
 def _repository_text(data_node, filename):
@@ -1484,7 +1526,7 @@ def _unfolding_supercell_matrix(workchain, data):
     matrix = data.get("supercell_matrix")
     parameters = _get_optional_output(workchain.inputs, "unfolding_parameters")
     if matrix is None and parameters is not None:
-        matrix = parameters.get_dict().get("supercell_matrix")
+        matrix = _node_mapping(parameters).get("supercell_matrix")
     if matrix is None:
         raise ValueError("The unfolding result does not define a supercell matrix.")
     return json.dumps(np.asarray(matrix, dtype=int).tolist())
@@ -1495,7 +1537,7 @@ def _unfolding_k_path(workchain, data):
     labels = None
     parameters = _get_optional_output(workchain.inputs, "unfolding_parameters")
     if parameters is not None:
-        labels = parameters.get_dict().get("labels")
+        labels = _node_mapping(parameters).get("labels")
     if labels is None:
         labels = data.get("path_labels")
     if labels is None:
@@ -1541,9 +1583,9 @@ def _qe_banduppy_property_definition(
         workchain.outputs, "reference_bands_parameters"
     )
     output_parameters = (
-        output_parameters_node.get_dict() if output_parameters_node is not None else {}
+        _node_mapping(output_parameters_node) if output_parameters_node is not None else {}
     )
-    system = workchain.inputs.parameters.get_dict().get("SYSTEM", {})
+    system = _node_mapping(workchain.inputs.parameters).get("SYSTEM", {})
     dft_parameters = {
         "xc_functional": output_parameters.get(
             "dft_exchange_correlation", "unknown"
@@ -1600,7 +1642,7 @@ def _cp2k_scf_property_definitions(
     """Build schema properties for all scientific results of a CP2K SCF block."""
     dft_parameters = get_dft_parameters_cp2k(
         workchain.inputs.cp2k_code.description,
-        workchain.inputs.dft_params.get_dict(),
+        _node_mapping(workchain.inputs.dft_params),
     )
     output_parameters = _node_mapping(workchain.outputs.output_parameters)
     output_text = _cp2k_scf_output_text(workchain)
@@ -1738,7 +1780,7 @@ def _replica_chain_profile(workchain):
     energies_hartree = []
     actual_values = []
     for _label, detail_node in detail_items:
-        detail = detail_node.get_dict()
+        detail = _node_mapping(detail_node)
         parameters = detail.get("output_parameters", {})
         energy = parameters.get("energy_scf", parameters.get("energy"))
         if energy is None:
@@ -1831,9 +1873,9 @@ def _cp2k_mep_property_definition(
     """Build MINIMUM_ENERGY_PATH properties for CP2K path workflows."""
     dft_parameters = get_dft_parameters_cp2k(
         workchain.inputs.code.description,
-        workchain.inputs.dft_params.get_dict(),
+        _node_mapping(workchain.inputs.dft_params),
     )
-    system_parameters = workchain.inputs.sys_params.get_dict()
+    system_parameters = _node_mapping(workchain.inputs.sys_params)
     properties = _simulation_properties(
         workchain,
         "Minimum energy path",
@@ -1857,7 +1899,7 @@ def _cp2k_mep_property_definition(
     elif workchain.process_label == "Cp2kNebWorkChain":
         energies, _coordinates = _neb_profile(workchain)
         properties["mep_method"] = "NEB"
-        band_type = str(workchain.inputs.neb_params.get_dict().get("band_type", "NEB"))
+        band_type = str(_node_mapping(workchain.inputs.neb_params).get("band_type", "NEB"))
         normalized = re.sub(r"[^A-Z0-9]+", "_", band_type.upper()).strip("_")
         properties["neb_variant"] = "CI_NEB" if normalized == "CI_NEB" else "NEB"
         collective_variables = _collective_variables_description(system_parameters)
@@ -2496,7 +2538,7 @@ def NanoribbonWorkChain_export(
 
     geometry_object = None
     if cell_opt is not None:
-        cell_output = cell_opt.outputs.output_parameters.get_dict()
+        cell_output = _node_mapping(cell_opt.outputs.output_parameters)
         properties = _simulation_properties(
             workchain,
             "Geometry optimization",
@@ -2513,7 +2555,7 @@ def NanoribbonWorkChain_export(
             }
         )
         cell_dofree = (
-            cell_opt.inputs.parameters.get_dict().get("CELL", {}).get("cell_dofree")
+            _node_mapping(cell_opt.inputs.parameters).get("CELL", {}).get("cell_dofree")
         )
         if cell_dofree:
             properties["cell_constraints"] = str(cell_dofree)
@@ -2766,7 +2808,7 @@ def _cp2k_output_parameters(workchain):
     output = _get_optional_output(workchain.outputs, "dft_output_parameters")
     if output is None:
         output = workchain.outputs.output_parameters
-    return output.get_dict()
+    return _node_mapping(output)
 
 
 def Cp2kGeoOptWorkChain_export(
@@ -2782,9 +2824,9 @@ def Cp2kGeoOptWorkChain_export(
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
         executable_ids = _ensure_executables(openbis_session, workchain)
-    system_parameters = workchain.inputs.sys_params.get_dict()
+    system_parameters = _node_mapping(workchain.inputs.sys_params)
     dft_parameters = get_dft_parameters_cp2k(
-        workchain.inputs.code.description, workchain.inputs.dft_params.get_dict()
+        workchain.inputs.code.description, _node_mapping(workchain.inputs.dft_params)
     )
     output_parameters = _cp2k_output_parameters(workchain)
     motion = output_parameters.get("motion_step_info", {})
@@ -3071,7 +3113,7 @@ def Cp2kStmWorkChain_export(
     if executable_ids is None:
         executable_ids = _ensure_executables(openbis_session, workchain)
     dft_parameters = get_dft_parameters_cp2k(
-        workchain.inputs.spm_code.description, workchain.inputs.dft_params.get_dict()
+        workchain.inputs.spm_code.description, _node_mapping(workchain.inputs.dft_params)
     )
     properties = _simulation_properties(
         workchain,
@@ -3144,7 +3186,7 @@ def _result_property_definitions(workchain):
         }
         cell_opt = calculations["cell_opt2"]
         if cell_opt is not None:
-            cell_output = cell_opt.outputs.output_parameters.get_dict()
+            cell_output = _node_mapping(cell_opt.outputs.output_parameters)
             properties = _simulation_properties(
                 workchain,
                 "Geometry optimization",
@@ -3160,7 +3202,7 @@ def _result_property_definitions(workchain):
                 }
             )
             cell_dofree = (
-                cell_opt.inputs.parameters.get_dict().get("CELL", {}).get("cell_dofree")
+                _node_mapping(cell_opt.inputs.parameters).get("CELL", {}).get("cell_dofree")
             )
             if cell_dofree:
                 properties["cell_constraints"] = str(cell_dofree)
@@ -3283,9 +3325,9 @@ def _result_property_definitions(workchain):
         }
 
     if process_label == "Cp2kGeoOptWorkChain":
-        system_parameters = workchain.inputs.sys_params.get_dict()
+        system_parameters = _node_mapping(workchain.inputs.sys_params)
         dft_parameters = get_dft_parameters_cp2k(
-            workchain.inputs.code.description, workchain.inputs.dft_params.get_dict()
+            workchain.inputs.code.description, _node_mapping(workchain.inputs.dft_params)
         )
         output_parameters = _cp2k_output_parameters(workchain)
         motion = output_parameters.get("motion_step_info", {})
@@ -3334,7 +3376,7 @@ def _result_property_definitions(workchain):
     if process_label == "Cp2kStmWorkChain":
         dft_parameters = get_dft_parameters_cp2k(
             workchain.inputs.spm_code.description,
-            workchain.inputs.dft_params.get_dict(),
+            _node_mapping(workchain.inputs.dft_params),
         )
         properties = _simulation_properties(workchain, "STM", dft_parameters, None)
         properties["spm_mode"] = "STM"
