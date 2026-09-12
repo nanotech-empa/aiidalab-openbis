@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
 OPENBIS_OBJECT_TYPES = OPENBIS_CONFIG["OpenBIS Types"]
 OPENBIS_SIMULATION_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
 OPENBIS_SESSION, SESSION_DATA = utils.connect_openbis_aiida()
+PREVIEW_MAX_SIDE_PX = 500
 
 # AiiDA calculation entry points identify executables (pw.x, pp.x, dos.x,
 # projwfc.x, and so on), while an openBIS CODE identifies the software suite.
@@ -1476,6 +1478,19 @@ def _qe_relax_number_of_steps(workchain, output_parameters):
     return int(fallback) if fallback is not None else None
 
 
+def _magnetization_properties(output_parameters):
+    """Return QE magnetizations, preserving explicitly reported zero values."""
+    properties = {}
+    for source, target in (
+        ("total_magnetization", "total_magnetization_bohr_magneton"),
+        ("absolute_magnetization", "absolute_magnetization_bohr_magneton"),
+    ):
+        value = output_parameters.get(source)
+        if value is not None:
+            properties[target] = float(value)
+    return properties
+
+
 def _qe_relax_metadata(workchain, output_parameters):
     """Extract optional scientific metadata from a QE relaxation result."""
     metadata = {}
@@ -1523,9 +1538,7 @@ def _qe_relax_metadata(workchain, output_parameters):
         if gap is not None:
             metadata["electronic_gap_ev"] = [float(gap)]
 
-    magnetization = output_parameters.get("total_magnetization")
-    if magnetization is not None:
-        metadata["total_magnetization_bohr_magneton"] = float(magnetization)
+    metadata.update(_magnetization_properties(output_parameters))
     return metadata
 
 
@@ -1820,7 +1833,129 @@ def _cp2k_pdos_property_definition(
 
 
 def _render_cp2k_pdos_preview(workchain, path):
-    """Render a compact total-PDOS preview from the retained CP2K files."""
+    """Reuse the surfaces PDOS model for a compact frontier-state preview."""
+    try:
+        from matplotlib.figure import Figure
+        from surfaces_tools.widgets.pdos import (
+            PdosOverlapViewerWidget,
+            load_overlap_npz,
+        )
+
+        viewer = PdosOverlapViewerWidget()
+        viewer.uks = bool(_input_value(workchain, "do_overlap", False))
+        viewer._projections.workchain = workchain
+        projection_data = viewer._projections.data
+        spin_count = len(projection_data["tdos"])
+        viewer.uks = spin_count > 1
+
+        # The normal viewer starts from total DOS only. Add the chemically useful
+        # molecule projection to the ELN suggestion when the workflow produced it.
+        if "molecule" in viewer._projections.options:
+            for spin in range(spin_count):
+                viewer._projections.add_item(None)
+                item = viewer._projections.items[-1]
+                item._data_selection.label = "molecule"
+                item._spin_selector.value = spin
+
+        viewer.do_overlap = bool(_input_value(workchain, "do_overlap", False))
+        if viewer.do_overlap:
+            overlap = next(
+                (
+                    process
+                    for process in workchain.called_descendants
+                    if getattr(process, "label", "") == "overlap"
+                    or getattr(process, "process_label", "")
+                    == "OverlapCalculation"
+                ),
+                None,
+            )
+            if overlap is None:
+                viewer.do_overlap = False
+            else:
+                retrieved = _get_optional_output(overlap.outputs, "retrieved")
+                with retrieved.open("overlap.npz", mode="rb") as handle:
+                    viewer._overlap.data = load_overlap_npz(handle.name)
+                # A full interactive viewer may show many orbitals. The ELN image
+                # keeps only the frontier HOMO/LUMO pair for every spin channel.
+                viewer._overlap.items = tuple(
+                    item
+                    for item in viewer._overlap.items
+                    if re.search(
+                        r"-(?:HOMO|LUMO)\s+\(",
+                        item._data_selection.label,
+                    )
+                )
+                viewer.cumulative_plot.value = False
+
+        energy_values = []
+        for key, channels in projection_data.items():
+            if str(key).startswith("_"):
+                continue
+            for channel in channels:
+                values = np.asarray(channel, dtype=float)
+                if values.ndim == 2 and values.shape[1] >= 1:
+                    energy_values.extend(values[:, 0])
+        if not energy_values:
+            raise ValueError("The CP2K PDOS viewer contains no energy grid.")
+
+        lower = float(np.min(energy_values))
+        upper = float(np.max(energy_values))
+        overlap_parameters = _get_optional_output(workchain.inputs, "overlap_params")
+        if overlap_parameters is not None:
+            overlap_parameters = _node_mapping(overlap_parameters)
+            lower = float(overlap_parameters.get("--emin1", lower))
+            upper = float(overlap_parameters.get("--emax1", upper))
+        if upper <= lower:
+            raise ValueError("The CP2K PDOS energy interval is empty.")
+
+        slider = viewer._energy_range_slider
+        slider.min = min(lower, 0.0)
+        slider.max = max(upper, 0.0)
+        slider.value = (lower, upper)
+        slider.min = lower
+        slider.max = upper
+
+        delta_energy = min(viewer._fwhm_slider.value / 10.0, 0.005)
+        energy_grid = np.arange(lower, upper, delta_energy)
+        collected = np.reshape(energy_grid, (1, energy_grid.size))
+        headers = ["energy [eV]"]
+        limits = [None, None]
+
+        figure = Figure(figsize=(9, 4.8), constrained_layout=True)
+        axis = figure.subplots()
+        headers, collected = viewer._plot_projections(
+            axis, limits, energy_grid, collected, headers
+        )
+        if viewer.do_overlap and viewer._overlap.items:
+            viewer._plot_overlaps(axis, limits, energy_grid, collected, headers)
+        if spin_count == 1:
+            limits[0] = 0.0
+        axis.set_xlim(lower, upper)
+        axis.set_ylim(limits)
+        axis.axhline(0.0, color="black", lw=1.2, zorder=400)
+        axis.set_xlabel(r"$E-E_{ref}$ (eV)")
+        axis.set_ylabel("Density of states (a.u.)")
+        axis.set_title("CP2K projected density of states")
+        handles, labels = axis.get_legend_handles_labels()
+        if handles:
+            axis.legend(
+                handles,
+                labels,
+                ncol=2 if spin_count > 1 else 1,
+                loc="center left",
+                bbox_to_anchor=(1.01, 0.5),
+                fontsize="small",
+            )
+        figure.savefig(path, dpi=160, bbox_inches="tight")
+        return
+    except Exception:
+        # surfaces is optional for aiidalab-openbis. Keep a dependency-free
+        # fallback for installations that can read the archive but lack the app.
+        logger.warning(
+            "Could not reuse the surfaces CP2K PDOS viewer; using total PDOS.",
+            exc_info=True,
+        )
+
     from matplotlib.figure import Figure
 
     figure = Figure(figsize=(7, 4.5), constrained_layout=True)
@@ -2434,12 +2569,52 @@ def _attach_parent(openbis_object, parent):
     utils.update_openbis_object(openbis_object)
 
 
+def _resample_preview_content(
+    content, filename="preview.png", max_side=PREVIEW_MAX_SIDE_PX
+):
+    """Return proportionally resampled image bytes and their display metadata."""
+    from PIL import Image, UnidentifiedImageError
+
+    content = bytes(content)
+    suffix = Path(filename).suffix.lower()
+    output_format = "JPEG" if suffix in {".jpg", ".jpeg"} else "PNG"
+    try:
+        with Image.open(io.BytesIO(content)) as opened:
+            image = opened.copy()
+    except (OSError, UnidentifiedImageError):
+        # Unit-test doubles and legacy callers may provide opaque bytes. The
+        # openBIS upload path retains them, while real UI uploads are images.
+        return content, output_format.lower(), None
+
+    max_side = int(max_side)
+    if max_side <= 0:
+        raise ValueError("Preview maximum side must be positive.")
+    if max(image.size) > max_side:
+        resampling = getattr(Image, "Resampling", Image).LANCZOS
+        image.thumbnail((max_side, max_side), resampling)
+    if output_format == "JPEG" and image.mode not in {"L", "RGB"}:
+        image = image.convert("RGB")
+
+    output = io.BytesIO()
+    image.save(output, format=output_format, optimize=True)
+    return output.getvalue(), output_format.lower(), image.size
+
+
+def _resample_preview_path(path, max_side=PREVIEW_MAX_SIDE_PX):
+    content, _format, size = _resample_preview_content(
+        path.read_bytes(), path.name, max_side=max_side
+    )
+    path.write_bytes(content)
+    return size
+
+
 def _upload_preview(openbis_session, openbis_object, renderer, stem):
     with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-preview-") as dirname:
         path = Path(dirname) / f"{stem}.png"
         renderer(path)
         if not path.is_file():
             raise RuntimeError(f"Preview renderer did not create {path.name}.")
+        _resample_preview_path(path)
         utils.create_openbis_dataset(
             openbis_session,
             type="ELN_PREVIEW",
@@ -2463,6 +2638,7 @@ def _upload_preview_content(
     with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-preview-") as dirname:
         path = Path(dirname) / f"{stem}{suffix}"
         path.write_bytes(bytes(preview_override["content"]))
+        _resample_preview_path(path)
         utils.create_openbis_dataset(
             openbis_session,
             type="ELN_PREVIEW",
@@ -2511,6 +2687,358 @@ def _render_xy_preview(xy_node, path, title, x_label=None, y_label=None):
     if len(curves) > 1:
         axis.legend(fontsize="small")
     figure.savefig(path, dpi=160)
+
+
+def _cached_preview_renderer(renderer):
+    """Reuse one rendered image for result objects that share a preview."""
+    content = []
+
+    def render(path):
+        if not content:
+            renderer(path)
+            content.append(path.read_bytes())
+        else:
+            path.write_bytes(content[0])
+
+    return render
+
+
+def _render_simple_bands_dos_preview(
+    bands_node, dos_node, path, fermi_energy=None, title=None
+):
+    """Render a dependency-free combined bands/DOS fallback preview."""
+    from matplotlib.figure import Figure
+
+    bands = np.asarray(bands_node.get_bands(), dtype=float)
+    if bands.ndim == 2:
+        bands = bands[np.newaxis, ...]
+    if bands.ndim != 3:
+        raise ValueError(f"Unsupported band array shape: {bands.shape}.")
+
+    figure = Figure(figsize=(9, 5.5), constrained_layout=True)
+    grid = figure.add_gridspec(1, 2, width_ratios=(0.7, 0.3))
+    bands_axis = figure.add_subplot(grid[0, 0])
+    dos_axis = figure.add_subplot(grid[0, 1], sharey=bands_axis)
+    for spin_bands in bands:
+        bands_axis.plot(
+            np.arange(spin_bands.shape[0]), spin_bands, color="black", lw=0.8
+        )
+    if fermi_energy is not None:
+        bands_axis.axhline(float(fermi_energy), color="gray", ls="--", lw=0.9)
+    bands_axis.set_xlabel("k-point index")
+    bands_axis.set_ylabel(f"Energy ({getattr(bands_node, 'units', 'eV')})")
+    bands_axis.set_title(title or "Electronic bands and density of states")
+
+    x_name, x_values, x_unit = dos_node.get_x()
+    curves = dos_node.get_y()
+    for curve_name, values, _unit in curves:
+        dos_axis.plot(np.asarray(values), np.asarray(x_values), label=curve_name)
+    dos_axis.set_xlabel("Density of states")
+    dos_axis.set_ylabel(f"{x_name} ({x_unit})")
+    dos_axis.tick_params(labelleft=False)
+    if len(curves) > 1:
+        dos_axis.legend(fontsize="x-small")
+    figure.savefig(path, dpi=180)
+
+
+def _matplotlib_trace_color(value, default):
+    """Convert common Plotly color strings into Matplotlib-compatible colors."""
+    if value in (None, ""):
+        return default
+    value = str(value)
+    match = re.fullmatch(
+        r"rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)"
+        r"(?:\s*,\s*([\d.]+))?\s*\)",
+        value,
+    )
+    if match is None:
+        return value
+    red, green, blue = (float(component) / 255.0 for component in match.groups()[:3])
+    alpha = float(match.group(4)) if match.group(4) is not None else 1.0
+    return red, green, blue, alpha
+
+
+def _numeric_plot_values(values):
+    """Return Plotly values as floats while preserving trace breaks."""
+    return np.asarray(
+        [np.nan if value is None else float(value) for value in values], dtype=float
+    )
+
+
+def _plain_axis_title(axis, fallback):
+    """Return a plain-text title from a Plotly axis description."""
+    try:
+        title = axis.title.text
+    except AttributeError:
+        title = None
+    if not title:
+        return fallback
+    return re.sub(r"<[^>]+>", "", str(title)).replace("−", "-")
+
+
+def _draw_plotly_bands_pdos(plot, bands_axis, dos_axis, title):
+    """Draw the data and defaults from a QE Results Plotly figure in Matplotlib."""
+    bands_traces = [trace for trace in plot.data if trace.xaxis != "x2"]
+    dos_traces = [trace for trace in plot.data if trace.xaxis == "x2"]
+    for index, trace in enumerate(bands_traces):
+        bands_axis.plot(
+            _numeric_plot_values(trace.x),
+            _numeric_plot_values(trace.y),
+            color=_matplotlib_trace_color(trace.line.color, f"C{index}"),
+            lw=float(trace.line.width or 1.0),
+            label=str(trace.name or ""),
+        )
+    bands_axis.axhline(0.0, color="#555555", ls="--", lw=0.8)
+    bands_axis.set_title(title)
+    bands_axis.set_xlabel(_plain_axis_title(plot.layout.xaxis, "k-points"))
+    bands_axis.set_ylabel(
+        _plain_axis_title(plot.layout.yaxis, "Energy - Fermi energy (eV)")
+    )
+    tick_values = plot.layout.xaxis.tickvals
+    tick_labels = plot.layout.xaxis.ticktext
+    if tick_values is not None and tick_labels is not None:
+        bands_axis.set_xticks(list(tick_values), list(tick_labels))
+        for value in tick_values:
+            bands_axis.axvline(float(value), color="#777777", lw=0.5)
+    y_range = plot.layout.yaxis.range
+    if y_range is not None:
+        bands_axis.set_ylim(float(y_range[0]), float(y_range[1]))
+
+    for index, trace in enumerate(dos_traces):
+        x_values = _numeric_plot_values(trace.x)
+        y_values = _numeric_plot_values(trace.y)
+        color = _matplotlib_trace_color(trace.line.color, f"C{index}")
+        dos_axis.plot(x_values, y_values, color=color, lw=1.0, label=trace.name)
+        if trace.fill == "tozerox":
+            dos_axis.fill_betweenx(y_values, 0.0, x_values, color=color, alpha=0.18)
+    dos_axis.axhline(0.0, color="#555555", ls="--", lw=0.8)
+    dos_axis.set_xlabel(_plain_axis_title(plot.layout.xaxis2, "Density of states"))
+    dos_axis.tick_params(labelleft=False)
+    if dos_traces:
+        dos_axis.legend(fontsize="x-small", loc="best")
+
+
+def _render_plotly_bands_pdos_preview(plot, path, title):
+    """Render a QE Results bands/PDOS figure without requiring Chrome/Kaleido."""
+    from matplotlib.figure import Figure
+
+    has_dos = any(trace.xaxis == "x2" for trace in plot.data)
+    if not has_dos:
+        figure = Figure(figsize=(8, 5), constrained_layout=True)
+        axis = figure.subplots()
+        for index, trace in enumerate(plot.data):
+            axis.plot(
+                _numeric_plot_values(trace.x),
+                _numeric_plot_values(trace.y),
+                color=_matplotlib_trace_color(trace.line.color, f"C{index}"),
+                label=trace.name,
+            )
+        axis.set_title(title)
+        axis.set_xlabel(_plain_axis_title(plot.layout.xaxis, "Energy (eV)"))
+        axis.set_ylabel(_plain_axis_title(plot.layout.yaxis, "Intensity"))
+        if len(plot.data) > 1:
+            axis.legend(fontsize="x-small")
+        figure.savefig(path, dpi=180)
+        return
+
+    figure = Figure(figsize=(9, 5.5), constrained_layout=True)
+    grid = figure.add_gridspec(1, 2, width_ratios=(0.7, 0.3))
+    bands_axis = figure.add_subplot(grid[0, 0])
+    dos_axis = figure.add_subplot(grid[0, 1], sharey=bands_axis)
+    _draw_plotly_bands_pdos(plot, bands_axis, dos_axis, title)
+    figure.savefig(path, dpi=180)
+
+
+def _qe_app_root(workchain):
+    """Return the enclosing QE app workchain, if this result has one."""
+    current = workchain
+    seen = set()
+    while current is not None and str(current.uuid) not in seen:
+        seen.add(str(current.uuid))
+        if current.process_label == "QeAppWorkChain":
+            return current
+        current = getattr(current, "caller", None)
+    return None
+
+
+def _render_qe_electronic_preview(workchain, path):
+    """Reuse the QE app Results plot for bands and (P)DOS previews."""
+    try:
+        from aiidalab_qe.common.bands_pdos.model import BandsPdosModel
+
+        root = _qe_app_root(workchain)
+        if root is not None:
+            model = BandsPdosModel.from_nodes(root=root)
+        elif workchain.process_label == "BandsWorkChain":
+            model = BandsPdosModel.from_nodes(bands=workchain)
+        else:
+            model = BandsPdosModel.from_nodes(pdos=workchain)
+        model.fetch_data()
+        model.create_plot()
+        _render_plotly_bands_pdos_preview(
+            model.plot, path, "Electronic bands and density of states"
+        )
+        return
+    except Exception:  # noqa: BLE001 - optional app integration has a safe fallback
+        logger.warning(
+            "Could not reuse the QE Results plot; using the generic preview.",
+            exc_info=True,
+        )
+
+    if workchain.process_label == "BandsWorkChain":
+        try:
+            root_out = workchain.outputs.bands
+        except NotExistentAttributeError:
+            root_out = workchain.outputs.bands_projwfc
+        output_parameters = _node_mapping(root_out.scf_parameters)
+        dos_node = _bands_dos_node(root_out)
+        if dos_node is not None:
+            _render_simple_bands_dos_preview(
+                root_out.band_structure,
+                dos_node,
+                path,
+                output_parameters.get("fermi_energy"),
+            )
+        else:
+            _render_bands_preview(
+                root_out.band_structure,
+                path,
+                output_parameters.get("fermi_energy"),
+            )
+        return
+    _render_xy_preview(
+        workchain.outputs.projwfc.Dos, path, "Projected density of states"
+    )
+
+
+def _render_nanoribbon_bands_pdos_preview(workchain, path):
+    """Reuse the nanoribbon viewer's default combined bands/PDOS figure."""
+    try:
+        from matplotlib import pyplot as plt
+        from nanoribbon.viewers.pdos_computed import NanoribbonPDOSWidget
+
+        viewer = NanoribbonPDOSWidget(workchain)
+        figure = viewer.create_figure()
+        figure.savefig(path, dpi=180, bbox_inches="tight")
+        plt.close(figure)
+        return
+    except Exception:  # noqa: BLE001 - optional app integration has a safe fallback
+        logger.warning(
+            "Could not reuse the nanoribbon Results plot; using the generic preview.",
+            exc_info=True,
+        )
+
+    calculations = _find_nanoribbon_calculations(workchain)
+    output_parameters = _node_mapping(calculations["scf"].outputs.output_parameters)
+    dos_node = _get_optional_output(calculations["export_pdos"].outputs, "Dos")
+    if dos_node is None:
+        raise ValueError("The export_pdos calculation does not contain a Dos output.")
+    _render_simple_bands_dos_preview(
+        calculations["bands"].outputs.output_band,
+        dos_node,
+        path,
+        output_parameters.get("fermi_energy"),
+    )
+
+
+def _vibroscopy_output_namespace(workchain):
+    """Build the output mapping expected by the QE vibroscopy Results models."""
+    from aiida.common.extendeddicts import AttributeDict
+
+    return AttributeDict(
+        {name: getattr(workchain.outputs, name) for name in workchain.outputs}
+    )
+
+
+def _render_qe_vibrational_preview(workchain, path):
+    """Reuse the default QE phonon, IR, and Raman result data in one preview."""
+    try:
+        from matplotlib.figure import Figure
+        from aiidalab_qe.common.bands_pdos.bandpdosplotly import BandsPdosPlotly
+        from aiidalab_qe_vibroscopy.app.widgets.phononmodel import PhononModel
+        from aiidalab_qe_vibroscopy.app.widgets.ramanmodel import RamanModel
+
+        phonon_model = PhononModel(vibro=workchain)
+        phonon_model.fetch_data()
+        phonon_plot = BandsPdosPlotly(
+            bands_data=phonon_model.bands_data,
+            pdos_data=phonon_model.pdos_data,
+        ).bandspdosfigure
+        y_values = _numeric_plot_values(phonon_plot.data[0].y)
+        phonon_plot.update_layout(
+            xaxis={"title": "q-points"},
+            yaxis={
+                "title": "THz",
+                "range": [
+                    float(np.nanmin(y_values)) - 0.1,
+                    float(np.nanmax(y_values)) + 0.1,
+                ],
+            },
+        )
+
+        output_namespace = _vibroscopy_output_namespace(workchain)
+        input_structure = workchain.inputs.structure.get_ase()
+        spectra = []
+        for spectrum_type in ("IR", "Raman"):
+            model = RamanModel(
+                vibro=output_namespace,
+                input_structure=input_structure,
+                spectrum_type=spectrum_type,
+            )
+            model.fetch_data()
+            if len(model.raw_frequencies) == 0:
+                continue
+            model.update_data()
+            if len(model.frequencies) == 0:
+                continue
+            spectra.append(
+                (
+                    spectrum_type,
+                    np.asarray(model.frequencies, dtype=float),
+                    np.asarray(model.intensities, dtype=float),
+                )
+            )
+
+        row_count = 1 + len(spectra)
+        figure = Figure(figsize=(9, 5.5 + 2.6 * len(spectra)), constrained_layout=True)
+        grid = figure.add_gridspec(
+            row_count,
+            2,
+            width_ratios=(0.7, 0.3),
+            height_ratios=(2.0,) + (1.0,) * len(spectra),
+        )
+        bands_axis = figure.add_subplot(grid[0, 0])
+        dos_axis = figure.add_subplot(grid[0, 1], sharey=bands_axis)
+        _draw_plotly_bands_pdos(
+            phonon_plot,
+            bands_axis,
+            dos_axis,
+            "Phonon bands and density of states",
+        )
+        for row, (spectrum_type, frequencies, intensities) in enumerate(
+            spectra, start=1
+        ):
+            axis = figure.add_subplot(grid[row, :])
+            axis.plot(frequencies, intensities, color="#1f77b4")
+            axis.fill_between(
+                frequencies, 0.0, intensities, color="#1f77b4", alpha=0.15
+            )
+            axis.set_title(f"Powder {spectrum_type} spectrum")
+            axis.set_xlabel("Frequency (cm$^{-1}$)")
+            axis.set_ylabel("Normalized intensity")
+        figure.savefig(path, dpi=180)
+        return
+    except Exception:  # noqa: BLE001 - optional app integration has a safe fallback
+        logger.warning(
+            "Could not reuse the QE vibroscopy Results plots; using the generic preview.",
+            exc_info=True,
+        )
+
+    _render_xy_preview(
+        workchain.outputs.phonon_pdos,
+        path,
+        "Vibrational density of states",
+    )
 
 
 def _render_mep_preview(workchain, path):
@@ -2851,15 +3379,12 @@ def _cp2k_spm_result_metadata(workchain):
             properties["afm_scan_z_step_angstrom"] = float(scan_step[2])
         tip = str(parameters.get("tip", "")).strip()
         probe = str(parameters.get("probeType", "")).strip()
-        if tip or probe:
-            properties["tip_model"] = "; ".join(
-                value
-                for value in (
-                    f"{tip} tip" if tip else "",
-                    f"{probe} probe" if probe else "",
-                )
-                if value
-            )
+        details = ["Probe-particle AFM"]
+        if tip:
+            details.append(f"{tip} tip")
+        if probe:
+            details.append(f"{probe} probe")
+        properties["tip_model"] = "; ".join(details)
         return properties
 
     raise ValueError(f"Unsupported SPM workflow: {workchain.process_label}")
@@ -2895,103 +3420,226 @@ def _cp2k_spm_property_definition(workchain, aiida_node_id=None, executable_ids=
     }
 
 
+def _nearest_available_index(values, target, require_in_range=False):
+    """Return the index nearest a target, optionally only inside the data range."""
+    values = np.asarray(values, dtype=float).ravel()
+    if values.size == 0:
+        return None
+    if require_in_range and not float(np.min(values)) <= target <= float(np.max(values)):
+        return None
+    return int(np.argmin(np.abs(values - target)))
+
+
+def _spm_series_details(info):
+    details = []
+    if info.get("height") is not None:
+        details.append(f"height {float(info['height']):.2f} Å")
+    if info.get("isovalue") is not None:
+        details.append(f"isovalue {float(info['isovalue']):.2g} a.u.")
+    if info.get("p_tip_ratio") is not None:
+        details.append(_tip_model_summary([info["p_tip_ratio"]]))
+    return ", ".join(details)
+
+
+def _highest_contrast_image(candidates):
+    def contrast(candidate):
+        finite = np.asarray(candidate[0])[np.isfinite(candidate[0])]
+        return float(np.ptp(finite)) if finite.size else -1.0
+
+    return max(candidates, key=contrast)
+
+
+def _spm_preview_panels(workchain):
+    """Select scientifically recognizable panels from one SPM result archive."""
+    if workchain.process_label == "Cp2kAfmWorkChain":
+        archive = _retrieved_npz_data(workchain, "df.npz")
+        grid = np.asarray(archive["data"], dtype=float)
+        planes = grid.reshape((-1,) + grid.shape[-2:])
+        parameters = _node_mapping(workchain.inputs.ppafm_params)
+        scan_min = parameters.get("scanMin", [0.0, 0.0, 0.0])
+        scan_max = parameters.get(
+            "scanMax", [float(planes.shape[-1]), float(planes.shape[-2]), 0.0]
+        )
+        step = parameters.get("scanStep", [0.0, 0.0, 1.0])
+        amplitude = float(parameters.get("Amplitude", 0.0))
+        first_tip_z = float(scan_min[2]) + amplitude / 2.0
+        tip_z = first_tip_z + np.arange(len(planes)) * float(step[2])
+        index = _nearest_available_index(tip_z, 15.0)
+        return [
+            {
+                "image": planes[index],
+                "title": f"Probe-particle AFM, tip z = {tip_z[index]:.2f} Å",
+                "extent": [scan_min[0], scan_max[0], scan_min[1], scan_max[1]],
+                "cmap": "gray",
+                "center_zero": False,
+                "general_info": None,
+            }
+        ]
+
+    if workchain.process_label == "Cp2kOrbitalsWorkChain":
+        panels = []
+        for general_info, series_info, series_data in _orbital_archive_metadata(
+            workchain
+        ):
+            energies = np.asarray(general_info.get("energies", []), dtype=float)
+            orbital_indexes = np.asarray(
+                general_info.get("orb_indexes", []), dtype=int
+            )
+            homo = general_info.get("homo")
+            if homo is None:
+                continue
+            spin = int(general_info.get("spin", 0))
+            spin_label = "alpha" if spin == 0 else "beta"
+            for frontier_label, frontier_index in (("HOMO", int(homo)), ("LUMO", int(homo) + 1)):
+                positions = np.flatnonzero(orbital_indexes == frontier_index)
+                if not len(positions):
+                    continue
+                energy_index = int(positions[0])
+                candidates = []
+                for series_index, info in enumerate(series_info):
+                    series_type = str(info.get("type", "")).lower()
+                    if series_type != "const-height orbital":
+                        continue
+                    data = np.asarray(series_data[series_index], dtype=float)
+                    if energy_index < data.shape[0]:
+                        candidates.append((data[energy_index], info))
+                if not candidates:
+                    continue
+                image, info = _highest_contrast_image(candidates)
+                details = _spm_series_details(info)
+                title = f"{spin_label} {frontier_label}, E = {energies[energy_index]:.2f} eV"
+                if details:
+                    title += f"; {details}"
+                panels.append(
+                    {
+                        "image": image,
+                        "title": title,
+                        "extent": None,
+                        "cmap": "seismic",
+                        "center_zero": True,
+                        "general_info": general_info,
+                    }
+                )
+        if panels:
+            return panels
+        raise ValueError("The orbital archive contains no explicit HOMO/LUMO maps.")
+
+    general_info, series_info, series_data = _stm_archive_metadata(workchain)
+    energies = np.asarray(general_info.get("energies", []), dtype=float)
+    panels = []
+    selected = set()
+    for target in (-0.5, 0.5):
+        energy_index = _nearest_available_index(
+            energies, target, require_in_range=True
+        )
+        if energy_index is None:
+            continue
+        candidates = []
+        for series_index, info in enumerate(series_info):
+            if not str(info.get("type", "")).lower().endswith("stm"):
+                continue
+            data = np.asarray(series_data[series_index], dtype=float)
+            if energy_index < data.shape[0]:
+                candidates.append((data[energy_index], info, series_index))
+        if not candidates:
+            continue
+        image, info, series_index = _highest_contrast_image(candidates)
+        identity = (series_index, energy_index)
+        if identity in selected:
+            continue
+        selected.add(identity)
+        details = _spm_series_details(info)
+        title = f"STM at {energies[energy_index]:+.2f} V"
+        if details:
+            title += f"; {details}"
+        panels.append(
+            {
+                "image": image,
+                "title": title,
+                "extent": None,
+                # This is the yellow heat-map option exposed by the surfaces app.
+                "cmap": "gist_heat",
+                "center_zero": False,
+                "general_info": general_info,
+            }
+        )
+    if panels:
+        return panels
+    raise ValueError("The STM archive has no map near the requested biases.")
+
+
 def _render_spm_preview(workchain, path):
     from matplotlib.figure import Figure
 
-    if workchain.process_label == "Cp2kAfmWorkChain":
-        data = _retrieved_npz_data(workchain, "df.npz")
-        grid = np.asarray(data["data"], dtype=float)
-        planes = grid.reshape((-1,) + grid.shape[-2:])
-        image = max(
-            planes,
-            key=lambda plane: (
-                float(np.ptp(plane[np.isfinite(plane)]))
-                if np.isfinite(plane).any()
-                else -1.0
-            ),
-        )
-        parameters = _node_mapping(workchain.inputs.ppafm_params)
-        scan_min = parameters.get("scanMin", [0.0, 0.0])
-        scan_max = parameters.get("scanMax", list(reversed(image.shape)))
-        extent = [scan_min[0], scan_max[0], scan_min[1], scan_max[1]]
-        title = "Representative AFM frequency-shift map"
-        x_values = y_values = None
-    elif workchain.process_label == "Cp2kOrbitalsWorkChain":
-        blocks = _orbital_archive_metadata(workchain)
-        candidates = []
-        for general_info, series_info, series_data in blocks:
-            for index, info in enumerate(series_info):
-                if "orbital" not in str(info.get("type", "")).lower():
-                    continue
-                candidate_data = np.asarray(series_data[index], dtype=float)
-                for plane in candidate_data.reshape((-1,) + candidate_data.shape[-2:]):
-                    finite = plane[np.isfinite(plane)]
-                    contrast = float(np.ptp(finite)) if finite.size else -1.0
-                    candidates.append((contrast, plane, info, general_info))
-        if not candidates:
-            raise ValueError("The orbital archive contains no orbital image series.")
-        _contrast, image, selected_info, general_info = max(
-            candidates, key=lambda item: item[0]
-        )
-        x_values = np.asarray(general_info.get("x_arr", np.arange(image.shape[-1])))
-        y_values = np.asarray(general_info.get("y_arr", np.arange(image.shape[-2])))
-        extent = [
-            x_values.min() * Bohr,
-            x_values.max() * Bohr,
-            y_values.min() * Bohr,
-            y_values.max() * Bohr,
-        ]
-        title = str(selected_info.get("type", "Representative orbital map"))
-    else:
-        general_info, series_info, series_data = _stm_archive_metadata(workchain)
-        candidates = []
-        for index, info in enumerate(series_info):
-            if not str(info.get("type", "")).lower().endswith("stm"):
-                continue
-            candidate_data = np.asarray(series_data[index], dtype=float)
-            for plane in candidate_data.reshape((-1,) + candidate_data.shape[-2:]):
-                finite = plane[np.isfinite(plane)]
-                contrast = float(np.ptp(finite)) if finite.size else -1.0
-                candidates.append((contrast, plane, info))
-        if not candidates:
-            raise ValueError("The STM archive contains no STM image series.")
-        _contrast, image, selected_info = max(candidates, key=lambda item: item[0])
-        x_values = np.asarray(general_info.get("x_arr", np.arange(image.shape[-1])))
-        y_values = np.asarray(general_info.get("y_arr", np.arange(image.shape[-2])))
-        extent = [
-            x_values.min() * Bohr,
-            x_values.max() * Bohr,
-            y_values.min() * Bohr,
-            y_values.max() * Bohr,
-        ]
-        title = str(selected_info.get("type", "Representative STM map"))
+    panels = _spm_preview_panels(workchain)
+    columns = min(2, len(panels))
+    rows = int(np.ceil(len(panels) / columns))
+    figure = Figure(
+        figsize=(5.2 * columns, 4.4 * rows),
+        constrained_layout=True,
+    )
+    axes = np.atleast_1d(figure.subplots(rows, columns)).ravel()
 
-    finite = image[np.isfinite(image)]
-    contrast = float(np.ptp(finite)) if finite.size else 0.0
-    figure = Figure(figsize=(6, 5), constrained_layout=True)
-    axis = figure.subplots()
-    if contrast > 0.0:
+    for axis, panel in zip(axes, panels):
+        image = np.asarray(panel["image"], dtype=float)
+        finite = image[np.isfinite(image)]
+        if not finite.size or np.ptp(finite) <= 0.0:
+            axis.axis("off")
+            axis.text(0.5, 0.5, "No finite image contrast", ha="center", va="center")
+            continue
+
+        general_info = panel["general_info"]
+        if general_info is not None:
+            try:
+                # Reuse the surfaces viewer geometry handling so skewed cells are
+                # plotted in physical coordinates rather than as square arrays.
+                from surfaces_tools.widgets.series_plotter import (
+                    _grid_geometry,
+                    make_plot,
+                )
+
+                extent, _ratio, geometry = _grid_geometry(
+                    general_info, image.shape
+                )
+                make_plot(
+                    figure,
+                    axis,
+                    image,
+                    extent,
+                    grid_geometry=geometry,
+                    title=panel["title"],
+                    center0=panel["center_zero"],
+                    cmap=panel["cmap"],
+                )
+                continue
+            except Exception:
+                logger.warning(
+                    "Could not reuse the surfaces SPM geometry renderer.",
+                    exc_info=True,
+                )
+
+        limits = None
+        if panel["center_zero"]:
+            maximum = float(np.max(np.abs(finite)))
+            limits = (-maximum, maximum)
         plotted = axis.imshow(
             image,
             origin="lower",
-            aspect="auto",
-            extent=extent,
-            cmap="viridis",
+            interpolation="bicubic",
+            extent=panel["extent"],
+            cmap=panel["cmap"],
+            vmin=limits[0] if limits else None,
+            vmax=limits[1] if limits else None,
         )
         axis.set_xlabel("x (Å)")
         axis.set_ylabel("y (Å)")
-        axis.set_title(title)
+        axis.set_title(panel["title"])
+        axis.axis("scaled")
         figure.colorbar(plotted, ax=axis)
-    else:
-        axis.axis("off")
-        axis.text(
-            0.5,
-            0.5,
-            "SPM preview suggestion\nReplace this image if a better preview is available.",
-            ha="center",
-            va="center",
-        )
-    figure.savefig(path, dpi=160)
+
+    for axis in axes[len(panels) :]:
+        axis.remove()
+    figure.savefig(path, dpi=160, bbox_inches="tight")
 
 
 def _preview_override(preview_overrides, workchain, result_role):
@@ -3186,6 +3834,9 @@ def _band_and_dos_properties(
     if fermi is not None:
         band_properties["fermi_energy_ev"] = fermi
         dos_properties["fermi_energy_ev"] = fermi
+    magnetization = _magnetization_properties(output_parameters)
+    band_properties.update(magnetization)
+    dos_properties.update(magnetization)
     return band_properties, dos_properties
 
 
@@ -3202,7 +3853,13 @@ def _create_band_and_dos_objects(
     executable_ids,
     preview_overrides=None,
     property_overrides=None,
+    preview_renderer=None,
 ):
+    shared_preview_renderer = (
+        _cached_preview_renderer(preview_renderer)
+        if preview_renderer is not None
+        else None
+    )
     band_properties, dos_properties = _band_and_dos_properties(
         workchain,
         dft_parameters,
@@ -3223,8 +3880,11 @@ def _create_band_and_dos_objects(
         OPENBIS_SIMULATION_TYPES["Band Structure"],
         band_properties,
         [structure_object],
-        lambda path: _render_bands_preview(
-            bands_node, path, output_parameters.get("fermi_energy")
+        shared_preview_renderer
+        or (
+            lambda path: _render_bands_preview(
+                bands_node, path, output_parameters.get("fermi_energy")
+            )
         ),
         "band_structure",
         preview_override=_preview_override(preview_overrides, workchain, "bands"),
@@ -3242,7 +3902,12 @@ def _create_band_and_dos_objects(
         OPENBIS_SIMULATION_TYPES["DOS"],
         dos_properties,
         [structure_object],
-        lambda path: _render_xy_preview(dos_node, path, "Projected density of states"),
+        shared_preview_renderer
+        or (
+            lambda path: _render_xy_preview(
+                dos_node, path, "Projected density of states"
+            )
+        ),
         "pdos",
         preview_override=_preview_override(preview_overrides, workchain, "pdos"),
     )
@@ -3296,6 +3961,9 @@ def NanoribbonWorkChain_export(
         executable_ids,
         preview_overrides=preview_overrides,
         property_overrides=property_overrides,
+        preview_renderer=lambda path: _render_nanoribbon_bands_pdos_preview(
+            workchain, path
+        ),
     )
 
     geometry_object = None
@@ -3315,6 +3983,7 @@ def NanoribbonWorkChain_export(
                 "final_energy_hartree": _energy_in_hartree(cell_output),
             }
         )
+        properties.update(_magnetization_properties(cell_output))
         cell_dofree = (
             _node_mapping(cell_opt.inputs.parameters).get("CELL", {}).get("cell_dofree")
         )
@@ -3431,6 +4100,7 @@ def BandsWorkChain_export(
         executable_ids,
         preview_overrides=preview_overrides,
         property_overrides=property_overrides,
+        preview_renderer=lambda path: _render_qe_electronic_preview(workchain, path),
     )
 
 
@@ -3471,17 +4141,17 @@ def PdosWorkChain_export(
     fermi = _fermi_energy(output_parameters)
     if fermi is not None:
         properties["fermi_energy_ev"] = fermi
+    properties.update(_magnetization_properties(output_parameters))
     properties = _apply_property_overrides(
         properties, property_overrides, workchain, "pdos"
     )
-    pdos_node = workchain.outputs.projwfc.Dos
     return _create_simulation_object(
         openbis_session,
         experiment_id,
         OPENBIS_SIMULATION_TYPES["DOS"],
         properties,
         [structure_object],
-        lambda path: _render_xy_preview(pdos_node, path, "Projected density of states"),
+        lambda path: _render_qe_electronic_preview(workchain, path),
         "pdos",
         preview_override=_preview_override(preview_overrides, workchain, "pdos"),
     )
@@ -3556,22 +4226,20 @@ def VibroWorkChain_export(
         executable_ids=executable_ids,
     )
     properties["vibrational_mode"] = _qe_vibrational_mode(workchain)
+    properties.update(_magnetization_properties(output_parameters))
     properties = _apply_property_overrides(
         properties, property_overrides, workchain, "vibrational_spectroscopy"
     )
     structure_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
     )
-    phonon_pdos = workchain.outputs.phonon_pdos
     return _create_simulation_object(
         openbis_session,
         experiment_id,
         OPENBIS_SIMULATION_TYPES["Vibrational Spectroscopy"],
         properties,
         [structure_object],
-        lambda path: _render_xy_preview(
-            phonon_pdos, path, "Vibrational density of states"
-        ),
+        lambda path: _render_qe_vibrational_preview(workchain, path),
         "vibrational_spectrum",
         preview_override=_preview_override(
             preview_overrides, workchain, "vibrational_spectroscopy"
@@ -4045,6 +4713,7 @@ def _result_property_definitions(workchain):
                     "final_energy_hartree": _energy_in_hartree(cell_output),
                 }
             )
+            properties.update(_magnetization_properties(cell_output))
             cell_dofree = (
                 _node_mapping(cell_opt.inputs.parameters)
                 .get("CELL", {})
@@ -4115,6 +4784,7 @@ def _result_property_definitions(workchain):
         fermi = _fermi_energy(output_parameters)
         if fermi is not None:
             properties["fermi_energy_ev"] = fermi
+        properties.update(_magnetization_properties(output_parameters))
         return {
             "pdos": {
                 "object_type": OPENBIS_SIMULATION_TYPES["DOS"],
@@ -4141,6 +4811,7 @@ def _result_property_definitions(workchain):
             workchain, "Vibrational spectroscopy", dft_parameters, None
         )
         properties["vibrational_mode"] = _qe_vibrational_mode(workchain)
+        properties.update(_magnetization_properties(output_parameters))
         return {
             "vibrational_spectroscopy": {
                 "object_type": OPENBIS_SIMULATION_TYPES["Vibrational Spectroscopy"],
@@ -4179,31 +4850,21 @@ def _preview_definitions(workchain):
     if process_label == "NanoribbonWorkChain":
         calculations = _find_nanoribbon_calculations(workchain)
         cell_opt = calculations["cell_opt2"]
-        scf = calculations["scf"]
-        output_parameters = _node_mapping(scf.outputs.output_parameters)
-        dos_node = _get_optional_output(calculations["export_pdos"].outputs, "Dos")
-        if dos_node is None:
-            raise ValueError(
-                "The export_pdos calculation does not contain a Dos output."
-            )
+        shared_renderer = _cached_preview_renderer(
+            lambda path: _render_nanoribbon_bands_pdos_preview(workchain, path)
+        )
         definitions = [
             (
                 "bands",
                 "Electronic band structure",
                 "band_structure",
-                lambda path: _render_bands_preview(
-                    calculations["bands"].outputs.output_band,
-                    path,
-                    output_parameters.get("fermi_energy"),
-                ),
+                shared_renderer,
             ),
             (
                 "pdos",
                 "Projected density of states",
                 "pdos",
-                lambda path: _render_xy_preview(
-                    dos_node, path, "Projected density of states"
-                ),
+                shared_renderer,
             ),
         ]
         if cell_opt is not None:
@@ -4314,17 +4975,15 @@ def _preview_definitions(workchain):
             root_out = workchain.outputs.bands
         except NotExistentAttributeError:
             root_out = workchain.outputs.bands_projwfc
-        output_parameters = _node_mapping(root_out.scf_parameters)
+        shared_renderer = _cached_preview_renderer(
+            lambda path: _render_qe_electronic_preview(workchain, path)
+        )
         definitions = [
             (
                 "bands",
                 "Electronic band structure",
                 "band_structure",
-                lambda path: _render_bands_preview(
-                    root_out.band_structure,
-                    path,
-                    output_parameters.get("fermi_energy"),
-                ),
+                shared_renderer,
             )
         ]
         dos_node = _bands_dos_node(root_out)
@@ -4334,9 +4993,7 @@ def _preview_definitions(workchain):
                     "pdos",
                     "Projected density of states",
                     "pdos",
-                    lambda path: _render_xy_preview(
-                        dos_node, path, "Projected density of states"
-                    ),
+                    shared_renderer,
                 )
             )
         return definitions
@@ -4347,11 +5004,7 @@ def _preview_definitions(workchain):
                 "pdos",
                 "Projected density of states",
                 "pdos",
-                lambda path: _render_xy_preview(
-                    workchain.outputs.projwfc.Dos,
-                    path,
-                    "Projected density of states",
-                ),
+                lambda path: _render_qe_electronic_preview(workchain, path),
             )
         ]
 
@@ -4361,11 +5014,7 @@ def _preview_definitions(workchain):
                 "vibrational_spectroscopy",
                 "Vibrational spectrum",
                 "vibrational_spectrum",
-                lambda path: _render_xy_preview(
-                    workchain.outputs.phonon_pdos,
-                    path,
-                    "Vibrational density of states",
-                ),
+                lambda path: _render_qe_vibrational_preview(workchain, path),
             )
         ]
 
@@ -4473,6 +5122,7 @@ def render_workchain_preview_suggestions(
                             raise RuntimeError(
                                 f"Preview renderer did not create {path.name}."
                             )
+                        _resample_preview_path(path)
                         content = path.read_bytes()
                     except Exception as exception:  # noqa: BLE001 - allow UI replacement
                         content = None

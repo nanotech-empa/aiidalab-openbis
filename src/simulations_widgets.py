@@ -77,8 +77,18 @@ def _first_uploaded_file(files_widget):
     return uploaded[0] if uploaded else None
 
 
-def _image_format(filename):
-    return "jpeg" if Path(filename).suffix.lower() in {".jpg", ".jpeg"} else "png"
+def _preview_image_widget(content, filename):
+    """Display a proportionally resampled preview at its actual pixel size."""
+    content, image_format, size = aiida_utils._resample_preview_content(
+        content, filename
+    )
+    kwargs = {
+        "value": content,
+        "format": image_format,
+    }
+    if size is not None:
+        kwargs.update(width=str(size[0]), height=str(size[1]))
+    return ipw.Image(**kwargs)
 
 
 _AIIDA_ROOT_UUID_RE = re.compile(
@@ -2297,11 +2307,7 @@ class SimulationDetailsWidget(ipw.VBox):
             property_widget.set_values(suggestion["properties"])
             content = suggestion["content"]
             preview = (
-                ipw.Image(
-                    value=content,
-                    format="png",
-                    layout=ipw.Layout(max_width="560px", height="auto"),
-                )
+                _preview_image_widget(content, suggestion["name"])
                 if content is not None
                 else ipw.HTML(
                     "<p style='color:#b00020'>No suggestion could be generated: "
@@ -2325,10 +2331,8 @@ class SimulationDetailsWidget(ipw.VBox):
                 if uploaded is None:
                     return
                 preview_box.children = [
-                    ipw.Image(
-                        value=uploaded["content"],
-                        format=_image_format(uploaded["name"]),
-                        layout=ipw.Layout(max_width="560px", height="auto"),
+                    _preview_image_widget(
+                        uploaded["content"], uploaded["name"]
                     )
                 ]
                 status.value = (

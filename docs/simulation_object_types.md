@@ -284,6 +284,7 @@ converged: boolean
 method_label: string
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 fermi_energy_ev: float[] (eV)
 electronic_gap_ev: float[] (eV)
 comments: text
@@ -445,6 +446,7 @@ final_max_force_hartree_per_bohr: float (Hartree/bohr)
 number_of_steps: integer
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 fermi_energy_ev: float[] (eV)
 electronic_gap_ev: float[] (eV)
 comments: text
@@ -578,6 +580,7 @@ method_label: string
 fermi_energy_ev: float[] (eV)
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 k_path: string
 electronic_gap_type: enum
 comments: text
@@ -727,6 +730,7 @@ energy_max_ev: float (eV relative to the stored reference)
 projection_description: text
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -908,6 +912,7 @@ converged: boolean
 method_label: string
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 fermi_energy_ev: float[] (eV)
 electronic_gap_ev: float[] (eV)
 comments: text
@@ -1068,6 +1073,7 @@ energy_min_ev: float (eV)
 energy_max_ev: float (eV)
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 electronic_gap_ev: float[] (eV)
 comments: text
 ```
@@ -1235,6 +1241,7 @@ constraints_description: text
 reaction_coordinate_description: text
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1423,6 +1430,7 @@ afm_scan_z_max_angstrom: float (absolute grid coordinate)
 afm_scan_z_step_angstrom: float
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1432,7 +1440,16 @@ fractions, while `tip_model` gives an explicit corresponding summary (for
 example, ratio `0.8` is `20% s + 80% p`; multiple ratios are separated by
 semicolons). Orbital energies remain separate from ordinary requested bias
 voltages. AFM z limits are absolute scan-grid coordinates and are not interpreted
-as heights above the topmost atom.
+as heights above the topmost atom. For AFM, `tip_model` identifies the
+probe-particle model and its electronic tip/probe summary; the dedicated AFM
+fields retain the probe species, charge, amplitude, and scan range. Complete
+force-field and cantilever parameters remain reproducibly available in the
+linked AiiDA archive.
+
+The suggested ELN preview contains maps nearest -0.5 V and +0.5 V when those
+biases are covered by an STM result, HOMO and LUMO maps for every available spin
+channel for orbital results, and the AFM frequency-shift plane nearest a 15
+angstrom probe-particle tip coordinate. The user may replace every suggestion.
 
 ## `spm_mode` vocabulary
 
@@ -1590,6 +1607,7 @@ converged: boolean
 method_label: string
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 
@@ -1766,6 +1784,7 @@ thermostat: string
 barostat: string
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
 

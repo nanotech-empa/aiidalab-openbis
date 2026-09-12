@@ -185,6 +185,8 @@ def make_workchain(include_cell_optimization):
         "non_colinear_calculation": False,
         "lsda": True,
         "fermi_energy": -3.2,
+        "total_magnetization": 0.0,
+        "absolute_magnetization": 0.87,
     }
     scf = make_calculation(
         "scf",
@@ -218,7 +220,12 @@ def make_workchain(include_cell_optimization):
                 },
                 outputs={
                     "output_parameters": FakeDict(
-                        {"energy": -272.11386245988, "energy_units": "eV"}
+                        {
+                            "energy": -272.11386245988,
+                            "energy_units": "eV",
+                            "total_magnetization": 0.0,
+                            "absolute_magnetization": 0.87,
+                        }
                     ),
                     "output_structure": SimpleNamespace(uuid="optimized-structure"),
                 },
@@ -403,6 +410,7 @@ def test_qe_relax_metadata_uses_final_forces_and_direct_ionic_steps(
             "fermi_energy": 6.166,
             "number_of_electrons": 8.0,
             "total_magnetization": 0.0,
+            "absolute_magnetization": 0.87,
         },
     )
 
@@ -413,6 +421,18 @@ def test_qe_relax_metadata_uses_final_forces_and_direct_ionic_steps(
     assert metadata["fermi_energy_ev"] == [6.166]
     assert metadata["electronic_gap_ev"] == [0.47]
     assert metadata["total_magnetization_bohr_magneton"] == 0.0
+    assert metadata["absolute_magnetization_bohr_magneton"] == pytest.approx(0.87)
+
+
+def test_magnetization_properties_preserve_reported_zero_values(aiida_utils):
+    properties = aiida_utils._magnetization_properties(
+        {"total_magnetization": 0.0, "absolute_magnetization": 0.0}
+    )
+
+    assert properties == {
+        "total_magnetization_bohr_magneton": 0.0,
+        "absolute_magnetization_bohr_magneton": 0.0,
+    }
 
 
 def test_unknown_method_label_is_omitted(aiida_utils):
@@ -905,6 +925,10 @@ def test_nanoribbon_export_uses_simplified_schema(
         assert simulation.props["method_modifiers"] == ["VDW", "SPIN_COLLINEAR"]
         assert simulation.props["charge"] == -1.0
         assert simulation.props["converged"] is True
+        assert simulation.props["total_magnetization_bohr_magneton"] == 0.0
+        assert simulation.props[
+            "absolute_magnetization_bohr_magneton"
+        ] == pytest.approx(0.87)
         assert simulation.props["comments"] == workchain.description
         assert simulation.props["aiida_node"] == "aiida-archive-permid"
         assert simulation.props["executables"] == [
@@ -925,6 +949,10 @@ def test_nanoribbon_export_uses_simplified_schema(
         assert geometry.props["cell_optimization"] is True
         assert geometry.props["cell_constraints"] == "x"
         assert geometry.props["final_energy_hartree"] == pytest.approx(-10.0)
+        assert geometry.props["total_magnetization_bohr_magneton"] == 0.0
+        assert geometry.props[
+            "absolute_magnetization_bohr_magneton"
+        ] == pytest.approx(0.87)
         assert geometry.props["aiida_node"] == "aiida-archive-permid"
         assert geometry.parents == [structures["input-structure"]]
         assert structures["optimized-structure"].parents == [geometry]
@@ -1091,6 +1119,23 @@ def test_record_openbis_exports_updates_structured_workchain_extra(
     ]
 
 
+def test_cached_preview_renderer_renders_once_and_copies_bytes(tmp_path, aiida_utils):
+    calls = []
+
+    def render(path):
+        calls.append(Path(path))
+        Path(path).write_bytes(b"shared-preview")
+
+    cached = aiida_utils._cached_preview_renderer(render)
+    first = tmp_path / "bands.png"
+    second = tmp_path / "pdos.png"
+    cached(first)
+    cached(second)
+
+    assert calls == [first]
+    assert first.read_bytes() == second.read_bytes() == b"shared-preview"
+
+
 def test_upload_preview_content_uses_user_replacement(
     tmp_path, monkeypatch, aiida_utils
 ):
@@ -1110,6 +1155,32 @@ def test_upload_preview_content_uses_user_replacement(
     )
 
     assert uploaded == [("ELN_PREVIEW", ".jpg", b"replacement")]
+
+
+def test_upload_preview_content_resamples_with_preserved_aspect_ratio(
+    monkeypatch, aiida_utils
+):
+    from PIL import Image
+
+    source = io.BytesIO()
+    Image.new("RGB", (900, 1600), color="white").save(source, format="PNG")
+    uploaded = []
+
+    def create_dataset(_session, **kwargs):
+        path = Path(kwargs["files"][0])
+        uploaded.append(path.read_bytes())
+
+    monkeypatch.setattr(aiida_utils.utils, "create_openbis_dataset", create_dataset)
+    aiida_utils._upload_preview_content(
+        object(),
+        object(),
+        lambda _path: pytest.fail("renderer should not run for a replacement"),
+        "pdos",
+        preview_override={"name": "chosen.png", "content": source.getvalue()},
+    )
+
+    with Image.open(io.BytesIO(uploaded[0])) as image:
+        assert image.size == (281, 500)
 
 
 def test_render_workchain_preview_suggestions_reports_each_result(
@@ -2245,7 +2316,98 @@ def test_afm_spm_metadata_uses_absolute_grid_coordinates(aiida_utils):
     assert properties["afm_scan_z_max_angstrom"] == pytest.approx(18.0)
     assert properties["afm_scan_z_step_angstrom"] == pytest.approx(0.2)
     assert "heights_angstrom" not in properties
-    assert properties["tip_model"] == "s tip; O probe"
+    assert properties["tip_model"] == "Probe-particle AFM; s tip; O probe"
+
+
+def test_stm_preview_selects_available_maps_near_plus_and_minus_half_volt(
+    monkeypatch, aiida_utils
+):
+    energies = np.asarray([-1.0, -0.48, 0.0, 0.52, 1.0])
+    data = np.arange(20, dtype=float).reshape((1, 5, 2, 2))
+    monkeypatch.setattr(
+        aiida_utils,
+        "_stm_archive_metadata",
+        lambda _workchain: (
+            {"energies": energies},
+            [{"type": "const-height stm", "height": 4.0}],
+            data,
+        ),
+    )
+
+    panels = aiida_utils._spm_preview_panels(
+        SimpleNamespace(process_label="Cp2kStmWorkChain")
+    )
+
+    assert len(panels) == 2
+    assert "-0.48 V" in panels[0]["title"]
+    assert "+0.52 V" in panels[1]["title"]
+    assert all(panel["cmap"] == "gist_heat" for panel in panels)
+
+
+def test_orbital_preview_selects_homo_and_lumo_for_every_spin(
+    monkeypatch, aiida_utils
+):
+    blocks = []
+    for spin in (0, 1):
+        blocks.append(
+            (
+                {
+                    "energies": [-1.0, 1.0],
+                    "orb_indexes": [4, 5],
+                    "homo": 4,
+                    "spin": spin,
+                },
+                [{"type": "const-height orbital", "height": 3.0}],
+                np.arange(8, dtype=float).reshape((1, 2, 2, 2)) + spin,
+            )
+        )
+    monkeypatch.setattr(
+        aiida_utils,
+        "_orbital_archive_metadata",
+        lambda _workchain: blocks,
+    )
+
+    panels = aiida_utils._spm_preview_panels(
+        SimpleNamespace(process_label="Cp2kOrbitalsWorkChain")
+    )
+
+    assert [panel["title"].split(",", 1)[0] for panel in panels] == [
+        "alpha HOMO",
+        "alpha LUMO",
+        "beta HOMO",
+        "beta LUMO",
+    ]
+    assert all(panel["center_zero"] for panel in panels)
+
+
+def test_afm_preview_selects_plane_nearest_fifteen_angstrom(
+    monkeypatch, aiida_utils
+):
+    planes = np.arange(31 * 4, dtype=float).reshape((31, 2, 2))
+    monkeypatch.setattr(
+        aiida_utils,
+        "_retrieved_npz_data",
+        lambda _workchain, _filename: {"data": planes},
+    )
+    workchain = SimpleNamespace(
+        process_label="Cp2kAfmWorkChain",
+        inputs=SimpleNamespace(
+            ppafm_params=FakeDict(
+                {
+                    "scanMin": [0.0, 0.0, 13.0],
+                    "scanMax": [8.0, 10.0, 18.0],
+                    "scanStep": [0.1, 0.1, 0.1],
+                    "Amplitude": 1.4,
+                }
+            )
+        ),
+    )
+
+    panel = aiida_utils._spm_preview_panels(workchain)[0]
+
+    assert "15.00 Å" in panel["title"]
+    assert np.array_equal(panel["image"], planes[13])
+    assert panel["cmap"] == "gray"
 
 
 def test_all_cp2k_spm_workchains_use_one_exporter(aiida_utils):

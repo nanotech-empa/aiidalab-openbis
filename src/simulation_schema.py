@@ -161,6 +161,11 @@ PROPERTY_TYPES = {
             "Total magnetization (Bohr magneton)",
             "REAL",
         ),
+        prop(
+            "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON",
+            "Absolute magnetization (Bohr magneton)",
+            "REAL",
+        ),
         # These are multivalued globally to support spin-resolved values.
         prop("FERMI_ENERGY_EV", "Fermi energy (eV)", "REAL", multi_value=True),
         prop("ELECTRONIC_GAP_EV", "Electronic gap (eV)", "REAL", multi_value=True),
@@ -365,6 +370,20 @@ SPIN = [
 def object_type(
     prefix: str, description: str, assignments: list[dict[str, Any]]
 ) -> dict[str, Any]:
+    # Absolute magnetization was added after the simulation object types were
+    # populated in openBIS. Append it so every pre-existing assignment keeps its
+    # ordinal; the additive migration below then remains safe for stored records.
+    if any(
+        item["code"] == "TOTAL_MAGNETIZATION_BOHR_MAGNETON"
+        for item in assignments
+    ):
+        assignments = assignments + [
+            assignment(
+                "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON",
+                False,
+                "Electronic properties",
+            )
+        ]
     return {
         "prefix": prefix,
         "description": description,
@@ -579,6 +598,29 @@ OBJECT_TYPES = {
 }
 
 
+for _object_code, _definition in OBJECT_TYPES.items():
+    if any(
+        item["code"] == "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON"
+        for item in _definition["assignments"]
+    ):
+        ADDITIVE_OBJECT_TYPE_ASSIGNMENTS[_object_code] = [
+            assignment(
+                "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON",
+                False,
+                "Electronic properties",
+            )
+        ]
+
+
+def base_assignments(object_code: str, assignments):
+    """Exclude append-only migrations from exact assignment comparisons."""
+    additive_codes = {
+        item["code"]
+        for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(object_code, [])
+    }
+    return [item for item in assignments if item["code"] not in additive_codes]
+
+
 def normalize_reference(value: Any) -> str:
     if value is None:
         return ""
@@ -734,10 +776,20 @@ def audit(session) -> dict[str, Any]:
             object_actions.append((code, "create"))
             continue
         current = assignment_state(existing)
-        desired = {item["code"]: item for item in expected["assignments"]}
+        desired_items = base_assignments(code, expected["assignments"])
+        desired = {item["code"]: item for item in desired_items}
+        additive_codes = {
+            item["code"]
+            for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(code, [])
+        }
+        current = {
+            property_code: row
+            for property_code, row in current.items()
+            if property_code not in additive_codes
+        }
         changed = set(current) != set(desired) or any(
             not assignment_matches(current[item["code"]], item, ordinal)
-            for ordinal, item in enumerate(expected["assignments"], start=1)
+            for ordinal, item in enumerate(desired_items, start=1)
             if item["code"] in current
         )
         if changed:
@@ -992,10 +1044,21 @@ def apply_object_type_assignments(session, code: str, expected: dict[str, Any]):
     """Make one empty object type's property assignments exact and idempotent."""
     object_type = create_object_type(session, code, expected)
     current = assignment_state(object_type)
-    changed = set(current) != {item["code"] for item in expected["assignments"]} or any(
-        not assignment_matches(current[item["code"]], item, ordinal)
-        for ordinal, item in enumerate(expected["assignments"], start=1)
-        if item["code"] in current
+    desired_items = base_assignments(code, expected["assignments"])
+    desired_codes = {item["code"] for item in desired_items}
+    additive_codes = {
+        item["code"]
+        for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(code, [])
+    }
+    current_base = {
+        property_code: row
+        for property_code, row in current.items()
+        if property_code not in additive_codes
+    }
+    changed = set(current_base) != desired_codes or any(
+        not assignment_matches(current_base[item["code"]], item, ordinal)
+        for ordinal, item in enumerate(desired_items, start=1)
+        if item["code"] in current_base
     )
     if changed:
         count = session.get_objects(type=code).totalCount

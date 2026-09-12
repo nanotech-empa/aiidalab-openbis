@@ -1,4 +1,5 @@
 import importlib
+import io
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,22 @@ def simulations_widgets(monkeypatch):
     sys.modules.pop("src.widgets", None)
     sys.modules.pop("src.simulations_widgets", None)
     return importlib.import_module("src.simulations_widgets")
+
+
+def test_preview_image_widget_resamples_without_distortion(simulations_widgets):
+    from PIL import Image
+
+    content = io.BytesIO()
+    Image.new("RGB", (1600, 900), color="white").save(content, format="PNG")
+
+    widget = simulations_widgets._preview_image_widget(
+        content.getvalue(), "preview.png"
+    )
+
+    assert widget.width == "500"
+    assert widget.height == "281"
+    with Image.open(io.BytesIO(widget.value)) as image:
+        assert image.size == (500, 281)
 
 
 @pytest.mark.parametrize("selection", [None, "", "-1"])
@@ -683,15 +700,38 @@ def test_aiida_root_uuids_schema_is_multivalued_and_additive(
 
     assert definition["dataType"] == "VARCHAR"
     assert definition["multiValue"] is True
-    assert assignments == {
-        "AIIDA_NODE": [
+    assert assignments["AIIDA_NODE"] == [
+        {
+            "code": "AIIDA_ROOT_UUIDS",
+            "mandatory": False,
+            "section": "Provenance",
+        }
+    ]
+
+
+def test_absolute_magnetization_schema_is_optional_and_additive(
+    simulations_widgets,
+):
+    schema = simulations_widgets.simulation_schema
+    definition = schema.PROPERTY_TYPES[
+        "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON"
+    ]
+
+    assert definition["dataType"] == "REAL"
+    for object_code, object_definition in schema.OBJECT_TYPES.items():
+        property_codes = [
+            item["code"] for item in object_definition["assignments"]
+        ]
+        if "TOTAL_MAGNETIZATION_BOHR_MAGNETON" not in property_codes:
+            continue
+        assert property_codes[-1] == "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON"
+        assert schema.ADDITIVE_OBJECT_TYPE_ASSIGNMENTS[object_code] == [
             {
-                "code": "AIIDA_ROOT_UUIDS",
+                "code": "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON",
                 "mandatory": False,
-                "section": "Provenance",
+                "section": "Electronic properties",
             }
         ]
-    }
 
 
 def test_multiple_archive_roots_are_listed_in_import_message(
