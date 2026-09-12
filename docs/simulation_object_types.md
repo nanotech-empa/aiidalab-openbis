@@ -49,6 +49,27 @@ membership tests, independent of formula ordering; for example, a 2D search
 requiring Au, C, O, and Co accepts formulas containing all four elements even
 when additional elements are present.
 
+
+### Imported-structure provenance
+
+The openBIS structure importer stores source identity in the standard AiiDA
+`eln` extra. The mapping contains the openBIS instance, object permID and type,
+selected representation, optional dataset and file identifiers, and an exact
+structure fingerprint. `StructureManagerWidget` preserves this extra when a
+user edits or stores the imported geometry.
+
+For a `MOLECULE` source, the exporter links the resulting
+`ATOMISTIC_MODEL` back to that concept automatically. For an
+`ATOMISTIC_MODEL` source, an unchanged manually uploaded structure is reused.
+If its `WFMS_UUID` is empty, the exporter fills it with the UUID of the first
+AiiDA `StructureData`. A changed geometry creates a new `ATOMISTIC_MODEL`;
+an existing, different `WFMS_UUID` is never overwritten.
+
+If the referenced `StructureData` UUID is already present in the active AiiDA
+profile, the importer reuses that node. Otherwise it locates a directly linked
+`AIIDA_NODE` archive and imports a thin archive containing only the requested
+`StructureData`, preserving its UUID.
+
 ### AiiDA result identity
 
 Every AiiDA-generated simulation object records:
