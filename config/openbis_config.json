@@ -24,23 +24,51 @@
             "Settings": "/LAB205_EQUIPMENT/ILOG/ILOG_SETTING_COLLECTION",
             "Chemical": "/LAB205_MATERIALS/RAW_MATERIALS/CHEMICAL_COLLECTION",
             "Gas Bottles": "/LAB205_MATERIALS/RAW_MATERIALS/GAS_BOTTLE_COLLECTION",
-            "Open Source Code": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/OPEN_SOURCE_SOFTWARE_COLLECTION"
+            "Open Source Code": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/OPEN_SOURCE_SOFTWARE_COLLECTION",
+            "Custom Code": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/CUSTOM_CODE_COLLECTION",
+            "Proprietary Code": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/PROPRIETARY_SOFTWARE_COLLECTION",
+            "Executable": "/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/EXECUTABLE_COLLECTION",
+            "Computer Local": "/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_LOCAL_IT_HARDWARE",
+            "Computer External": "/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_EXTERNAL_AND_HPC_RESOURCES"
         }
     },
     "Simulations": {
         "Types": {
-            "Geometry optimisation": "GEOMETRY_OPTIMISATION",
-            "Band structure": "BAND_STRUCTURE",
-            "PDOS": "PDOS",
-            "Vibrational spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
-            "Unclassified simulation": "UNCLASSIFIED_SIMULATION",
-            "STM simulation": "STM_SIMULATION"
+            "Energy Calculation": "ENERGY_CALCULATION",
+            "Geometry Optimisation": "GEOMETRY_OPTIMISATION",
+            "Band Structure": "BAND_STRUCTURE",
+            "Band Unfolding": "BAND_UNFOLDING",
+            "Charge Analysis": "CHARGE_ANALYSIS",
+            "DOS": "DOS",
+            "Minimum Energy Path": "MINIMUM_ENERGY_PATH",
+            "SPM Simulation": "SPM_SIMULATION",
+            "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
+            "Molecular Dynamics": "MOLECULAR_DYNAMICS",
+            "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
         }
     },
+    "Simulation Export Types": {
+        "Energy Calculation": "ENERGY_CALCULATION",
+        "Geometry Optimisation": "GEOMETRY_OPTIMISATION",
+        "Band Structure": "BAND_STRUCTURE",
+        "Band Unfolding": "BAND_UNFOLDING",
+        "Charge Analysis": "CHARGE_ANALYSIS",
+        "DOS": "DOS",
+        "Minimum Energy Path": "MINIMUM_ENERGY_PATH",
+        "SPM Simulation": "SPM_SIMULATION",
+        "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
+        "Molecular Dynamics": "MOLECULAR_DYNAMICS",
+        "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
+    },
     "Workchain Viewers": {
-        "QeAppWorkChain": "/apps/quantum-espresso/qe.ipynb",
-        "Cp2kGeoOptWorkChain": "/apps/surfaces/view_geometry_optimization.ipynb",
-        "Cp2kStmWorkChain": "/apps/surfaces/view_stm.ipynb"
+        "QeAppWorkChain": "/apps/apps/quantum-espresso/qe.ipynb",
+        "Cp2kGeoOptWorkChain": "/apps/apps/surfaces/view_geometry_optimization.ipynb",
+        "Cp2kNebWorkChain": "/apps/apps/surfaces/view_neb.ipynb",
+        "Cp2kStmWorkChain": "/apps/apps/surfaces/view_stm.ipynb",
+        "Cp2kOrbitalsWorkChain": "/apps/apps/surfaces/view_orbitals.ipynb",
+        "Cp2kAfmWorkChain": "/apps/apps/surfaces/view_afm.ipynb",
+        "QeBanduppyUnfoldingWorkChain": "/apps/apps/aiidalab-empa-qe-postprocess/view_qe_unfolding.ipynb",
+        "NanoribbonWorkChain": "/apps/apps/nanoribbons/show.ipynb"
     },
     "OpenBIS Types": {
         "Process": "PROCESS",
@@ -49,11 +77,14 @@
         "Atomistic Model": "ATOMISTIC_MODEL",
         "Aiida Node": "AIIDA_NODE",
         "Band Structure": "BAND_STRUCTURE",
+        "Band Unfolding": "BAND_UNFOLDING",
         "Geometry Optimisation": "GEOMETRY_OPTIMISATION",
         "PDOS": "PDOS",
         "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
         "Unclassified Simulation": "UNCLASSIFIED_SIMULATION",
         "Code": "CODE",
+        "Computer": "COMPUTER",
+        "Executable": "EXECUTABLE",
         "Molecule": "MOLECULE",
         "Reaction Product Concept": "REACTION_PRODUCT_CONCEPT",
         "Reaction Product": "REACTION_PRODUCT",

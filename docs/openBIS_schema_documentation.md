@@ -315,6 +315,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `aiida_root_uuids` | AiiDA root UUIDs | UUIDs of all root ProcessNodes contained in an AiiDA archive | VARCHAR | False | True | False |
 
 ### Analyser
 * **Code:** `ANALYSER`
@@ -1568,6 +1569,14 @@ By mapping the detailed relationships between physical materials, hardware state
 | `by_hand_settings` | By hand settings | By hand settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
 
 ### Minimum Energy Potential
+
+> **Legacy empty type.** `MINIMUM_ENERGY_POTENTIAL` used “potential” where
+> “path” was intended and is superseded by `MINIMUM_ENERGY_PATH`. The current
+> simulation schema and its AiiDA mapping are specified in
+> [simulation_object_types.md](simulation_object_types.md#minimum_energy_path).
+> `REACTION_BARRIER` remains separate; its scope, including possible
+> MD/free-energy methods, will be defined independently.
+
 * **Code:** `MINIMUM_ENERGY_POTENTIAL`
 * **Generated code prefix:** `MEPO`
 * **Semantic Annotation:**
