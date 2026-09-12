@@ -18,14 +18,15 @@ from typing import Any
 from pybis import Openbis
 
 # openBIS does not allow changing these property attributes in place. CHARGE
-# and AIIDA_NODE are the two explicitly approved corrections to pre-existing
-# properties. The other four were created by this migration and must be
+# CHARGE and AIIDA_NODE are explicitly approved corrections to pre-existing
+# properties. The remaining entries were created by this migration and must be
 # recreated because pyBIS 6.6 strips multiValue for an openBIS 7 server.
 IMMUTABLE_PROPERTY_MIGRATIONS = (
     "CHARGE",
     "AIIDA_NODE",
     "METHOD_MODIFIERS",
     "EXECUTABLES",
+    "SPM_MODE",
 )
 
 # Superseded empty types created before the canonical names were agreed.
@@ -82,7 +83,14 @@ VOCABULARIES = {
     "SPM_MODE_ENUM": [
         ("STM", "STM"),
         ("STS", "STS"),
-        ("NC_AFM", "nc-AFM"),
+        ("AFM", "AFM"),
+        ("ORBITALS", "Orbitals"),
+        ("OTHER", "other"),
+    ],
+    "SPM_IMAGE_MODE_ENUM": [
+        ("CONSTANT_HEIGHT", "Constant height"),
+        ("CONSTANT_ISOVALUE", "Constant isovalue"),
+        ("THREE_DIMENSIONAL_GRID", "Three-dimensional grid"),
         ("OTHER", "other"),
     ],
     "VIBRATIONAL_MODE_ENUM": [
@@ -258,16 +266,36 @@ PROPERTY_TYPES = {
         ),
         prop(
             "SPM_MODE",
-            "SPM mode",
+            "SPM modes",
             "CONTROLLEDVOCABULARY",
+            multi_value=True,
             vocabulary="SPM_MODE_ENUM",
         ),
-        prop("BIAS_VOLTAGE_V", "Bias voltage (V)", "REAL"),
-        prop("HEIGHT_ANGSTROM", "Height (angstrom)", "REAL"),
-        prop("ISOVALUE_AU", "Isovalue (a.u.)", "REAL"),
+        prop("BIAS_VOLTAGES_V", "Bias voltages (V)", "REAL", multi_value=True),
+        prop("HEIGHTS_ANGSTROM", "Heights (angstrom)", "REAL", multi_value=True),
+        prop("ISOVALUES_AU", "Isovalues (a.u.)", "REAL", multi_value=True),
+        prop("P_TIP_RATIOS", "p-tip ratios", "REAL", multi_value=True),
         prop("TIP_MODEL", "Tip model", "VARCHAR"),
-        prop("SCAN_AREA", "Scan area", "VARCHAR"),
-        prop("IMAGE_MODE", "Image mode", "VARCHAR"),
+        prop("SCAN_AREA_ANGSTROM2", "Scan area (angstrom^2)", "REAL"),
+        prop(
+            "IMAGE_MODES",
+            "Image modes",
+            "CONTROLLEDVOCABULARY",
+            multi_value=True,
+            vocabulary="SPM_IMAGE_MODE_ENUM",
+        ),
+        prop(
+            "ORBITAL_ENERGIES_EV",
+            "Orbital energies (eV)",
+            "REAL",
+            multi_value=True,
+        ),
+        prop("AFM_AMPLITUDE_ANGSTROM", "AFM amplitude (angstrom)", "REAL"),
+        prop("AFM_PROBE_TYPE", "AFM probe type", "VARCHAR"),
+        prop("AFM_TIP_CHARGE_E", "AFM tip charge (e)", "REAL"),
+        prop("AFM_SCAN_Z_MIN_ANGSTROM", "AFM scan z minimum (angstrom)", "REAL"),
+        prop("AFM_SCAN_Z_MAX_ANGSTROM", "AFM scan z maximum (angstrom)", "REAL"),
+        prop("AFM_SCAN_Z_STEP_ANGSTROM", "AFM scan z step (angstrom)", "REAL"),
         prop(
             "VIBRATIONAL_MODE",
             "Vibrational mode",
@@ -479,12 +507,20 @@ OBJECT_TYPES = {
         + [
             assignment("SPM_MODE", True, "Method"),
             assignment("CONVERGED", True, "Results"),
-            assignment("BIAS_VOLTAGE_V", False, "Simulation settings"),
-            assignment("HEIGHT_ANGSTROM", False, "Simulation settings"),
-            assignment("ISOVALUE_AU", False, "Simulation settings"),
+            assignment("BIAS_VOLTAGES_V", False, "Simulation settings"),
+            assignment("HEIGHTS_ANGSTROM", False, "Simulation settings"),
+            assignment("ISOVALUES_AU", False, "Simulation settings"),
+            assignment("P_TIP_RATIOS", False, "Simulation settings"),
             assignment("TIP_MODEL", False, "Simulation settings"),
-            assignment("SCAN_AREA", False, "Simulation settings"),
-            assignment("IMAGE_MODE", False, "Simulation settings"),
+            assignment("SCAN_AREA_ANGSTROM2", False, "Simulation settings"),
+            assignment("IMAGE_MODES", False, "Simulation settings"),
+            assignment("ORBITAL_ENERGIES_EV", False, "Orbital settings"),
+            assignment("AFM_AMPLITUDE_ANGSTROM", False, "AFM settings"),
+            assignment("AFM_PROBE_TYPE", False, "AFM settings"),
+            assignment("AFM_TIP_CHARGE_E", False, "AFM settings"),
+            assignment("AFM_SCAN_Z_MIN_ANGSTROM", False, "AFM settings"),
+            assignment("AFM_SCAN_Z_MAX_ANGSTROM", False, "AFM settings"),
+            assignment("AFM_SCAN_Z_STEP_ANGSTROM", False, "AFM settings"),
         ]
         + SPIN
         + [assignment("COMMENTS", False, "General information")]
@@ -793,10 +829,11 @@ def synchronize_vocabulary(session, code: str, expected_terms):
 
     expected = dict(expected_terms)
     current = {
-        str(row["code"]): row
-        for row in vocabulary.get_terms().df.to_dict("records")
+        str(row["code"]): row for row in vocabulary.get_terms().df.to_dict("records")
     }
-    if {term: str(row.get("label") or term) for term, row in current.items()} == expected:
+    if {
+        term: str(row.get("label") or term) for term, row in current.items()
+    } == expected:
         return vocabulary
 
     property_codes = [

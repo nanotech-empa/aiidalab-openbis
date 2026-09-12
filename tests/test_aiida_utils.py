@@ -1,6 +1,6 @@
+import importlib
 import io
 import json
-import importlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -90,6 +90,71 @@ def aiida_utils(monkeypatch):
     monkeypatch.setattr(utils, "connect_openbis_aiida", lambda: (None, None))
     sys.modules.pop("src.aiida_utils", None)
     return importlib.import_module("src.aiida_utils")
+
+
+def test_preceding_main_workchains_ignore_noncausal_return_links(
+    monkeypatch,
+    aiida_utils,
+):
+    class Incoming:
+        def __init__(self, links):
+            self._links = links
+
+        def all(self):
+            return list(self._links)
+
+    class Links:
+        def __init__(self):
+            self.incoming = []
+
+        def get_incoming(self, link_type=None):
+            links = self.incoming
+            if link_type is not None:
+                links = [link for link in links if link.link_type == link_type]
+            return Incoming(links)
+
+    class Node:
+        def __init__(self, pk, uuid, ctime):
+            self.pk = pk
+            self.uuid = uuid
+            self.ctime = ctime
+            self.base = SimpleNamespace(links=Links())
+            self.process_label = ""
+
+    class WorkChain(Node):
+        def __init__(self, pk, uuid, ctime, process_label):
+            super().__init__(pk, uuid, ctime)
+            self.process_label = process_label
+
+    def incoming(target, source, link_type):
+        target.base.links.incoming.append(
+            SimpleNamespace(node=source, link_type=link_type)
+        )
+
+    geometry = WorkChain(1, "geometry-uuid", "2026-01-01", "Cp2kGeoOptWorkChain")
+    creator = Node(2, "creator-uuid", "2026-01-02")
+    structure = Node(3, "structure-uuid", "2026-01-03")
+    current = WorkChain(4, "scf-uuid", "2026-01-04", "Cp2kScfWorkChain")
+    later_replica = WorkChain(
+        5,
+        "replica-uuid",
+        "2026-01-05",
+        "Cp2kReplicaWorkChain",
+    )
+
+    incoming(creator, geometry, aiida_utils.LinkType.CALL_CALC)
+    incoming(structure, creator, aiida_utils.LinkType.CREATE)
+    incoming(structure, geometry, aiida_utils.LinkType.RETURN)
+    incoming(structure, later_replica, aiida_utils.LinkType.RETURN)
+    incoming(current, structure, aiida_utils.LinkType.INPUT_WORK)
+
+    monkeypatch.setattr(aiida_utils.orm, "WorkChainNode", WorkChain)
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _identifier: current)
+
+    assert aiida_utils.get_all_preceding_main_workchains(current.uuid) == [
+        geometry.uuid,
+        current.uuid,
+    ]
 
 
 def test_log_paths_are_anchored_to_app_root(aiida_utils):
@@ -293,14 +358,16 @@ def test_qe_relax_metadata_uses_final_forces_and_direct_ionic_steps(
     monkeypatch, aiida_utils
 ):
     trajectory = SimpleNamespace(
-        get_array=lambda name: np.asarray(
-            [
-                [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
-                [[0.003, 0.004, 0.0], [0.0, 0.0, 0.0]],
-            ]
+        get_array=lambda name: (
+            np.asarray(
+                [
+                    [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+                    [[0.003, 0.004, 0.0], [0.0, 0.0, 0.0]],
+                ]
+            )
+            if name == "forces"
+            else None
         )
-        if name == "forces"
-        else None
     )
     called = [
         SimpleNamespace(
@@ -1089,6 +1156,63 @@ def test_render_workchain_preview_suggestions_reports_each_result(
     ]
 
 
+def test_preview_suggestions_skip_rendering_existing_results(
+    monkeypatch,
+    aiida_utils,
+):
+    root = SimpleNamespace(uuid="root-uuid")
+    target = SimpleNamespace(uuid="target-uuid")
+    existing = FakeOpenbisObject(
+        "DOS",
+        {"name": "Existing PDOS", "aiida_source_uuid": target.uuid},
+    )
+    existing.collection = "/SPACE/PROJECT/OLD_COLLECTION"
+    existing.get_eln_url = lambda: "https://openbis.example/existing"
+    session = FakeSession({"DOS": [existing]})
+
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _uuid: root)
+    monkeypatch.setattr(aiida_utils, "_exportable_workchains", lambda _wc: [target])
+    monkeypatch.setattr(
+        aiida_utils,
+        "_preview_definitions",
+        lambda _wc: [
+            (
+                "pdos",
+                "Projected DOS",
+                "pdos",
+                lambda _path: pytest.fail("existing previews must not be rendered"),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "_result_property_definitions",
+        lambda _wc: {
+            "pdos": {
+                "object_type": "DOS",
+                "properties": {
+                    "name": "Newly derived PDOS",
+                    "aiida_source_uuid": target.uuid,
+                },
+            }
+        },
+    )
+
+    suggestions = aiida_utils.render_workchain_preview_suggestions(
+        root.uuid,
+        openbis_session=session,
+        experiment_id="/SPACE/PROJECT/NEW_COLLECTION",
+    )
+
+    assert suggestions[0]["content"] is None
+    assert suggestions[0]["error"] is None
+    assert suggestions[0]["existing"] == {
+        "permid": existing.permId,
+        "name": "Existing PDOS",
+        "url": "https://openbis.example/existing",
+    }
+
+
 def test_reviewed_properties_override_values_but_not_provenance(aiida_utils):
     workchain = SimpleNamespace(uuid="source-uuid")
     properties = {
@@ -1190,34 +1314,40 @@ def make_cp2k_scf_workchain(include_bader=True, include_unfolding=False):
             }
         ),
         "retrieved": SimpleNamespace(
-            base=SimpleNamespace(
-                repository=FakeRepository({"aiida.out": output_text})
-            )
+            base=SimpleNamespace(repository=FakeRepository({"aiida.out": output_text}))
         ),
     }
     if include_bader:
         outputs["bader_retrieved"] = SimpleNamespace(
             base=SimpleNamespace(
-                repository=FakeRepository(object_names=["ACF.dat"])
+                repository=FakeRepository(
+                    {
+                        "ACF.dat": b"bader charges",
+                        "AVF.dat": b"bader volumes",
+                        "BCF.dat": b"bader distances",
+                    }
+                )
             )
         )
     if include_unfolding:
         outputs["unfolding_retrieved"] = SimpleNamespace(
-            base=SimpleNamespace(repository=FakeRepository(
-                {
-                    "unfolding_bands.npz": make_npz_bytes(
-                        supercell_matrix=[[2, 0, 0], [0, 2, 0], [0, 0, 1]],
-                        path_labels=["G", "K", "M", "G"],
-                        path_k_indices=[0, 1],
-                        path_x=[0.0, 1.0],
-                        ref_energy_ev=-5.0,
-                        evals_ev_spin_0=[-6.0, -4.0],
-                        weights_spin_0=[[1.0, 0.2], [0.4, 0.8]],
-                        x_ticks=[0.0, 1.0],
-                        x_tick_labels=["G", "K"],
-                    )
-                }
-            ))
+            base=SimpleNamespace(
+                repository=FakeRepository(
+                    {
+                        "unfolding_bands.npz": make_npz_bytes(
+                            supercell_matrix=[[2, 0, 0], [0, 2, 0], [0, 0, 1]],
+                            path_labels=["G", "K", "M", "G"],
+                            path_k_indices=[0, 1],
+                            path_x=[0.0, 1.0],
+                            ref_energy_ev=-5.0,
+                            evals_ev_spin_0=[-6.0, -4.0],
+                            weights_spin_0=[[1.0, 0.2], [0.4, 0.8]],
+                            x_ticks=[0.0, 1.0],
+                            x_tick_labels=["G", "K"],
+                        )
+                    }
+                )
+            )
         )
     return SimpleNamespace(
         uuid="cp2k-scf-uuid",
@@ -1228,12 +1358,194 @@ def make_cp2k_scf_workchain(include_bader=True, include_unfolding=False):
             structure=structure,
             cp2k_code=SimpleNamespace(description="CP2K"),
             dft_params=FakeDict(
-                {"charge": 0, "multiplicity": 1, "uks": False, "vdw": True, "xc_functional": "PBE"}
+                {
+                    "charge": 0,
+                    "multiplicity": 1,
+                    "uks": False,
+                    "vdw": True,
+                    "xc_functional": "PBE",
+                }
             ),
             unfolding_path=SimpleNamespace(value="G-K-M-G"),
         ),
         outputs=SimpleNamespace(**outputs),
         called_descendants=[],
+    )
+
+
+def make_cp2k_geo_opt_workchain():
+    workchain = make_cp2k_scf_workchain(include_bader=False)
+    workchain.uuid = "cp2k-geo-opt-uuid"
+    workchain.process_label = "Cp2kGeoOptWorkChain"
+    workchain.label = "CP2K_GeoOpt"
+    workchain.inputs.code = workchain.inputs.cp2k_code
+    workchain.inputs.sys_params = FakeDict({"constraints": []})
+    workchain.outputs.output_structure = SimpleNamespace(
+        uuid="optimized-methane-structure",
+        get_formula=lambda: "CH4",
+    )
+    output_parameters = workchain.outputs.output_parameters.get_dict()
+    output_parameters["motion_step_info"] = {
+        "scf_converged": [True],
+        "max_grad_au": [0.01],
+        "step": [3],
+    }
+    workchain.outputs.retrieved = SimpleNamespace(
+        base=SimpleNamespace(
+            repository=FakeRepository(
+                {
+                    "aiida.out": """
+ !------------------------------!
+                     Mulliken Population Analysis
+ # Atom  Element  Net charge
+      1  C       -0.30
+ !------------------------------!
+ !------------------------------!
+                           Hirshfeld Charges
+ # Atom  Element  Net charge
+      1  C       -0.10
+ !------------------------------!
+"""
+                }
+            )
+        )
+    )
+    return workchain
+
+
+def make_cp2k_pdos_workchain():
+    structure = SimpleNamespace(uuid="pdos-structure", get_formula=lambda: "C2H2")
+    retrieved = SimpleNamespace(
+        base=SimpleNamespace(
+            repository=FakeRepository(
+                {
+                    "aiida.out": (
+                        "Fermi Energy [eV] : -2.0\n"
+                        "Fermi Energy [eV] : -1.5\n"
+                    ),
+                    "aiida-ALPHA_k1-1.pdos": (
+                        "# Projected DOS for atomic kind C\n"
+                        "1 -0.20 1.0 1.0 2.0\n"
+                        "2  0.10 0.0 3.0 4.0\n"
+                    ),
+                    "aiida-BETA_k1-1.pdos": (
+                        "# Projected DOS for atomic kind C\n"
+                        "1 -0.20 1.0 0.5 1.0\n"
+                        "2  0.10 0.0 1.5 2.0\n"
+                    ),
+                    "aiida-ALPHA_list1-1.pdos": (
+                        "# User-selected projection\n1 -0.20 1.0 9.0\n"
+                    ),
+                }
+            )
+        )
+    )
+    output_parameters = FakeDict(
+        {
+            "dft_type": "UKS",
+            "bandgap_spin1_au": 0.1,
+            "bandgap_spin2_au": 0.2,
+            "eigen_spin1_au": [-0.2, -0.1],
+            "eigen_spin2_au": [-0.2, -0.05],
+        }
+    )
+    diag = SimpleNamespace(
+        pk=2,
+        ctime="2026-01-02",
+        process_label="Cp2kDiagWorkChain",
+        inputs=SimpleNamespace(
+            structure=structure,
+            dft_params=FakeDict(
+                {
+                    "charge": -1,
+                    "multiplicity": 2,
+                    "uks": True,
+                    "vdw": True,
+                    "xc_functional": "PBE0",
+                }
+            ),
+        ),
+        outputs=SimpleNamespace(
+            output_parameters=output_parameters,
+            retrieved=retrieved,
+        ),
+    )
+    return SimpleNamespace(
+        pk=1,
+        uuid="cp2k-pdos-uuid",
+        process_label="Cp2kPdosWorkChain",
+        description="acetylene PDOS with overlap",
+        is_finished_ok=True,
+        inputs=SimpleNamespace(
+            structure=structure,
+            cp2k_code=SimpleNamespace(description="CP2K"),
+            dft_params=FakeDict({"charges": {"all": -1}}),
+            pdos_lists=SimpleNamespace(get_list=lambda: [["1..2", "molecule"]]),
+            do_overlap=SimpleNamespace(value=True),
+        ),
+        outputs=SimpleNamespace(slab_retrieved=retrieved),
+        called_descendants=[diag],
+    )
+
+
+def test_cp2k_pdos_properties_use_full_system_data(aiida_utils):
+    workchain = make_cp2k_pdos_workchain()
+
+    properties = aiida_utils._cp2k_pdos_property_definition(
+        workchain,
+        aiida_node_id="archive-permid",
+        executable_ids=["cp2k-executable", "overlap-executable"],
+    )["pdos"]["properties"]
+
+    assert properties["name"].startswith("PDOS C2H2")
+    assert properties["charge"] == pytest.approx(-1.0)
+    assert properties["spin_multiplicity"] == 2
+    assert properties["method_label"] == "PBE0"
+    assert properties["method_modifiers"] == ["HYBRID", "VDW", "SPIN_COLLINEAR"]
+    assert properties["fermi_energy_ev"] == pytest.approx([-2.0, -1.5])
+    assert properties["electronic_gap_ev"] == pytest.approx(
+        [0.1 * aiida_utils.Hartree, 0.2 * aiida_utils.Hartree]
+    )
+    assert properties["energy_min_ev"] < properties["energy_max_ev"]
+    assert "molecule (1..2)" in properties["projection_description"]
+    assert "overlap analysis is also included" in properties["projection_description"]
+    assert properties["executables"] == [
+        "cp2k-executable",
+        "overlap-executable",
+    ]
+    assert properties["aiida_node"] == "archive-permid"
+
+
+def test_cp2k_pdos_export_creates_one_dos_object(monkeypatch, aiida_utils):
+    workchain = make_cp2k_pdos_workchain()
+    monkeypatch.setattr(
+        aiida_utils,
+        "_workchain_codes",
+        lambda _workchain: [
+            SimpleNamespace(label="cp2k", full_label="cp2k@localhost"),
+            SimpleNamespace(label="overlap", full_label="overlap@localhost"),
+        ],
+    )
+    created, previews, structures, session = configure_export_mocks(
+        monkeypatch, aiida_utils, workchain
+    )
+
+    exported = aiida_utils.Cp2kPdosWorkChain_export(
+        session,
+        "/PROJECT/EXPERIMENT",
+        workchain.uuid,
+        [],
+        "archive-permid",
+        executable_ids=["cp2k-executable", "overlap-executable"],
+    )
+
+    assert [obj.type for obj in created] == ["DOS"]
+    assert exported.parents == [structures["pdos-structure"]]
+    assert exported.props["pdos"] is True
+    assert exported._aiidalab_result_role == "pdos"
+    assert [stem for _obj, stem in previews] == ["cp2k_pdos"]
+    assert aiida_utils.workchain_exporters["Cp2kPdosWorkChain"] is (
+        aiida_utils.Cp2kPdosWorkChain_export
     )
 
 
@@ -1323,18 +1635,14 @@ def test_qe_banduppy_properties_use_common_unfolding_schema(aiida_utils):
         make_qe_banduppy_workchain(),
     ],
 )
-def test_unfolding_preview_supports_cp2k_and_banduppy(
-    aiida_utils, tmp_path, workchain
-):
+def test_unfolding_preview_supports_cp2k_and_banduppy(aiida_utils, tmp_path, workchain):
     output = tmp_path / f"{workchain.process_label}.png"
     aiida_utils._render_unfolding_preview(workchain, output)
     assert output.is_file()
     assert output.stat().st_size > 0
 
 
-def test_qe_banduppy_export_uses_input_supercell_as_parent(
-    monkeypatch, aiida_utils
-):
+def test_qe_banduppy_export_uses_input_supercell_as_parent(monkeypatch, aiida_utils):
     workchain = make_qe_banduppy_workchain()
     created, previews, structures, session = configure_export_mocks(
         monkeypatch, aiida_utils, workchain
@@ -1375,9 +1683,7 @@ def test_cp2k_fermi_and_gap_values_preserve_spin_channels(aiida_utils):
     )
 
 
-def test_cp2k_scf_properties_detect_real_charge_outputs(
-    monkeypatch, aiida_utils
-):
+def test_cp2k_scf_properties_detect_real_charge_outputs(monkeypatch, aiida_utils):
     workchain = make_cp2k_scf_workchain()
     codes = [
         SimpleNamespace(label="bader", full_label="bader@localhost"),
@@ -1400,20 +1706,61 @@ def test_cp2k_scf_properties_detect_real_charge_outputs(
     assert energy["electronic_gap_ev"] == pytest.approx([11.176662])
     assert energy["executables"] == ["cp2k-executable"]
     assert energy["converged"] is True
-    assert charge["charge_analysis_method"] == (
-        "Mulliken; Hirshfeld; Löwdin; Bader"
-    )
+    assert charge["name"].startswith("Post-SCF charge analysis with Bader CH4")
+    assert charge["charge_analysis_method"] == ("Mulliken; Hirshfeld; Löwdin; Bader")
     assert charge["executables"] == ["cp2k-executable", "bader-executable"]
     assert charge["aiida_node"] == "archive-permid"
     assert "total_energy_hartree" not in charge
 
 
+def test_cp2k_charge_analysis_extract_keeps_final_complete_tables(aiida_utils):
+    output = """
+ !------------------------------!
+                     Mulliken Population Analysis
+ # Atom  Element  Net charge
+      1  C       -0.20
+ !------------------------------!
+ unrelated output
+ !------------------------------!
+                           Hirshfeld Charges
+ # Atom  Element  Net charge
+      1  C       -0.10
+ !------------------------------!
+ later output
+ !------------------------------!
+                     Mulliken Population Analysis
+ # Atom  Element  Net charge
+      1  C       -0.30
+ !------------------------------!
+"""
+
+    extract = aiida_utils._cp2k_charge_analysis_extract(output)
+
+    assert "-0.30" in extract
+    assert "-0.20" not in extract
+    assert "-0.10" in extract
+    assert "unrelated output" not in extract
+    assert "later output" not in extract
+
+
+def test_cp2k_charge_analysis_files_include_bader_results(aiida_utils, tmp_path):
+    workchain = make_cp2k_scf_workchain()
+
+    files = aiida_utils._cp2k_charge_analysis_files(workchain, tmp_path)
+
+    assert [path.name for path in files] == [
+        "cp2k_charge_analysis.txt",
+        "ACF.dat",
+        "AVF.dat",
+        "BCF.dat",
+    ]
+    assert (tmp_path / "ACF.dat").read_bytes() == b"bader charges"
+
+
 def test_cp2k_scf_properties_add_unfolding_band_without_duplicate_arrays(
     monkeypatch, aiida_utils
 ):
-    workchain = make_cp2k_scf_workchain(
-        include_bader=False, include_unfolding=True
-    )
+    workchain = make_cp2k_scf_workchain(include_bader=False, include_unfolding=True)
     codes = [
         SimpleNamespace(label="cp2k", full_label="cp2k@localhost"),
         SimpleNamespace(label="cp2k-unfolding", full_label="cp2k-unfolding@localhost"),
@@ -1448,9 +1795,7 @@ def test_cp2k_scf_properties_add_unfolding_band_without_duplicate_arrays(
     assert "unfolding_projections" not in band
 
 
-def test_cp2k_scf_export_links_charge_to_structure_and_energy(
-    monkeypatch, aiida_utils
-):
+def test_cp2k_scf_export_links_charge_to_structure_and_energy(monkeypatch, aiida_utils):
     workchain = make_cp2k_scf_workchain()
     codes = [
         SimpleNamespace(label="bader", full_label="bader@localhost"),
@@ -1460,6 +1805,18 @@ def test_cp2k_scf_export_links_charge_to_structure_and_energy(
     created, previews, structures, session = configure_export_mocks(
         monkeypatch, aiida_utils, workchain
     )
+    datasets = []
+
+    def create_dataset(_session, **kwargs):
+        datasets.append(
+            (
+                kwargs["type"],
+                kwargs["sample"],
+                {Path(path).name: Path(path).read_bytes() for path in kwargs["files"]},
+            )
+        )
+
+    monkeypatch.setattr(aiida_utils.utils, "create_openbis_dataset", create_dataset)
 
     energy, charge = aiida_utils.Cp2kScfWorkChain_export(
         session,
@@ -1482,6 +1839,79 @@ def test_cp2k_scf_export_links_charge_to_structure_and_energy(
         "energy_calculation",
         "charge_analysis",
     ]
+    assert len(datasets) == 1
+    assert datasets[0][0] == "RAW_DATA"
+    assert datasets[0][1] is charge
+    assert set(datasets[0][2]) == {
+        "cp2k_charge_analysis.txt",
+        "ACF.dat",
+        "AVF.dat",
+        "BCF.dat",
+    }
+
+
+def test_cp2k_geo_opt_export_adds_final_charge_analysis(
+    monkeypatch,
+    aiida_utils,
+):
+    workchain = make_cp2k_geo_opt_workchain()
+    codes = [SimpleNamespace(label="cp2k", full_label="cp2k@localhost")]
+    monkeypatch.setattr(aiida_utils, "_workchain_codes", lambda _workchain: codes)
+    created, previews, structures, session = configure_export_mocks(
+        monkeypatch, aiida_utils, workchain
+    )
+    datasets = []
+
+    def create_dataset(_session, **kwargs):
+        datasets.append(
+            (
+                kwargs["type"],
+                kwargs["sample"],
+                {Path(path).name: Path(path).read_text() for path in kwargs["files"]},
+            )
+        )
+
+    monkeypatch.setattr(aiida_utils.utils, "create_openbis_dataset", create_dataset)
+
+    geometry, charge = aiida_utils.Cp2kGeoOptWorkChain_export(
+        session,
+        "/PROJECT/EXPERIMENT",
+        workchain.uuid,
+        [],
+        "archive-permid",
+        executable_ids=["cp2k-executable"],
+    )
+
+    assert [obj.type for obj in created] == [
+        "GEOMETRY_OPTIMISATION",
+        "CHARGE_ANALYSIS",
+    ]
+    assert geometry.parents == [structures["methane-structure"]]
+    assert charge.parents == [structures["optimized-methane-structure"], geometry]
+    assert charge.props["name"].startswith(
+        "Final geometry population analysis CH4"
+    )
+    assert charge.props["charge_analysis_method"] == "Mulliken; Hirshfeld"
+    assert charge.props["aiida_node"] == "archive-permid"
+    assert charge.props["executables"] == ["cp2k-executable"]
+    assert [stem for _obj, stem in previews] == [
+        "optimized_geometry",
+        "charge_analysis",
+    ]
+    assert len(datasets) == 1
+    assert datasets[0][0] == "RAW_DATA"
+    assert datasets[0][1] is charge
+    assert set(datasets[0][2]) == {"cp2k_charge_analysis.txt"}
+    assert "-0.30" in datasets[0][2]["cp2k_charge_analysis.txt"]
+    assert "-0.10" in datasets[0][2]["cp2k_charge_analysis.txt"]
+
+
+def test_cp2k_geo_opt_preview_definitions_include_charge_analysis(aiida_utils):
+    workchain = make_cp2k_geo_opt_workchain()
+
+    roles = [definition[0] for definition in aiida_utils._preview_definitions(workchain)]
+
+    assert roles == ["geometry_optimization", "charge_analysis"]
 
 
 class FakeArray:
@@ -1499,17 +1929,13 @@ def _mep_structure(uuid):
 def _mep_inputs(**extra):
     values = {
         "code": SimpleNamespace(description="CP2K"),
-        "dft_params": FakeDict(
-            {"charge": 0, "vdw": True, "xc_functional": "PBE"}
-        ),
+        "dft_params": FakeDict({"charge": 0, "vdw": True, "xc_functional": "PBE"}),
         "sys_params": FakeDict(
             {
                 "colvars": "distance atoms 1 2",
                 "colvars_targets": [1.2],
                 "colvars_increments": [0.05],
-                "constraints": (
-                    "collective 1 [eV/angstrom^2] 40 [angstrom] 1.095"
-                ),
+                "constraints": ("collective 1 [eV/angstrom^2] 40 [angstrom] 1.095"),
             }
         ),
     }
@@ -1706,3 +2132,129 @@ def test_replica_chain_export_links_only_endpoints_and_preceding_mep(
     assert exported.parents == [structures["initial"], structures["final"], predecessor]
     assert "aiida_result_role" not in exported.props
     assert exported._aiidalab_result_role == "minimum_energy_path"
+
+
+def test_spm_series_summary_preserves_all_modes_and_values(aiida_utils):
+    general_info = {
+        "energies": [-1.0, -0.5, 2.0e-15],
+        "cell_vectors": [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]],
+    }
+    series = [
+        {"type": "const-height sts", "height": 4.0, "p_tip_ratio": 0.0},
+        {"type": "const-height stm", "height": 6.0, "p_tip_ratio": 0.0},
+        {"type": "const-isovalue stm", "isovalue": 1.0e-7},
+    ]
+
+    properties = aiida_utils._series_summary(
+        [general_info], series, include_bias_voltages=True
+    )
+
+    assert properties["spm_mode"] == ["STM", "STS"]
+    assert properties["image_modes"] == [
+        "CONSTANT_HEIGHT",
+        "CONSTANT_ISOVALUE",
+    ]
+    assert properties["bias_voltages_v"] == [-1.0, -0.5, 0.0]
+    assert properties["heights_angstrom"] == [4.0, 6.0]
+    assert properties["isovalues_au"] == [1.0e-7]
+    assert properties["p_tip_ratios"] == [0.0]
+    assert properties["tip_model"] == "100% s"
+    assert properties["scan_area_angstrom2"] == pytest.approx(6.0 * aiida_utils.Bohr**2)
+
+
+def test_tip_model_summary_reports_each_exact_s_p_mixture(aiida_utils):
+    assert aiida_utils._tip_model_summary([0.0]) == "100% s"
+    assert aiida_utils._tip_model_summary([1.0]) == "100% p"
+    assert aiida_utils._tip_model_summary([0.8]) == "20% s + 80% p"
+    assert aiida_utils._tip_model_summary([0.0, 0.8, 1.0]) == (
+        "100% s; 20% s + 80% p; 100% p"
+    )
+
+
+def test_orbital_spm_metadata_keeps_orbital_energies_separate(aiida_utils):
+    general = np.array(
+        {
+            "energies": [-5.0, 1.5],
+            "cell_vectors": np.eye(3),
+        },
+        dtype=object,
+    )
+    series = np.array(
+        [
+            {"type": "const-height orbital", "height": 3.0},
+            {"type": "const-height sts", "height": 3.0},
+            {"type": "const-isovalue stm", "isovalue": 1.0e-7},
+        ],
+        dtype=object,
+    )
+    descendant = SimpleNamespace(
+        outputs=SimpleNamespace(
+            retrieved=SimpleNamespace(
+                base=SimpleNamespace(
+                    repository=FakeRepository(
+                        {
+                            "orb.npz": make_npz_bytes(
+                                s0_orb_general_info=general,
+                                s0_orb_series_info=series,
+                                s0_orb_series_data=np.zeros((3, 2, 2, 2)),
+                            )
+                        }
+                    )
+                )
+            )
+        )
+    )
+    workchain = SimpleNamespace(
+        process_label="Cp2kOrbitalsWorkChain",
+        called_descendants=[descendant],
+    )
+
+    properties = aiida_utils._cp2k_spm_result_metadata(workchain)
+
+    assert properties["spm_mode"] == ["ORBITALS", "STM", "STS"]
+    assert properties["orbital_energies_ev"] == [-5.0, 1.5]
+    assert "bias_voltages_v" not in properties
+
+
+def test_afm_spm_metadata_uses_absolute_grid_coordinates(aiida_utils):
+    workchain = SimpleNamespace(
+        process_label="Cp2kAfmWorkChain",
+        inputs=SimpleNamespace(
+            ppafm_params=FakeDict(
+                {
+                    "gridA": [8.0, 0.0, 0.0],
+                    "gridB": [1.0, 10.0, 0.0],
+                    "scanMin": [0.0, 0.0, 13.0],
+                    "scanMax": [8.0, 10.0, 18.0],
+                    "scanStep": [0.1, 0.1, 0.2],
+                    "Amplitude": 1.4,
+                    "probeType": "O",
+                    "charge": -0.03,
+                    "tip": "s",
+                }
+            )
+        ),
+    )
+
+    properties = aiida_utils._cp2k_spm_result_metadata(workchain)
+
+    assert properties["spm_mode"] == ["AFM"]
+    assert properties["image_modes"] == ["THREE_DIMENSIONAL_GRID"]
+    assert properties["scan_area_angstrom2"] == pytest.approx(80.0)
+    assert properties["afm_scan_z_min_angstrom"] == pytest.approx(13.0)
+    assert properties["afm_scan_z_max_angstrom"] == pytest.approx(18.0)
+    assert properties["afm_scan_z_step_angstrom"] == pytest.approx(0.2)
+    assert "heights_angstrom" not in properties
+    assert properties["tip_model"] == "s tip; O probe"
+
+
+def test_all_cp2k_spm_workchains_use_one_exporter(aiida_utils):
+    for process_label in (
+        "Cp2kStmWorkChain",
+        "Cp2kOrbitalsWorkChain",
+        "Cp2kAfmWorkChain",
+    ):
+        assert (
+            aiida_utils.workchain_exporters[process_label]
+            is aiida_utils.Cp2kSpmWorkChain_export
+        )

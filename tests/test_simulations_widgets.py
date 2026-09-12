@@ -663,8 +663,7 @@ def test_declared_archive_roots_support_legacy_comment_records(
     aiida_node = SimpleNamespace(
         props={
             "comments": (
-                "AiiDA root process UUID: "
-                "33333333-3333-3333-3333-333333333333"
+                "AiiDA root process UUID: 33333333-3333-3333-3333-333333333333"
             ),
         }
     )
@@ -680,9 +679,7 @@ def test_aiida_root_uuids_schema_is_multivalued_and_additive(
     definition = simulations_widgets.simulation_schema.PROPERTY_TYPES[
         "AIIDA_ROOT_UUIDS"
     ]
-    assignments = (
-        simulations_widgets.simulation_schema.ADDITIVE_OBJECT_TYPE_ASSIGNMENTS
-    )
+    assignments = simulations_widgets.simulation_schema.ADDITIVE_OBJECT_TYPE_ASSIGNMENTS
 
     assert definition["dataType"] == "VARCHAR"
     assert definition["multiValue"] is True
@@ -726,11 +723,9 @@ def test_multiple_archive_roots_are_listed_in_import_message(
         ),
     )
 
-    message = (
-        simulations_widgets.ImportSimulationsWidget._import_success_message(
-            simulations,
-            roots,
-        )
+    message = simulations_widgets.ImportSimulationsWidget._import_success_message(
+        simulations,
+        roots,
     )
 
     assert "Root processes (2)" in message
@@ -782,9 +777,7 @@ def test_manual_archive_creates_one_aiida_node(
         simulations_widgets,
         "_archive_root_processes",
         lambda archive_path: (
-            tuple(roots)
-            if archive_path.read_bytes() == b"valid archive"
-            else ()
+            tuple(roots) if archive_path.read_bytes() == b"valid archive" else ()
         ),
     )
     monkeypatch.setattr(
@@ -805,26 +798,23 @@ def test_manual_archive_creates_one_aiida_node(
     )
     widget = SimpleNamespace(openbis_session="session")
 
-    result = (
-        simulations_widgets.ExportSimulationsWidget._create_manual_aiida_node(
-            widget,
-            {"name": "../archive.aiida", "content": b"valid archive"},
-            "Manual simulation",
-        )
+    result = simulations_widgets.ExportSimulationsWidget._create_manual_aiida_node(
+        widget,
+        {"name": "../archive.aiida", "content": b"valid archive"},
+        "Manual simulation",
     )
 
     assert result is aiida_node
-    assert created[0][1]["type"] == simulations_widgets.OPENBIS_OBJECT_TYPES[
-        "AiiDA Node"
-    ]
-    assert created[0][1]["collection"] == (
-        simulations_widgets.OPENBIS_COLLECTIONS_PATHS["AiiDA Node"]
+    assert (
+        created[0][1]["type"] == simulations_widgets.OPENBIS_OBJECT_TYPES["AiiDA Node"]
+    )
+    assert (
+        created[0][1]["collection"]
+        == (simulations_widgets.OPENBIS_COLLECTIONS_PATHS["AiiDA Node"])
     )
     properties = created[0][1]["props"]
     assert properties.get("wfms_uuid") == expected_workflow_uuid
-    assert properties.get("aiida_root_uuids", []) == [
-        root["uuid"] for root in roots
-    ]
+    assert properties.get("aiida_root_uuids", []) == [root["uuid"] for root in roots]
     assert properties["comments"] == ""
     assert datasets[0][1]["sample"] is aiida_node
 
@@ -838,9 +828,7 @@ def test_manual_upload_rejects_multiple_aiida_archives(simulations_widgets):
     )
 
     with pytest.raises(ValueError, match="at most one"):
-        simulations_widgets.ExportSimulationsWidget._uploaded_aiida_archive(
-            uploader
-        )
+        simulations_widgets.ExportSimulationsWidget._uploaded_aiida_archive(uploader)
 
 
 def test_prepare_data_download_excludes_previews(
@@ -957,7 +945,7 @@ def test_prepare_archive_download_for_browser(
 ):
     class ArchiveDataset:
         permId = "archive-dataset"
-        file_list = ["original/export.aiida"]
+        file_list = ("original/export.aiida",)
 
         def download(self, files, destination):
             assert files == ["original/export.aiida"]
@@ -1062,14 +1050,20 @@ def test_property_review_populates_codes_and_reports_cleared_optional_values(
     assert values["comments"] is None
 
 
-def test_property_overrides_are_collected_per_result(simulations_widgets):
+def test_property_overrides_are_collected_only_for_new_results(
+    simulations_widgets,
+):
     widget = SimpleNamespace(
         _preview_entries={
             "source:bands": {
                 "property_widget": SimpleNamespace(
                     values=lambda include_empty: {"name": "Edited bands"}
-                )
-            }
+                ),
+                "existing": False,
+            },
+            "source:geometry_optimization": {
+                "existing": True,
+            },
         }
     )
 
@@ -1132,6 +1126,10 @@ def test_preview_overrides_use_suggestion_or_replacement(simulations_widgets):
                     )
                 ),
             },
+            "source:geometry_optimization": {
+                "suggestion": {"title": "Geometry optimization"},
+                "existing": True,
+            },
         }
     )
 
@@ -1144,6 +1142,106 @@ def test_preview_overrides_use_suggestion_or_replacement(simulations_widgets):
             "content": b"replacement",
         },
     }
+
+
+def test_existing_result_is_shown_as_status_without_editor(
+    monkeypatch,
+    simulations_widgets,
+):
+    suggestion = {
+        "key": "source:geometry_optimization",
+        "result_role": "geometry_optimization",
+        "existing": {
+            "permid": "existing-permid",
+            "url": "https://openbis.example/existing",
+        },
+    }
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "render_workchain_preview_suggestions",
+        lambda *_args, **_kwargs: [suggestion],
+    )
+    widget = SimpleNamespace(
+        _preview_entries={},
+        preview_suggestions_box=SimpleNamespace(children=[]),
+        simulations_dropdown=SimpleNamespace(value=6708),
+        target_experiment_id="experiment-permid",
+        preview_suggestions_status=SimpleNamespace(value=""),
+        openbis_session=object(),
+    )
+
+    simulations_widgets.SimulationDetailsWidget.load_aiida_preview_suggestions(widget)
+
+    assert widget._preview_entries == {
+        "source:geometry_optimization": {
+            "suggestion": suggestion,
+            "existing": True,
+        }
+    }
+    assert len(widget.preview_suggestions_box.children) == 1
+    status = widget.preview_suggestions_box.children[0].value
+    assert "Geometry optimization" in status
+    assert "already present" in status
+    assert "open in openBIS" in status
+    assert "1 already present" in widget.preview_suggestions_status.value
+
+
+def test_target_experiment_refreshes_checked_simulation(simulations_widgets):
+    calls = []
+    widget = SimpleNamespace(
+        target_experiment_id="-1",
+        simulations_dropdown=SimpleNamespace(value=6708),
+        load_aiida_preview_suggestions=lambda: calls.append(True),
+    )
+
+    simulations_widgets.SimulationDetailsWidget.set_target_experiment(
+        widget,
+        "experiment-permid",
+    )
+
+    assert widget.target_experiment_id == "experiment-permid"
+    assert calls == [True]
+
+
+def test_new_pk_clears_previous_export_feedback(simulations_widgets):
+    cleared = []
+    widget = SimpleNamespace(
+        export_message_html=SimpleNamespace(value="old openBIS links"),
+        _clear_resolution_controls=lambda: cleared.append(True),
+    )
+
+    simulations_widgets.ExportSimulationsWidget._clear_previous_export_feedback(widget)
+
+    assert widget.export_message_html.value == ""
+    assert cleared == [True]
+
+
+def test_unsupported_pk_clears_previous_preview_state(
+    monkeypatch,
+    simulations_widgets,
+):
+    unsupported = SimpleNamespace(pk=6136, process_label="UnsupportedWorkChain")
+    monkeypatch.setattr(simulations_widgets.orm, "load_node", lambda _pk: unsupported)
+    widget = SimpleNamespace(
+        simulation_check_status=SimpleNamespace(value="old status"),
+        _preview_entries={"old": object()},
+        preview_suggestions_box=SimpleNamespace(children=[object()]),
+        preview_suggestions_status=SimpleNamespace(value="old preview status"),
+        simulations_dropdown=SimpleNamespace(
+            options=[("Old workflow", 1)],
+            value=1,
+        ),
+        simulation_pk_input=SimpleNamespace(value=6136),
+        _exportable_ancestor=lambda _node: None,
+    )
+
+    simulations_widgets.SimulationDetailsWidget.check_aiida_simulation(widget)
+
+    assert widget._preview_entries == {}
+    assert widget.preview_suggestions_box.children == []
+    assert widget.preview_suggestions_status.value == ""
+    assert widget.simulations_dropdown.value == "-1"
+    assert "unsupported workflow" in widget.simulation_check_status.value
 
 
 @pytest.mark.parametrize(
@@ -1282,10 +1380,8 @@ def test_import_expands_mep_and_atomistic_model_ancestors(
         ),
     )
 
-    expanded = (
-        simulations_widgets.ImportSimulationsWidget._simulation_dependencies(
-            widget, [neb]
-        )
+    expanded = simulations_widgets.ImportSimulationsWidget._simulation_dependencies(
+        widget, [neb]
     )
 
     assert expanded == [geometry, replica, neb]
@@ -1382,3 +1478,33 @@ def test_container_workchain_with_exportable_descendants_is_supported(
     )
 
     assert resolved is container
+
+
+def test_spm_editor_uses_multi_mode_checkboxes_and_numeric_lists(
+    simulations_widgets,
+):
+    widget = simulations_widgets.SimulationPropertiesWidget(object())
+    widget.load_widgets("SPM_SIMULATION")
+    widget.set_values(
+        {
+            "name": "STM and STS test",
+            "method_family": "DFT",
+            "charge": 0.0,
+            "spm_mode": ["STM", "STS"],
+            "image_modes": ["CONSTANT_HEIGHT", "CONSTANT_ISOVALUE"],
+            "bias_voltages_v": [-1.0, 0.0, 1.0],
+            "heights_angstrom": [4.0, 6.0],
+        }
+    )
+
+    assert isinstance(
+        widget.fields["SPM_MODE"], simulations_widgets.MultiCheckboxWidget
+    )
+    assert widget.fields["SPM_MODE"].value == ("STM", "STS")
+    assert widget.fields["IMAGE_MODES"].value == (
+        "CONSTANT_HEIGHT",
+        "CONSTANT_ISOVALUE",
+    )
+    values = widget.values()
+    assert values["bias_voltages_v"] == [-1.0, 0.0, 1.0]
+    assert values["heights_angstrom"] == [4.0, 6.0]

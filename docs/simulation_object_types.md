@@ -38,6 +38,17 @@ must convert values before saving them. The canonical units are Hartree for tota
 energies, eV for electronic energies and barriers, Hartree/bohr for forces, Bohr
 magnetons for magnetization, volts, angstrom, femtoseconds, kelvin, and bar.
 
+### Atomistic-model search conventions
+
+For an AiiDA-generated `ATOMISTIC_MODEL`, the exporter uses the chemical
+formula as `NAME` (for example `CH4` or `C20H12AuCoO2`) and records the inferred
+integer `DIMENSIONALITY` together with the three
+`PERIODIC_BOUNDARY_CONDITIONS` flags. A structure search may therefore combine
+dimensionality with element-aware parsing of the name. Element filters are set
+membership tests, independent of formula ordering; for example, a 2D search
+requiring Au, C, O, and Co accepts formulas containing all four elements even
+when additional elements are present.
+
 ### AiiDA result identity
 
 Every AiiDA-generated simulation object records:
@@ -356,6 +367,22 @@ GEOMETRY_OPTIMISATION → ATOMISTIC_MODEL
 ```
 
 The child `ATOMISTIC_MODEL` represents the optimized geometry.
+
+Optional, when the final electronic step contains charge-population tables:
+
+```text
+CHARGE_ANALYSIS
+```
+
+Relation:
+
+```text
+GEOMETRY_OPTIMISATION → CHARGE_ANALYSIS
+optimized ATOMISTIC_MODEL → CHARGE_ANALYSIS
+```
+
+The charge-analysis object shares the geometry optimization's `AIIDA_NODE` and
+stores only a compact final charge-table extract as `RAW_DATA`.
 
 ## Object references
 
@@ -784,13 +811,24 @@ Optional, if the charge analysis derives from a previous calculation:
 
 ```text
 ENERGY_CALCULATION
+GEOMETRY_OPTIMISATION
 ```
 
-Relation:
+Relations:
 
 ```text
 ENERGY_CALCULATION → CHARGE_ANALYSIS
+GEOMETRY_OPTIMISATION → CHARGE_ANALYSIS
 ```
+
+For charge tables printed by the final electronic step of a geometry
+optimization, the required `ATOMISTIC_MODEL` parent is the optimized structure.
+
+A final population analysis from a geometry optimization and a later post-SCF
+charge analysis are distinct scientific results, even when their numerical values
+are nearly identical. Each keeps the source UUID and `AIIDA_NODE` of the WorkChain
+that produced it. Suggested names should make the provenance clear, for example
+`Final geometry population analysis` and `Post-SCF charge analysis with Bader`.
 
 ## Child objects
 
@@ -823,6 +861,23 @@ Content:
 ```text
 image of the input ATOMISTIC_MODEL, preferably coloured or annotated by charge if available
 ```
+
+Required if AiiDA-generated:
+
+```text
+RAW_DATA
+```
+
+Content:
+
+```text
+compact text extract containing the computed Mulliken, Hirshfeld, and/or Löwdin
+population tables; if Bader analysis is present, also ACF.dat, AVF.dat, and BCF.dat
+```
+
+The extract exposes the numerical charge results directly on `CHARGE_ANALYSIS`.
+The complete calculation output remains available from the linked `.aiida` archive
+and is not duplicated.
 
 Required if non-AiiDA:
 
@@ -1016,6 +1071,14 @@ total_magnetization_bohr_magneton: float (Bohr magnetons)
 electronic_gap_ev: float[] (eV)
 comments: text
 ```
+
+## AiiDA mapping
+
+A `Cp2kPdosWorkChain` creates one `DOS` object with `PDOS = true`. Its atom- and
+selection-projected arrays remain in the linked AiiDA archive. When the workflow
+also computes molecular-orbital overlaps, this is recorded in
+`projection_description` and the overlap executable is linked, but no separate
+simulation object is created for the overlap post-processing step.
 
 ## Required linked content
 
@@ -1332,33 +1395,75 @@ name: string
 method_family: enum
 method_modifiers: enum[]
 charge: number
-spm_mode: enum
+spm_mode: enum[]
 converged: boolean
 ```
+
+One object can describe several observables produced by the same workflow and
+AiiDA archive. For example, a single calculation can contain STM and STS maps,
+or orbital maps together with STM and STS maps.
 
 ## Optional properties
 
 ```text
 method_label: string
-bias_voltage_v: float (V)
-height_angstrom: float (angstrom)
-isovalue_au: float (a.u.)
+bias_voltages_v: float[] (V)
+heights_angstrom: float[] (angstrom above the topmost atom)
+isovalues_au: float[] (a.u.)
+p_tip_ratios: float[]
 tip_model: string
-scan_area: string
-image_mode: string
+scan_area_angstrom2: float (angstrom^2)
+image_modes: enum[]
+orbital_energies_ev: float[] (eV relative to the workflow reference energy)
+afm_amplitude_angstrom: float (angstrom)
+afm_probe_type: string
+afm_tip_charge_e: float (elementary charge)
+afm_scan_z_min_angstrom: float (absolute grid coordinate)
+afm_scan_z_max_angstrom: float (absolute grid coordinate)
+afm_scan_z_step_angstrom: float
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
 comments: text
 ```
+
+`bias_voltages_v`, `heights_angstrom`, and `isovalues_au` contain every value
+represented by the exported calculation. `p_tip_ratios` stores the p-orbital
+fractions, while `tip_model` gives an explicit corresponding summary (for
+example, ratio `0.8` is `20% s + 80% p`; multiple ratios are separated by
+semicolons). Orbital energies remain separate from ordinary requested bias
+voltages. AFM z limits are absolute scan-grid coordinates and are not interpreted
+as heights above the topmost atom.
 
 ## `spm_mode` vocabulary
 
 ```text
 STM
 STS
-nc-AFM
+AFM
+ORBITALS
 other
 ```
+
+## `image_modes` vocabulary
+
+```text
+constant height
+constant isovalue
+three-dimensional grid
+other
+```
+
+## AiiDA mapping
+
+- `Cp2kStmWorkChain` -> one `SPM_SIMULATION`, normally with `STM` and `STS`.
+- `Cp2kOrbitalsWorkChain` -> one `SPM_SIMULATION`, normally with `ORBITALS`,
+  `STM`, and `STS`.
+- `Cp2kAfmWorkChain` -> one `SPM_SIMULATION` with `AFM`.
+- The scan area is the norm of the cross product of the two in-plane grid/cell
+  vectors. CP2K STM/orbital vectors are converted from Bohr before calculating
+  the area.
+- Large map and grid arrays remain in the linked AiiDA archive; openBIS stores
+  only searchable summary metadata and an `ELN_PREVIEW`.
 
 ## Required linked content
 

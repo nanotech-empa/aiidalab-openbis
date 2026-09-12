@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -7,7 +9,6 @@ import subprocess
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Optional, Tuple
 
 import numpy as np
 from aiida import orm
@@ -164,9 +165,7 @@ def find_bandgap(bandsdata_uuid, number_electrons=None, fermi_energy=None):
                     ]
                 )
             )
-            number_electrons = int(
-                round(sum([sum(i) for i in occupations]) / num_kpoints)
-            )
+            number_electrons = round(sum([sum(i) for i in occupations]) / num_kpoints)
 
             homo_indexes = [
                 np.where(np.array([nint(_) for _ in x]) > 0)[0][-1] for x in occupations
@@ -230,17 +229,13 @@ def find_bandgap(bandsdata_uuid, number_electrons=None, fermi_energy=None):
         if fermi_energy < bands.min():
             raise orm.FermiEnergyAndBandsEnergiesError(where="below")
 
-        # one band is crossed by the fermi energy
-        if any(i[1] < fermi_energy and fermi_energy < i[0] for i in max_mins):
-            return False, 0.0, None, None
-
-        # case of semimetals, fermi energy at the crossing of two bands
-        # this will only work if the dirac point is computed!
-        elif any(i[0] == fermi_energy for i in max_mins) and any(
+        crosses_fermi = any(i[1] < fermi_energy < i[0] for i in max_mins)
+        # This only identifies a semimetal when the Dirac point is computed.
+        touches_fermi = any(i[0] == fermi_energy for i in max_mins) and any(
             i[1] == fermi_energy for i in max_mins
-        ):
+        )
+        if crosses_fermi or touches_fermi:
             return False, 0.0, None, None
-        # insulating case
         else:
             # Take the max of the band maxima below the fermi energy.
             homo = max([i[0] for i in max_mins if i[0] < fermi_energy])
@@ -297,6 +292,11 @@ def get_all_preceding_main_workchains(node_uuid):
 
         # Regardless of whether it's a MAIN workchain, continue tracing backward
         for input_link in n.base.links.get_incoming().all():
+            # RETURN only exposes an existing data node from a WorkChain. It does
+            # not identify the process that created the data, and following it can
+            # incorrectly traverse into a later workflow that reused that node.
+            if input_link.link_type == LinkType.RETURN:
+                continue
             trace_back_main_workchains(input_link.node)
 
         # CP2K path continuations identify the previous path WorkChain through
@@ -307,12 +307,13 @@ def get_all_preceding_main_workchains(node_uuid):
             "Cp2kReplicaWorkChain",
         }:
             try:
-                restart_from = getattr(n.inputs, "restart_from")
+                restart_from = n.inputs.restart_from
                 restart_uuid = _node_value(restart_from)
                 if restart_uuid:
                     trace_back_main_workchains(orm.load_node(str(restart_uuid)))
             except (AttributeError, NotExistentAttributeError, TypeError, ValueError):
                 pass
+
     # Start tracing back from the given node
     trace_back_main_workchains(node)
 
@@ -490,8 +491,8 @@ def geo_to_png(ase_geo, filename="ase_geo.png"):
 
 
 def guess_dimensionality(
-    ase_geo: Optional[Atoms] = None, thr_vacuum: float = 5
-) -> Optional[Tuple[int, Tuple[bool, bool, bool]]]:
+    ase_geo: Atoms | None = None, thr_vacuum: float = 5
+) -> tuple[int, tuple[bool, bool, bool]] | None:
     """Guess the dimensionality of a structure. thr_vacuum in Å.
     returns:
     -int dimensionality
@@ -594,27 +595,25 @@ def aiida_data_to_json(data_uuid):
 
     # temporary fix waiting for https://github.com/aiidateam/aiida-quantumespresso/pull/1188
     # projwfc creates BandsData with U8 instead of floats
-    if data.__class__.__name__ == "BandsData":
-        if data.get_bands().dtype != np.dtype("float64"):
-            new = data.clone()
-            new.set_bands(new.get_bands().astype(float))
-            data = new.clone()
+    if data.__class__.__name__ == "BandsData" and data.get_bands().dtype != np.dtype(
+        "float64"
+    ):
+        new = data.clone()
+        new.set_bands(new.get_bands().astype(float))
+        data = new.clone()
     # end temporary fix
 
-    # Create a temporary file path
-    temp_file = tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False)
+    # Close the temporary file before AiiDA exports into the same path.
+    with tempfile.NamedTemporaryFile(
+        mode="w+", suffix=".json", delete=False
+    ) as temp_file:
+        temp_name = temp_file.name
     try:
-        temp_file.close()  # Close it to allow export to overwrite the file
-
-        # Export the Data object to the temporary file in JSON format
-        data.export(temp_file.name, fileformat="json", overwrite=True)
-
-        # Read the contents of the temporary file
-        with open(temp_file.name, "r") as f:
-            json_string = f.read()
+        data.export(temp_name, fileformat="json", overwrite=True)
+        with open(temp_name) as handle:
+            json_string = handle.read()
     finally:
-        # Clean up the temporary file
-        os.remove(temp_file.name)
+        os.remove(temp_name)
 
     return json_string
 
@@ -1427,9 +1426,7 @@ def _qe_vibrational_mode(workchain):
     for branch_name in ("harmonic", "iraman"):
         branch = _namespace_value(workchain.outputs, branch_name)
         output_namespaces.append(_namespace_value(branch, "vibrational_data"))
-    output_namespaces.append(
-        _namespace_value(workchain.outputs, "vibrational_data")
-    )
+    output_namespaces.append(_namespace_value(workchain.outputs, "vibrational_data"))
 
     for namespace in output_namespaces:
         for node in _nested_array_data(namespace):
@@ -1629,19 +1626,234 @@ def _cp2k_electronic_gaps(output_parameters):
     return gaps or None
 
 
+def _cp2k_pdos_full_system_process(workchain):
+    """Return the CP2K process that produced the full-system PDOS."""
+    structure_uuid = str(workchain.inputs.structure.uuid)
+    diag_workchains = [
+        process
+        for process in workchain.called_descendants
+        if getattr(process, "process_label", "") == "Cp2kDiagWorkChain"
+    ]
+    exact_matches = []
+    for process in diag_workchains:
+        try:
+            if str(process.inputs.structure.uuid) == structure_uuid:
+                exact_matches.append(process)
+        except (AttributeError, NotExistentAttributeError):
+            continue
+    candidates = exact_matches or diag_workchains
+    if not candidates:
+        candidates = [
+            process
+            for process in workchain.called_descendants
+            if getattr(process, "label", "") == "slab_scf"
+        ]
+    if not candidates:
+        raise ValueError("The CP2K PDOS workflow has no full-system calculation.")
+    return min(
+        candidates,
+        key=lambda process: (
+            str(getattr(process, "ctime", "")),
+            int(getattr(process, "pk", 0) or 0),
+        ),
+    )
+
+
+def _cp2k_pdos_retrieved(workchain):
+    retrieved = _get_optional_output(workchain.outputs, "slab_retrieved")
+    if retrieved is not None:
+        return retrieved
+    process = _cp2k_pdos_full_system_process(workchain)
+    retrieved = _get_optional_output(process.outputs, "retrieved")
+    if retrieved is None:
+        raise ValueError("The CP2K PDOS workflow has no retrieved full-system data.")
+    return retrieved
+
+
+def _cp2k_pdos_output_parameters(workchain):
+    process = _cp2k_pdos_full_system_process(workchain)
+    output = _get_optional_output(process.outputs, "output_parameters")
+    if output is None:
+        raise ValueError("The CP2K PDOS workflow has no output parameters.")
+    return _node_mapping(output)
+
+
+def _cp2k_pdos_fermi_energies(workchain, output_parameters=None):
+    """Return spin-resolved PDOS references in eV."""
+    if output_parameters is None:
+        output_parameters = _cp2k_pdos_output_parameters(workchain)
+    retrieved = _cp2k_pdos_retrieved(workchain)
+    try:
+        output_text = _repository_text(retrieved, "aiida.out")
+    except (FileNotFoundError, OSError):
+        output_text = ""
+    values = _cp2k_fermi_energies(output_parameters, output_text)
+    if values is not None:
+        return values
+
+    # Legacy CP2K parsers retain occupied eigenvalues but may omit a dedicated
+    # Fermi-energy field. The last occupied value is then the reliable reference.
+    references = []
+    for spin in (1, 2):
+        eigenvalues = output_parameters.get(f"eigen_spin{spin}_au", [])
+        if eigenvalues:
+            references.append(float(eigenvalues[-1]) * Hartree)
+    return references or None
+
+
+def _cp2k_pdos_series(workchain, output_parameters=None):
+    """Return total spin-resolved PDOS curves relative to their references."""
+    if output_parameters is None:
+        output_parameters = _cp2k_pdos_output_parameters(workchain)
+    retrieved = _cp2k_pdos_retrieved(workchain)
+    filenames = sorted(
+        name
+        for name in retrieved.base.repository.list_object_names()
+        if name.lower().endswith(".pdos")
+    )
+    kind_filenames = [name for name in filenames if "list" not in name.lower()]
+    filenames = kind_filenames or filenames
+    if not filenames:
+        raise ValueError("The CP2K PDOS workflow contains no .pdos files.")
+
+    curves = {}
+    for filename in filenames:
+        with retrieved.base.repository.open(filename, mode="r") as handle:
+            handle.readline()
+            data = np.asarray(np.loadtxt(handle), dtype=float)
+        if data.ndim == 1:
+            data = data[np.newaxis, :]
+        if data.shape[1] < 4:
+            continue
+        spin = 1 if "BETA" in filename.upper() else 0
+        energies_ev = data[:, 1] * Hartree
+        density = np.sum(data[:, 3:], axis=1)
+        if spin not in curves:
+            curves[spin] = [energies_ev, density]
+            continue
+        reference_energies, accumulated = curves[spin]
+        if np.array_equal(reference_energies, energies_ev):
+            accumulated += density
+        else:
+            accumulated += np.interp(reference_energies, energies_ev, density)
+
+    if not curves:
+        raise ValueError("The CP2K PDOS files contain no usable projected data.")
+    references = _cp2k_pdos_fermi_energies(workchain, output_parameters) or []
+    series = []
+    spin_polarized = len(curves) > 1
+    for spin, (energies_ev, density) in sorted(curves.items()):
+        reference = references[min(spin, len(references) - 1)] if references else 0.0
+        label = ("Alpha" if spin == 0 else "Beta") if spin_polarized else "Total"
+        plotted_density = -density if spin == 1 and spin_polarized else density
+        series.append((label, energies_ev - reference, plotted_density))
+    return series
+
+
+def _cp2k_pdos_projection_description(workchain):
+    try:
+        selections_node = workchain.inputs.pdos_lists
+        get_list = getattr(selections_node, "get_list", None)
+        selections = get_list() if callable(get_list) else list(selections_node)
+    except (AttributeError, NotExistentAttributeError, TypeError):
+        selections = []
+    labels = []
+    for selection in selections:
+        if isinstance(selection, (list, tuple)) and len(selection) >= 2:
+            labels.append(f"{selection[1]} ({selection[0]})")
+        else:
+            labels.append(str(selection))
+    description = "CP2K atom- and kind-projected density of states"
+    if labels:
+        description += " for selections: " + "; ".join(labels)
+    description += ". Full arrays are stored in the linked AiiDA archive."
+    do_overlap = _input_value(workchain, "do_overlap", False)
+    if bool(do_overlap):
+        description += " Molecular-orbital overlap analysis is also included."
+    return description
+
+
+def _cp2k_pdos_property_definition(
+    workchain,
+    aiida_node_id=None,
+    executable_ids=None,
+):
+    """Build the openBIS DOS result produced by a Cp2kPdosWorkChain."""
+    process = _cp2k_pdos_full_system_process(workchain)
+    dft_input = _get_optional_output(process.inputs, "dft_params")
+    if dft_input is None:
+        dft_input = workchain.inputs.dft_params
+    dft_parameters = get_dft_parameters_cp2k(
+        workchain.inputs.cp2k_code.description,
+        _node_mapping(dft_input),
+    )
+    output_parameters = _cp2k_pdos_output_parameters(workchain)
+    properties = _simulation_properties(
+        workchain,
+        "PDOS",
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+        result_role="pdos",
+    )
+    properties.update(
+        {
+            "pdos": True,
+            "projection_description": _cp2k_pdos_projection_description(workchain),
+        }
+    )
+    fermi_energies = _cp2k_pdos_fermi_energies(workchain, output_parameters)
+    if fermi_energies is not None:
+        properties["fermi_energy_ev"] = fermi_energies
+    electronic_gaps = _cp2k_electronic_gaps(output_parameters)
+    if electronic_gaps is not None:
+        properties["electronic_gap_ev"] = electronic_gaps
+    series = _cp2k_pdos_series(workchain, output_parameters)
+    properties["energy_min_ev"] = min(float(np.min(curve[1])) for curve in series)
+    properties["energy_max_ev"] = max(float(np.max(curve[1])) for curve in series)
+    return {
+        "pdos": {
+            "object_type": OPENBIS_SIMULATION_TYPES["DOS"],
+            "properties": properties,
+        }
+    }
+
+
+def _render_cp2k_pdos_preview(workchain, path):
+    """Render a compact total-PDOS preview from the retained CP2K files."""
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(7, 4.5), constrained_layout=True)
+    axis = figure.subplots()
+    for label, energies_ev, density in _cp2k_pdos_series(workchain):
+        axis.plot(energies_ev, density, label=label)
+    axis.axvline(0.0, color="black", ls="--", lw=0.8)
+    axis.axhline(0.0, color="black", lw=0.6)
+    axis.set_xlabel("Energy relative to reference (eV)")
+    axis.set_ylabel("Projected density of states (a.u.)")
+    axis.set_title("CP2K projected density of states")
+    if len(axis.lines) > 3:
+        axis.legend(fontsize="small")
+    figure.savefig(path, dpi=160)
+
+
+_CP2K_CHARGE_ANALYSIS_MARKERS = (
+    ("mulliken population analysis", "Mulliken"),
+    ("hirshfeld charges", "Hirshfeld"),
+    ("lowdin population analysis", "Löwdin"),
+)
+
+_BADER_RESULT_FILENAMES = ("ACF.dat", "AVF.dat", "BCF.dat")
+
+
 def _cp2k_charge_analysis_methods(workchain, output_text=None):
     """Report only charge analyses that are demonstrably present in the archive."""
     output_text = (
         _cp2k_scf_output_text(workchain) if output_text is None else output_text
     )
     methods = []
-    markers = (
-        ("mulliken population analysis", "Mulliken"),
-        ("hirshfeld charges", "Hirshfeld"),
-        ("lowdin population analysis", "Löwdin"),
-    )
     lower_text = output_text.lower()
-    for marker, method in markers:
+    for marker, method in _CP2K_CHARGE_ANALYSIS_MARKERS:
         if marker in lower_text:
             methods.append(method)
 
@@ -1654,6 +1866,84 @@ def _cp2k_charge_analysis_methods(workchain, output_text=None):
         if "ACF.dat" in names:
             methods.append("Bader")
     return methods
+
+
+def _cp2k_charge_analysis_extract(output_text):
+    """Extract the final complete CP2K table for each population method."""
+    lines = output_text.splitlines()
+    lower_lines = [line.lower() for line in lines]
+    separator = re.compile(r"^\s*!-{20,}!\s*$")
+    sections = []
+
+    for marker, _method in _CP2K_CHARGE_ANALYSIS_MARKERS:
+        occurrences = [
+            index for index, line in enumerate(lower_lines) if marker in line
+        ]
+        if not occurrences:
+            continue
+        marker_index = occurrences[-1]
+        start = next(
+            (
+                index
+                for index in range(marker_index - 1, -1, -1)
+                if separator.match(lines[index])
+            ),
+            marker_index,
+        )
+        end = next(
+            (
+                index
+                for index in range(marker_index + 1, len(lines))
+                if separator.match(lines[index])
+            ),
+            len(lines) - 1,
+        )
+        sections.append((marker_index, "\n".join(lines[start : end + 1]).strip()))
+
+    if not sections:
+        return ""
+    return "\n\n".join(section for _index, section in sorted(sections)) + "\n"
+
+
+def _cp2k_charge_analysis_files(workchain, directory):
+    """Materialize compact population tables and standard Bader result files."""
+    paths = []
+    extract = _cp2k_charge_analysis_extract(_cp2k_scf_output_text(workchain))
+    if extract:
+        output_path = directory / "cp2k_charge_analysis.txt"
+        output_path.write_text(extract, encoding="utf-8")
+        paths.append(output_path)
+
+    bader = _get_optional_output(workchain.outputs, "bader_retrieved")
+    if bader is None:
+        return paths
+    for filename in _BADER_RESULT_FILENAMES:
+        try:
+            with bader.base.repository.open(filename, mode="rb") as source:
+                content = source.read()
+        except (FileNotFoundError, OSError):
+            continue
+        output_path = directory / filename
+        output_path.write_bytes(content)
+        paths.append(output_path)
+    return paths
+
+
+def _attach_cp2k_charge_analysis_data(openbis_session, charge_object, workchain):
+    """Attach compact charge tables only when a charge object was newly created."""
+    if not getattr(charge_object, "_aiidalab_created", False):
+        return
+    with tempfile.TemporaryDirectory(
+        prefix="aiidalab-openbis-charge-analysis-"
+    ) as dirname:
+        files = _cp2k_charge_analysis_files(workchain, Path(dirname))
+        if files:
+            utils.create_openbis_dataset(
+                openbis_session,
+                type="RAW_DATA",
+                sample=charge_object,
+                files=files,
+            )
 
 
 def _scf_executable_ids(workchain, executable_ids, purpose):
@@ -1684,6 +1974,58 @@ def _scf_executable_ids(workchain, executable_ids, purpose):
     return executable_ids
 
 
+def _cp2k_charge_analysis_definition(
+    workchain,
+    dft_parameters,
+    output_parameters,
+    aiida_node_id=None,
+    executable_ids=None,
+    converged=None,
+):
+    """Build a charge-analysis result when CP2K retained final charge tables."""
+    output_text = _cp2k_scf_output_text(workchain)
+    charge_methods = _cp2k_charge_analysis_methods(workchain, output_text)
+    if not charge_methods:
+        return None
+
+    process_label = getattr(workchain, "process_label", "")
+    if process_label == "Cp2kGeoOptWorkChain":
+        name_prefix = "Final geometry population analysis"
+    elif "Bader" in charge_methods:
+        name_prefix = "Post-SCF charge analysis with Bader"
+    else:
+        name_prefix = "Post-SCF population analysis"
+
+    properties = _simulation_properties(
+        workchain,
+        name_prefix,
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=_scf_executable_ids(workchain, executable_ids, "charge"),
+        result_role="charge_analysis",
+    )
+    properties.update(
+        {
+            "charge_analysis_method": "; ".join(charge_methods),
+            "converged": (
+                bool(getattr(workchain, "is_finished_ok", True))
+                if converged is None
+                else bool(converged)
+            ),
+        }
+    )
+    fermi_energies = _cp2k_fermi_energies(output_parameters, output_text)
+    if fermi_energies is not None:
+        properties["fermi_energy_ev"] = fermi_energies
+    electronic_gaps = _cp2k_electronic_gaps(output_parameters)
+    if electronic_gaps is not None:
+        properties["electronic_gap_ev"] = electronic_gaps
+    return {
+        "object_type": OPENBIS_SIMULATION_TYPES["Charge Analysis"],
+        "properties": properties,
+    }
+
+
 def _unfolding_archive_data(workchain):
     """Load the compact metadata and arrays retained by an unfolding workflow."""
     retrieved = _get_optional_output(workchain.outputs, "unfolding_retrieved")
@@ -1691,9 +2033,11 @@ def _unfolding_archive_data(workchain):
         retrieved = _get_optional_output(workchain.outputs, "banduppy_retrieved")
     if retrieved is None:
         raise ValueError("The workflow does not contain unfolding output data.")
-    with retrieved.base.repository.open("unfolding_bands.npz", mode="rb") as handle:
-        with np.load(handle, allow_pickle=True) as archive:
-            return {key: np.array(archive[key], copy=True) for key in archive.files}
+    with (
+        retrieved.base.repository.open("unfolding_bands.npz", mode="rb") as handle,
+        np.load(handle, allow_pickle=True) as archive,
+    ):
+        return {key: np.array(archive[key], copy=True) for key in archive.files}
 
 
 def _unfolding_supercell_matrix(workchain, data):
@@ -1758,20 +2102,18 @@ def _qe_banduppy_property_definition(
         workchain.outputs, "reference_bands_parameters"
     )
     output_parameters = (
-        _node_mapping(output_parameters_node) if output_parameters_node is not None else {}
+        _node_mapping(output_parameters_node)
+        if output_parameters_node is not None
+        else {}
     )
     system = _node_mapping(workchain.inputs.parameters).get("SYSTEM", {})
     dft_parameters = {
-        "xc_functional": output_parameters.get(
-            "dft_exchange_correlation", "unknown"
-        ),
+        "xc_functional": output_parameters.get("dft_exchange_correlation", "unknown"),
         "plus_u": bool(output_parameters.get("lda_plus_u_calculation", False)),
         "spin_orbit_coupling": bool(
             output_parameters.get("spin_orbit_calculation", False)
         ),
-        "non_collinear": bool(
-            output_parameters.get("non_colinear_calculation", False)
-        ),
+        "non_collinear": bool(output_parameters.get("non_colinear_calculation", False)),
         "uks": bool(output_parameters.get("lsda", False)),
         "charge": float(system.get("tot_charge", 0.0)),
         "vdw_corr": system.get("vdw_corr", ""),
@@ -1811,9 +2153,7 @@ def _qe_banduppy_property_definition(
     }
 
 
-def _cp2k_scf_property_definitions(
-    workchain, aiida_node_id=None, executable_ids=None
-):
+def _cp2k_scf_property_definitions(workchain, aiida_node_id=None, executable_ids=None):
     """Build schema properties for all scientific results of a CP2K SCF block."""
     dft_parameters = get_dft_parameters_cp2k(
         workchain.inputs.cp2k_code.description,
@@ -1823,9 +2163,7 @@ def _cp2k_scf_property_definitions(
     output_text = _cp2k_scf_output_text(workchain)
     fermi_energies = _cp2k_fermi_energies(output_parameters, output_text)
     electronic_gaps = _cp2k_electronic_gaps(output_parameters)
-    scf_steps = output_parameters.get("motion_step_info", {}).get(
-        "scf_converged", []
-    )
+    scf_steps = output_parameters.get("motion_step_info", {}).get("scf_converged", [])
     converged = bool(getattr(workchain, "is_finished_ok", True)) and (
         not scf_steps or bool(scf_steps[-1])
     )
@@ -1856,30 +2194,16 @@ def _cp2k_scf_property_definitions(
         }
     }
 
-    charge_methods = _cp2k_charge_analysis_methods(workchain, output_text)
-    if charge_methods:
-        charge = _simulation_properties(
-            workchain,
-            "Charge analysis",
-            dft_parameters,
-            aiida_node_id,
-            executable_ids=_scf_executable_ids(workchain, executable_ids, "charge"),
-            result_role="charge_analysis",
-        )
-        charge.update(
-            {
-                "charge_analysis_method": "; ".join(charge_methods),
-                "converged": converged,
-            }
-        )
-        if fermi_energies is not None:
-            charge["fermi_energy_ev"] = fermi_energies
-        if electronic_gaps is not None:
-            charge["electronic_gap_ev"] = electronic_gaps
-        definitions["charge_analysis"] = {
-            "object_type": OPENBIS_SIMULATION_TYPES["Charge Analysis"],
-            "properties": charge,
-        }
+    charge_definition = _cp2k_charge_analysis_definition(
+        workchain,
+        dft_parameters,
+        output_parameters,
+        aiida_node_id=aiida_node_id,
+        executable_ids=executable_ids,
+        converged=converged,
+    )
+    if charge_definition is not None:
+        definitions["charge_analysis"] = charge_definition
 
     unfolding = _get_optional_output(workchain.outputs, "unfolding_retrieved")
     if unfolding is not None:
@@ -1889,9 +2213,7 @@ def _cp2k_scf_property_definitions(
             "Band unfolding",
             dft_parameters,
             aiida_node_id,
-            executable_ids=_scf_executable_ids(
-                workchain, executable_ids, "unfolding"
-            ),
+            executable_ids=_scf_executable_ids(workchain, executable_ids, "unfolding"),
             result_role="band_unfolding",
         )
         band.update(
@@ -1976,8 +2298,8 @@ def _replica_chain_profile(workchain):
     if len(energies_hartree) < 2 or len(structures) < 2:
         raise ValueError("A replica chain requires at least two path images.")
     relative_energies = (
-        (np.asarray(energies_hartree, dtype=float) - energies_hartree[0]) * Hartree
-    )
+        np.asarray(energies_hartree, dtype=float) - energies_hartree[0]
+    ) * Hartree
     return relative_energies, actual_values, structures[0], structures[-1]
 
 
@@ -2041,9 +2363,7 @@ def _collective_variables_description(system_parameters, actual_values=None):
     return json.dumps(content, indent=2)
 
 
-def _cp2k_mep_property_definition(
-    workchain, aiida_node_id=None, executable_ids=None
-):
+def _cp2k_mep_property_definition(workchain, aiida_node_id=None, executable_ids=None):
     """Build MINIMUM_ENERGY_PATH properties for CP2K path workflows."""
     dft_parameters = get_dft_parameters_cp2k(
         workchain.inputs.code.description,
@@ -2073,7 +2393,9 @@ def _cp2k_mep_property_definition(
     elif workchain.process_label == "Cp2kNebWorkChain":
         energies, _coordinates = _neb_profile(workchain)
         properties["mep_method"] = "NEB"
-        band_type = str(_node_mapping(workchain.inputs.neb_params).get("band_type", "NEB"))
+        band_type = str(
+            _node_mapping(workchain.inputs.neb_params).get("band_type", "NEB")
+        )
         normalized = re.sub(r"[^A-Z0-9]+", "_", band_type.upper()).strip("_")
         properties["neb_variant"] = "CI_NEB" if normalized == "CI_NEB" else "NEB"
         collective_variables = _collective_variables_description(system_parameters)
@@ -2090,7 +2412,7 @@ def _cp2k_mep_property_definition(
             "relative_energies_ev": [float(value) for value in energies],
             "forward_barrier_ev": maximum - float(energies[0]),
             "backward_barrier_ev": maximum - float(energies[-1]),
-            "number_of_images": int(len(energies)),
+            "number_of_images": len(energies),
             # Some accepted CP2K NEB runs currently terminate externally after
             # writing a usable final profile. Preserve the WorkChain decision.
             "converged": bool(getattr(workchain, "is_finished_ok", True)),
@@ -2325,54 +2647,327 @@ def _render_unfolding_preview(workchain, path):
     figure.savefig(path, dpi=160)
 
 
+def _retrieved_npz_data(workchain, filename):
+    """Load one small metadata/result NPZ from a workflow descendant."""
+    for node in (workchain, *tuple(workchain.called_descendants)):
+        retrieved = _get_optional_output(getattr(node, "outputs", {}), "retrieved")
+        if retrieved is None:
+            continue
+        repository = retrieved.base.repository
+        try:
+            names = repository.list_object_names()
+        except (AttributeError, OSError):
+            continue
+        if filename not in names:
+            continue
+        with (
+            repository.open(filename, mode="rb") as handle,
+            np.load(handle, allow_pickle=True) as archive,
+        ):
+            return {name: archive[name] for name in archive.files}
+    raise ValueError(
+        f"The {workchain.process_label} workflow does not contain a retrieved "
+        f"{filename} file."
+    )
+
+
+def _dictionary_array(values):
+    """Convert an object array containing dictionaries into plain dictionaries."""
+    result = []
+    for value in values:
+        if isinstance(value, np.ndarray) and value.shape == ():
+            value = value.item()
+        elif hasattr(value, "item"):
+            try:
+                value = value.item()
+            except ValueError:
+                pass
+        if isinstance(value, dict):
+            result.append(value)
+    return result
+
+
+def _sorted_unique_numbers(values):
+    numbers = []
+    for value in values:
+        number = round(float(value), 12)
+        numbers.append(0.0 if abs(number) < 1.0e-12 else number)
+    return sorted(set(numbers))
+
+
+def _spm_area_from_cell_vectors(general_info):
+    """Return the in-plane area; cp2k-spm-tools stores vectors in Bohr."""
+    vectors = np.asarray(general_info.get("cell_vectors", []), dtype=float)
+    if vectors.shape != (3, 3):
+        return None
+    return float(np.linalg.norm(np.cross(vectors[0], vectors[1])) * Bohr**2)
+
+
+def _stm_archive_metadata(workchain):
+    data = _retrieved_npz_data(workchain, "stm.npz")
+    general_info = data["stm_general_info"].item()
+    series = _dictionary_array(data["stm_series_info"])
+    return general_info, series, data["stm_series_data"]
+
+
+def _orbital_archive_metadata(workchain):
+    data = _retrieved_npz_data(workchain, "orb.npz")
+    blocks = []
+    for key in sorted(data):
+        if not key.endswith("_orb_general_info"):
+            continue
+        prefix = key[: -len("_general_info")]
+        blocks.append(
+            (
+                data[key].item(),
+                _dictionary_array(data[f"{prefix}_series_info"]),
+                data[f"{prefix}_series_data"],
+            )
+        )
+    if not blocks:
+        raise ValueError("The orbital archive contains no orbital metadata blocks.")
+    return blocks
+
+
+def _tip_model_summary(p_tip_ratios):
+    """Describe each s/p tip mixture using the stored p-orbital fraction."""
+    descriptions = []
+    for ratio in p_tip_ratios:
+        p_percent = 100.0 * float(ratio)
+        s_percent = 100.0 - p_percent
+
+        def percentage(value):
+            return f"{value:.12g}"
+
+        if np.isclose(p_percent, 0.0):
+            descriptions.append("100% s")
+        elif np.isclose(p_percent, 100.0):
+            descriptions.append("100% p")
+        else:
+            descriptions.append(
+                f"{percentage(s_percent)}% s + {percentage(p_percent)}% p"
+            )
+    return "; ".join(descriptions)
+
+
+def _series_summary(general_infos, series, include_bias_voltages):
+    types = [str(item.get("type", "")).lower() for item in series]
+    modes = set()
+    if any("orbital" in value for value in types):
+        modes.add("ORBITALS")
+    if any(value.endswith("stm") for value in types):
+        modes.add("STM")
+    if any(value.endswith("sts") for value in types):
+        modes.add("STS")
+
+    image_modes = set()
+    if any("const-height" in value for value in types):
+        image_modes.add("CONSTANT_HEIGHT")
+    if any("const-isovalue" in value for value in types):
+        image_modes.add("CONSTANT_ISOVALUE")
+
+    properties = {
+        "spm_mode": sorted(modes),
+        "image_modes": sorted(image_modes),
+    }
+    heights = _sorted_unique_numbers(
+        item["height"] for item in series if item.get("height") is not None
+    )
+    isovalues = _sorted_unique_numbers(
+        item["isovalue"] for item in series if item.get("isovalue") is not None
+    )
+    p_tip_ratios = _sorted_unique_numbers(
+        item["p_tip_ratio"] for item in series if item.get("p_tip_ratio") is not None
+    )
+    if heights:
+        properties["heights_angstrom"] = heights
+    if isovalues:
+        properties["isovalues_au"] = isovalues
+    if p_tip_ratios:
+        properties["p_tip_ratios"] = p_tip_ratios
+        properties["tip_model"] = _tip_model_summary(p_tip_ratios)
+
+    first_info = general_infos[0]
+    area = _spm_area_from_cell_vectors(first_info)
+    if area is not None:
+        properties["scan_area_angstrom2"] = area
+    if include_bias_voltages:
+        energies = []
+        for info in general_infos:
+            energies.extend(np.asarray(info.get("energies", []), dtype=float).ravel())
+        if energies:
+            properties["bias_voltages_v"] = _sorted_unique_numbers(energies)
+    return properties
+
+
+def _cp2k_spm_result_metadata(workchain):
+    """Derive searchable SPM summaries without duplicating NPZ arrays."""
+    if workchain.process_label == "Cp2kStmWorkChain":
+        general_info, series, _series_data = _stm_archive_metadata(workchain)
+        return _series_summary([general_info], series, include_bias_voltages=True)
+
+    if workchain.process_label == "Cp2kOrbitalsWorkChain":
+        blocks = _orbital_archive_metadata(workchain)
+        general_infos = [block[0] for block in blocks]
+        series = [item for block in blocks for item in block[1]]
+        properties = _series_summary(general_infos, series, include_bias_voltages=False)
+        orbital_energies = []
+        for info in general_infos:
+            orbital_energies.extend(
+                np.asarray(info.get("energies", []), dtype=float).ravel()
+            )
+        if orbital_energies:
+            properties["orbital_energies_ev"] = _sorted_unique_numbers(orbital_energies)
+        return properties
+
+    if workchain.process_label == "Cp2kAfmWorkChain":
+        parameters = _node_mapping(workchain.inputs.ppafm_params)
+        grid_a = np.asarray(parameters.get("gridA", []), dtype=float)
+        grid_b = np.asarray(parameters.get("gridB", []), dtype=float)
+        properties = {
+            "spm_mode": ["AFM"],
+            "image_modes": ["THREE_DIMENSIONAL_GRID"],
+        }
+        if grid_a.shape == (3,) and grid_b.shape == (3,):
+            properties["scan_area_angstrom2"] = float(
+                np.linalg.norm(np.cross(grid_a, grid_b))
+            )
+        optional = {
+            "afm_amplitude_angstrom": parameters.get("Amplitude"),
+            "afm_probe_type": parameters.get("probeType"),
+            "afm_tip_charge_e": parameters.get("charge"),
+        }
+        properties.update(
+            {key: value for key, value in optional.items() if value is not None}
+        )
+        scan_min = parameters.get("scanMin")
+        scan_max = parameters.get("scanMax")
+        scan_step = parameters.get("scanStep")
+        if scan_min is not None and len(scan_min) >= 3:
+            properties["afm_scan_z_min_angstrom"] = float(scan_min[2])
+        if scan_max is not None and len(scan_max) >= 3:
+            properties["afm_scan_z_max_angstrom"] = float(scan_max[2])
+        if scan_step is not None and len(scan_step) >= 3:
+            properties["afm_scan_z_step_angstrom"] = float(scan_step[2])
+        tip = str(parameters.get("tip", "")).strip()
+        probe = str(parameters.get("probeType", "")).strip()
+        if tip or probe:
+            properties["tip_model"] = "; ".join(
+                value
+                for value in (
+                    f"{tip} tip" if tip else "",
+                    f"{probe} probe" if probe else "",
+                )
+                if value
+            )
+        return properties
+
+    raise ValueError(f"Unsupported SPM workflow: {workchain.process_label}")
+
+
+def _cp2k_spm_property_definition(workchain, aiida_node_id=None, executable_ids=None):
+    inputs = workchain.inputs
+    cp2k_code = getattr(inputs, "cp2k_code", None)
+    if cp2k_code is None:
+        cp2k_code = inputs.spm_code
+    dft_parameters = get_dft_parameters_cp2k(
+        cp2k_code.description, _node_mapping(inputs.dft_params)
+    )
+    prefix = {
+        "Cp2kStmWorkChain": "SPM",
+        "Cp2kOrbitalsWorkChain": "SPM orbitals",
+        "Cp2kAfmWorkChain": "AFM",
+    }[workchain.process_label]
+    properties = _simulation_properties(
+        workchain,
+        prefix,
+        dft_parameters,
+        aiida_node_id,
+        executable_ids=executable_ids,
+        result_role="spm",
+    )
+    properties.update(_cp2k_spm_result_metadata(workchain))
+    return {
+        "spm": {
+            "object_type": OPENBIS_SIMULATION_TYPES["SPM Simulation"],
+            "properties": properties,
+        }
+    }
+
+
 def _render_spm_preview(workchain, path):
     from matplotlib.figure import Figure
 
-    stm_calculation = None
-    for node in workchain.called_descendants:
-        label = str(getattr(node, "label", "")).lower()
-        process_label = str(getattr(node, "process_label", "")).lower()
-        if label == "stm" or "stm" in process_label:
-            retrieved = _get_optional_output(node.outputs, "retrieved")
-            if retrieved is not None:
-                stm_calculation = node
-                break
-    if stm_calculation is None:
-        raise ValueError("The STM workflow does not contain a retrieved stm.npz file.")
-
-    retrieved = stm_calculation.outputs.retrieved
-    with retrieved.base.repository.open("stm.npz", mode="rb") as handle:
-        archive = np.load(handle, allow_pickle=True)
-        series_info = archive["stm_series_info"]
-        series_data = archive["stm_series_data"]
-        general_info = archive["stm_general_info"].item()
-
+    if workchain.process_label == "Cp2kAfmWorkChain":
+        data = _retrieved_npz_data(workchain, "df.npz")
+        grid = np.asarray(data["data"], dtype=float)
+        planes = grid.reshape((-1,) + grid.shape[-2:])
+        image = max(
+            planes,
+            key=lambda plane: (
+                float(np.ptp(plane[np.isfinite(plane)]))
+                if np.isfinite(plane).any()
+                else -1.0
+            ),
+        )
+        parameters = _node_mapping(workchain.inputs.ppafm_params)
+        scan_min = parameters.get("scanMin", [0.0, 0.0])
+        scan_max = parameters.get("scanMax", list(reversed(image.shape)))
+        extent = [scan_min[0], scan_max[0], scan_min[1], scan_max[1]]
+        title = "Representative AFM frequency-shift map"
+        x_values = y_values = None
+    elif workchain.process_label == "Cp2kOrbitalsWorkChain":
+        blocks = _orbital_archive_metadata(workchain)
         candidates = []
-        for candidate, info in enumerate(series_info):
-            info = info.item() if hasattr(info, "item") else info
-            if not str(info.get("type", "")).lower().endswith("stm"):
-                continue
-            candidate_data = np.asarray(series_data[candidate], dtype=float)
-            if candidate_data.ndim < 2:
-                continue
-            planes = candidate_data.reshape((-1,) + candidate_data.shape[-2:])
-            plane_candidates = []
-            for plane_index, plane in enumerate(planes):
-                finite = plane[np.isfinite(plane)]
-                contrast = float(np.ptp(finite)) if finite.size else -1.0
-                plane_candidates.append((contrast, plane_index, plane))
-            contrast, plane_index, candidate_image = max(
-                plane_candidates, key=lambda item: item[0]
-            )
-            candidates.append((contrast, candidate, plane_index, candidate_image, info))
+        for general_info, series_info, series_data in blocks:
+            for index, info in enumerate(series_info):
+                if "orbital" not in str(info.get("type", "")).lower():
+                    continue
+                candidate_data = np.asarray(series_data[index], dtype=float)
+                for plane in candidate_data.reshape((-1,) + candidate_data.shape[-2:]):
+                    finite = plane[np.isfinite(plane)]
+                    contrast = float(np.ptp(finite)) if finite.size else -1.0
+                    candidates.append((contrast, plane, info, general_info))
         if not candidates:
-            raise ValueError("The STM archive contains no STM image series.")
-        contrast, _index, _plane_index, image, selected_info = max(
+            raise ValueError("The orbital archive contains no orbital image series.")
+        _contrast, image, selected_info, general_info = max(
             candidates, key=lambda item: item[0]
         )
         x_values = np.asarray(general_info.get("x_arr", np.arange(image.shape[-1])))
         y_values = np.asarray(general_info.get("y_arr", np.arange(image.shape[-2])))
+        extent = [
+            x_values.min() * Bohr,
+            x_values.max() * Bohr,
+            y_values.min() * Bohr,
+            y_values.max() * Bohr,
+        ]
+        title = str(selected_info.get("type", "Representative orbital map"))
+    else:
+        general_info, series_info, series_data = _stm_archive_metadata(workchain)
+        candidates = []
+        for index, info in enumerate(series_info):
+            if not str(info.get("type", "")).lower().endswith("stm"):
+                continue
+            candidate_data = np.asarray(series_data[index], dtype=float)
+            for plane in candidate_data.reshape((-1,) + candidate_data.shape[-2:]):
+                finite = plane[np.isfinite(plane)]
+                contrast = float(np.ptp(finite)) if finite.size else -1.0
+                candidates.append((contrast, plane, info))
+        if not candidates:
+            raise ValueError("The STM archive contains no STM image series.")
+        _contrast, image, selected_info = max(candidates, key=lambda item: item[0])
+        x_values = np.asarray(general_info.get("x_arr", np.arange(image.shape[-1])))
+        y_values = np.asarray(general_info.get("y_arr", np.arange(image.shape[-2])))
+        extent = [
+            x_values.min() * Bohr,
+            x_values.max() * Bohr,
+            y_values.min() * Bohr,
+            y_values.max() * Bohr,
+        ]
+        title = str(selected_info.get("type", "Representative STM map"))
 
+    finite = image[np.isfinite(image)]
+    contrast = float(np.ptp(finite)) if finite.size else 0.0
     figure = Figure(figsize=(6, 5), constrained_layout=True)
     axis = figure.subplots()
     if contrast > 0.0:
@@ -2380,37 +2975,21 @@ def _render_spm_preview(workchain, path):
             image,
             origin="lower",
             aspect="auto",
-            extent=[
-                x_values.min() * Bohr,
-                x_values.max() * Bohr,
-                y_values.min() * Bohr,
-                y_values.max() * Bohr,
-            ],
+            extent=extent,
             cmap="viridis",
         )
         axis.set_xlabel("x (Å)")
         axis.set_ylabel("y (Å)")
-        axis.set_title(str(selected_info.get("type", "Representative STM map")))
+        axis.set_title(title)
         figure.colorbar(plotted, ax=axis)
     else:
         axis.axis("off")
         axis.text(
             0.5,
-            0.55,
-            "STM preview suggestion",
-            ha="center",
-            va="center",
-            fontsize=16,
-            weight="bold",
-        )
-        axis.text(
             0.5,
-            0.42,
-            "The stored STM maps contain no spatial contrast.\n"
-            "Replace this image before export if a better preview is available.",
+            "SPM preview suggestion\nReplace this image if a better preview is available.",
             ha="center",
             va="center",
-            fontsize=11,
         )
     figure.savefig(path, dpi=160)
 
@@ -2455,13 +3034,9 @@ def _mark_export_result(
     # transient UI marker only on the local Python object.
     object.__setattr__(openbis_object, "_aiidalab_created", bool(created))
     if source_uuid:
-        object.__setattr__(
-            openbis_object, "_aiidalab_source_uuid", str(source_uuid)
-        )
+        object.__setattr__(openbis_object, "_aiidalab_source_uuid", str(source_uuid))
     if result_role:
-        object.__setattr__(
-            openbis_object, "_aiidalab_result_role", str(result_role)
-        )
+        object.__setattr__(openbis_object, "_aiidalab_result_role", str(result_role))
     return openbis_object
 
 
@@ -2483,6 +3058,27 @@ def _collection_space_code(openbis_session, collection_id):
     raise ValueError(f"Could not determine the openBIS space for {collection_id}.")
 
 
+def find_existing_simulation_result(
+    openbis_session,
+    experiment_id,
+    object_type,
+    source_uuid,
+):
+    """Return an existing result with the same identity in the target space."""
+    if not source_uuid or experiment_id in (None, "", "-1"):
+        return None
+    target_space = _collection_space_code(openbis_session, experiment_id)
+    existing = list(
+        openbis_session.get_objects(
+            type=object_type,
+            space=target_space,
+            where={"AIIDA_SOURCE_UUID": str(source_uuid)},
+        )
+        or []
+    )
+    return existing[0] if existing else None
+
+
 def _create_simulation_object(
     openbis_session,
     experiment_id,
@@ -2496,27 +3092,19 @@ def _create_simulation_object(
     properties = dict(properties)
     result_role = properties.pop("_aiidalab_result_role", None)
     source_uuid = properties.get("aiida_source_uuid")
-    identity = {"AIIDA_SOURCE_UUID": source_uuid}
-    if all(identity.values()):
-        # Experiment dropdowns expose permIDs, while pyBIS space searches need
-        # the actual space code. Passing an experiment permID as ``space`` makes
-        # pyBIS build an invalid Space PermIdSearchCriteria on this openBIS version.
-        target_space = _collection_space_code(openbis_session, experiment_id)
-        existing = list(
-            openbis_session.get_objects(
-                type=object_type,
-                space=target_space,
-                where=identity,
-            )
-            or []
+    existing = find_existing_simulation_result(
+        openbis_session,
+        experiment_id,
+        object_type,
+        source_uuid,
+    )
+    if existing is not None:
+        return _mark_export_result(
+            existing,
+            created=False,
+            source_uuid=source_uuid,
+            result_role=result_role,
         )
-        if existing:
-            return _mark_export_result(
-                existing[0],
-                created=False,
-                source_uuid=source_uuid,
-                result_role=result_role,
-            )
 
     openbis_object = utils.create_openbis_object(
         openbis_session,
@@ -2899,6 +3487,42 @@ def PdosWorkChain_export(
     )
 
 
+def Cp2kPdosWorkChain_export(
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
+    preview_overrides=None,
+    property_overrides=None,
+):
+    workchain = orm.load_node(workchain_uuid)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
+    definition = _cp2k_pdos_property_definition(
+        workchain,
+        aiida_node_id=aiida_node_id,
+        executable_ids=executable_ids,
+    )["pdos"]
+    properties = _apply_property_overrides(
+        definition["properties"], property_overrides, workchain, "pdos"
+    )
+    structure_object = structure_to_atomistic_model(
+        openbis_session, workchain.inputs.structure.uuid, uuids
+    )
+    return _create_simulation_object(
+        openbis_session,
+        experiment_id,
+        definition["object_type"],
+        properties,
+        [structure_object],
+        lambda path: _render_cp2k_pdos_preview(workchain, path),
+        "cp2k_pdos",
+        preview_override=_preview_override(preview_overrides, workchain, "pdos"),
+    )
+
+
 def VibroWorkChain_export(
     openbis_session,
     experiment_id,
@@ -2962,22 +3586,16 @@ def _cp2k_output_parameters(workchain):
     return _node_mapping(output)
 
 
-def Cp2kGeoOptWorkChain_export(
-    openbis_session,
-    experiment_id,
-    workchain_uuid,
-    uuids,
-    aiida_node_id,
+def _cp2k_geo_opt_property_definitions(
+    workchain,
+    aiida_node_id=None,
     executable_ids=None,
-    preview_overrides=None,
-    property_overrides=None,
 ):
-    workchain = orm.load_node(workchain_uuid)
-    if executable_ids is None:
-        executable_ids = _ensure_executables(openbis_session, workchain)
+    """Build geometry and optional final charge-analysis result definitions."""
     system_parameters = _node_mapping(workchain.inputs.sys_params)
     dft_parameters = get_dft_parameters_cp2k(
-        workchain.inputs.code.description, _node_mapping(workchain.inputs.dft_params)
+        workchain.inputs.code.description,
+        _node_mapping(workchain.inputs.dft_params),
     )
     output_parameters = _cp2k_output_parameters(workchain)
     motion = output_parameters.get("motion_step_info", {})
@@ -3000,7 +3618,9 @@ def Cp2kGeoOptWorkChain_export(
     if system_parameters.get("constraints"):
         properties["constraints_description"] = str(system_parameters["constraints"])
     if cell_optimization and system_parameters.get("cell_opt_constraint"):
-        properties["cell_constraints"] = str(system_parameters["cell_opt_constraint"])
+        properties["cell_constraints"] = str(
+            system_parameters["cell_opt_constraint"]
+        )
     if motion.get("max_grad_au"):
         properties["final_max_force_hartree_per_bohr"] = float(
             motion["max_grad_au"][-1]
@@ -3008,8 +3628,48 @@ def Cp2kGeoOptWorkChain_export(
     if motion.get("step"):
         properties["number_of_steps"] = int(motion["step"][-1])
 
-    properties = _apply_property_overrides(
-        properties, property_overrides, workchain, "geometry_optimization"
+    definitions = {
+        "geometry_optimization": {
+            "object_type": OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
+            "properties": properties,
+        }
+    }
+    charge_definition = _cp2k_charge_analysis_definition(
+        workchain,
+        dft_parameters,
+        output_parameters,
+        aiida_node_id=aiida_node_id,
+        executable_ids=executable_ids,
+    )
+    if charge_definition is not None:
+        definitions["charge_analysis"] = charge_definition
+    return definitions
+
+
+def Cp2kGeoOptWorkChain_export(
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
+    preview_overrides=None,
+    property_overrides=None,
+):
+    workchain = orm.load_node(workchain_uuid)
+    if executable_ids is None:
+        executable_ids = _ensure_executables(openbis_session, workchain)
+    definitions = _cp2k_geo_opt_property_definitions(
+        workchain,
+        aiida_node_id=aiida_node_id,
+        executable_ids=executable_ids,
+    )
+
+    geometry_properties = _apply_property_overrides(
+        definitions["geometry_optimization"]["properties"],
+        property_overrides,
+        workchain,
+        "geometry_optimization",
     )
     input_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
@@ -3019,7 +3679,7 @@ def Cp2kGeoOptWorkChain_export(
         openbis_session,
         experiment_id,
         OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
-        properties,
+        geometry_properties,
         [input_object],
         lambda path: _render_structure_preview(output_structure, path),
         "optimized_geometry",
@@ -3034,7 +3694,34 @@ def Cp2kGeoOptWorkChain_export(
     utils.update_openbis_object(output_object)
     geometry_object.add_children(output_object)
     utils.update_openbis_object(geometry_object)
-    return geometry_object
+
+    exported_objects = [geometry_object]
+    if "charge_analysis" in definitions:
+        charge_properties = _apply_property_overrides(
+            definitions["charge_analysis"]["properties"],
+            property_overrides,
+            workchain,
+            "charge_analysis",
+        )
+        charge_object = _create_simulation_object(
+            openbis_session,
+            experiment_id,
+            OPENBIS_SIMULATION_TYPES["Charge Analysis"],
+            charge_properties,
+            [output_object, geometry_object],
+            lambda path: _render_structure_preview(output_structure, path),
+            "charge_analysis",
+            preview_override=_preview_override(
+                preview_overrides, workchain, "charge_analysis"
+            ),
+        )
+        _attach_cp2k_charge_analysis_data(
+            openbis_session,
+            charge_object,
+            workchain,
+        )
+        exported_objects.append(charge_object)
+    return tuple(exported_objects)
 
 
 def QeBanduppyUnfoldingWorkChain_export(
@@ -3138,6 +3825,11 @@ def Cp2kScfWorkChain_export(
                 preview_overrides, workchain, "charge_analysis"
             ),
         )
+        _attach_cp2k_charge_analysis_data(
+            openbis_session,
+            charge_object,
+            workchain,
+        )
         exported_objects.append(charge_object)
 
     if "band_unfolding" in definitions:
@@ -3222,8 +3914,8 @@ def Cp2kMepWorkChain_export(
         "minimum_energy_path",
     )
     if workchain.process_label == "Cp2kReplicaWorkChain":
-        _energies, _values, start_structure, end_structure = (
-            _replica_chain_profile(workchain)
+        _energies, _values, start_structure, end_structure = _replica_chain_profile(
+            workchain
         )
     else:
         start_structure, end_structure = _neb_input_endpoints(workchain)
@@ -3249,7 +3941,7 @@ def Cp2kMepWorkChain_export(
     )
 
 
-def Cp2kStmWorkChain_export(
+def Cp2kSpmWorkChain_export(
     openbis_session,
     experiment_id,
     workchain_uuid,
@@ -3259,22 +3951,17 @@ def Cp2kStmWorkChain_export(
     preview_overrides=None,
     property_overrides=None,
 ):
+    """Export STM, orbital, or AFM results as one SPM simulation block."""
     workchain = orm.load_node(workchain_uuid)
     if executable_ids is None:
         executable_ids = _ensure_executables(openbis_session, workchain)
-    dft_parameters = get_dft_parameters_cp2k(
-        workchain.inputs.spm_code.description, _node_mapping(workchain.inputs.dft_params)
-    )
-    properties = _simulation_properties(
+    definition = _cp2k_spm_property_definition(
         workchain,
-        "STM",
-        dft_parameters,
-        aiida_node_id,
+        aiida_node_id=aiida_node_id,
         executable_ids=executable_ids,
-    )
-    properties["spm_mode"] = "STM"
+    )["spm"]
     properties = _apply_property_overrides(
-        properties, property_overrides, workchain, "stm"
+        definition["properties"], property_overrides, workchain, "spm"
     )
     structure_object = structure_to_atomistic_model(
         openbis_session, workchain.inputs.structure.uuid, uuids
@@ -3282,13 +3969,18 @@ def Cp2kStmWorkChain_export(
     return _create_simulation_object(
         openbis_session,
         experiment_id,
-        OPENBIS_SIMULATION_TYPES["SPM Simulation"],
+        definition["object_type"],
         properties,
         [structure_object],
         lambda path: _render_spm_preview(workchain, path),
-        "stm_map",
-        preview_override=_preview_override(preview_overrides, workchain, "stm"),
+        "spm",
+        preview_override=_preview_override(preview_overrides, workchain, "spm"),
     )
+
+
+# Retain the public name used by downstream notebooks while sharing the generic
+# implementation with orbital and AFM workflows.
+Cp2kStmWorkChain_export = Cp2kSpmWorkChain_export
 
 
 workchain_exporters = {
@@ -3299,8 +3991,11 @@ workchain_exporters = {
     "VibroWorkChain": VibroWorkChain_export,
     "Cp2kGeoOptWorkChain": Cp2kGeoOptWorkChain_export,
     "Cp2kScfWorkChain": Cp2kScfWorkChain_export,
+    "Cp2kPdosWorkChain": Cp2kPdosWorkChain_export,
     "QeBanduppyUnfoldingWorkChain": QeBanduppyUnfoldingWorkChain_export,
-    "Cp2kStmWorkChain": Cp2kStmWorkChain_export,
+    "Cp2kStmWorkChain": Cp2kSpmWorkChain_export,
+    "Cp2kOrbitalsWorkChain": Cp2kSpmWorkChain_export,
+    "Cp2kAfmWorkChain": Cp2kSpmWorkChain_export,
     "Cp2kReplicaWorkChain": Cp2kMepWorkChain_export,
     "Cp2kNebWorkChain": Cp2kMepWorkChain_export,
 }
@@ -3351,7 +4046,9 @@ def _result_property_definitions(workchain):
                 }
             )
             cell_dofree = (
-                _node_mapping(cell_opt.inputs.parameters).get("CELL", {}).get("cell_dofree")
+                _node_mapping(cell_opt.inputs.parameters)
+                .get("CELL", {})
+                .get("cell_dofree")
             )
             if cell_dofree:
                 properties["cell_constraints"] = str(cell_dofree)
@@ -3451,47 +4148,11 @@ def _result_property_definitions(workchain):
             }
         }
 
+    if process_label == "Cp2kPdosWorkChain":
+        return _cp2k_pdos_property_definition(workchain)
+
     if process_label == "Cp2kGeoOptWorkChain":
-        system_parameters = _node_mapping(workchain.inputs.sys_params)
-        dft_parameters = get_dft_parameters_cp2k(
-            workchain.inputs.code.description, _node_mapping(workchain.inputs.dft_params)
-        )
-        output_parameters = _cp2k_output_parameters(workchain)
-        motion = output_parameters.get("motion_step_info", {})
-        cell_optimization = workchain.label == "CP2K_CellOpt"
-        properties = _simulation_properties(
-            workchain,
-            "Geometry optimization",
-            dft_parameters,
-            None,
-        )
-        properties.update(
-            {
-                "constrained": bool(system_parameters.get("constraints")),
-                "cell_optimization": cell_optimization,
-                "final_energy_hartree": _energy_in_hartree(output_parameters),
-            }
-        )
-        if system_parameters.get("constraints"):
-            properties["constraints_description"] = str(
-                system_parameters["constraints"]
-            )
-        if cell_optimization and system_parameters.get("cell_opt_constraint"):
-            properties["cell_constraints"] = str(
-                system_parameters["cell_opt_constraint"]
-            )
-        if motion.get("max_grad_au"):
-            properties["final_max_force_hartree_per_bohr"] = float(
-                motion["max_grad_au"][-1]
-            )
-        if motion.get("step"):
-            properties["number_of_steps"] = int(motion["step"][-1])
-        return {
-            "geometry_optimization": {
-                "object_type": OPENBIS_SIMULATION_TYPES["Geometry Optimisation"],
-                "properties": properties,
-            }
-        }
+        return _cp2k_geo_opt_property_definitions(workchain)
 
     if process_label == "QeBanduppyUnfoldingWorkChain":
         return _qe_banduppy_property_definition(workchain)
@@ -3499,19 +4160,12 @@ def _result_property_definitions(workchain):
     if process_label == "Cp2kScfWorkChain":
         return _cp2k_scf_property_definitions(workchain)
 
-    if process_label == "Cp2kStmWorkChain":
-        dft_parameters = get_dft_parameters_cp2k(
-            workchain.inputs.spm_code.description,
-            _node_mapping(workchain.inputs.dft_params),
-        )
-        properties = _simulation_properties(workchain, "STM", dft_parameters, None)
-        properties["spm_mode"] = "STM"
-        return {
-            "stm": {
-                "object_type": OPENBIS_SIMULATION_TYPES["SPM Simulation"],
-                "properties": properties,
-            }
-        }
+    if process_label in {
+        "Cp2kStmWorkChain",
+        "Cp2kOrbitalsWorkChain",
+        "Cp2kAfmWorkChain",
+    }:
+        return _cp2k_spm_property_definition(workchain)
 
     if process_label in {"Cp2kReplicaWorkChain", "Cp2kNebWorkChain"}:
         return _cp2k_mep_property_definition(workchain)
@@ -3565,7 +4219,7 @@ def _preview_definitions(workchain):
             )
         return definitions
 
-    if process_label in {"PwRelaxWorkChain", "Cp2kGeoOptWorkChain"}:
+    if process_label == "PwRelaxWorkChain":
         return [
             (
                 "geometry_optimization",
@@ -3576,6 +4230,31 @@ def _preview_definitions(workchain):
                 ),
             )
         ]
+
+    if process_label == "Cp2kGeoOptWorkChain":
+        definitions = [
+            (
+                "geometry_optimization",
+                "Optimized geometry",
+                "optimized_geometry",
+                lambda path: _render_structure_preview(
+                    workchain.outputs.output_structure, path
+                ),
+            )
+        ]
+        properties = _cp2k_geo_opt_property_definitions(workchain)
+        if "charge_analysis" in properties:
+            definitions.append(
+                (
+                    "charge_analysis",
+                    "Charge analysis",
+                    "charge_analysis",
+                    lambda path: _render_structure_preview(
+                        workchain.outputs.output_structure, path
+                    ),
+                )
+            )
+        return definitions
 
     if process_label == "QeBanduppyUnfoldingWorkChain":
         return [
@@ -3619,6 +4298,16 @@ def _preview_definitions(workchain):
                 )
             )
         return definitions
+
+    if process_label == "Cp2kPdosWorkChain":
+        return [
+            (
+                "pdos",
+                "Projected density of states",
+                "cp2k_pdos",
+                lambda path: _render_cp2k_pdos_preview(workchain, path),
+            )
+        ]
 
     if process_label == "BandsWorkChain":
         try:
@@ -3690,12 +4379,21 @@ def _preview_definitions(workchain):
             )
         ]
 
-    if process_label == "Cp2kStmWorkChain":
+    if process_label in {
+        "Cp2kStmWorkChain",
+        "Cp2kOrbitalsWorkChain",
+        "Cp2kAfmWorkChain",
+    }:
+        title = {
+            "Cp2kStmWorkChain": "STM/STS map",
+            "Cp2kOrbitalsWorkChain": "Orbital/SPM map",
+            "Cp2kAfmWorkChain": "AFM map",
+        }[process_label]
         return [
             (
-                "stm",
-                "STM map",
-                "stm_map",
+                "spm",
+                title,
+                "spm",
                 lambda path: _render_spm_preview(workchain, path),
             )
         ]
@@ -3727,9 +4425,16 @@ def _exportable_workchains(workchain):
     return targets
 
 
-def render_workchain_preview_suggestions(workchain_uuid):
-    """Render all ELN preview suggestions without writing anything to openBIS."""
+def render_workchain_preview_suggestions(
+    workchain_uuid,
+    openbis_session=None,
+    experiment_id=None,
+):
+    """Prepare result reviews and identify results already present in openBIS."""
     workchain = orm.load_node(workchain_uuid)
+    check_existing = (
+        openbis_session is not None and experiment_id not in (None, "", "-1")
+    )
     suggestions = []
     with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-suggestions-") as dirname:
         directory = Path(dirname)
@@ -3737,31 +4442,55 @@ def render_workchain_preview_suggestions(workchain_uuid):
             property_definitions = _result_property_definitions(target)
             for role, title, stem, renderer in _preview_definitions(target):
                 definition = property_definitions[role]
-                path = directory / f"{target.uuid}-{stem}.png"
-                error = None
-                try:
-                    renderer(path)
-                    if not path.is_file():
-                        raise RuntimeError(
-                            f"Preview renderer did not create {path.name}."
-                        )
-                    content = path.read_bytes()
-                except Exception as exception:  # noqa: BLE001 - allow replacement in UI
-                    content = None
-                    error = str(exception)
-                suggestions.append(
-                    {
-                        "key": f"{target.uuid}:{role}",
-                        "source_uuid": str(target.uuid),
-                        "result_role": role,
-                        "title": title,
-                        "object_type": definition["object_type"],
-                        "properties": definition["properties"],
-                        "name": f"{stem}.png",
-                        "content": content,
-                        "error": error,
-                    }
+                existing_object = (
+                    find_existing_simulation_result(
+                        openbis_session,
+                        experiment_id,
+                        definition["object_type"],
+                        target.uuid,
+                    )
+                    if check_existing
+                    else None
                 )
+                existing = None
+                if existing_object is not None:
+                    existing = {
+                        "permid": str(existing_object.permId),
+                        "name": str(
+                            _openbis_property(existing_object, "name")
+                            or existing_object.permId
+                        ),
+                        "url": _openbis_eln_url(existing_object),
+                    }
+                    content = None
+                    error = None
+                else:
+                    path = directory / f"{target.uuid}-{stem}.png"
+                    error = None
+                    try:
+                        renderer(path)
+                        if not path.is_file():
+                            raise RuntimeError(
+                                f"Preview renderer did not create {path.name}."
+                            )
+                        content = path.read_bytes()
+                    except Exception as exception:  # noqa: BLE001 - allow UI replacement
+                        content = None
+                        error = str(exception)
+                suggestion = {
+                    "key": f"{target.uuid}:{role}",
+                    "source_uuid": str(target.uuid),
+                    "result_role": role,
+                    "title": title,
+                    "object_type": definition["object_type"],
+                    "properties": definition["properties"],
+                    "name": f"{stem}.png",
+                    "content": content,
+                    "error": error,
+                }
+                if check_existing:
+                    suggestion["existing"] = existing
+                suggestions.append(suggestion)
     return suggestions
 
 

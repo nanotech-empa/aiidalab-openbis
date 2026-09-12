@@ -30,6 +30,17 @@ _CREATE_NEW = "__create_new_openbis_object__"
 _DOWNLOAD_ROOT = Path(__file__).resolve().parent.parent / "temp_dataset_download"
 _DOWNLOAD_LIFETIME_SECONDS = 600
 _FUZZY_MATCH_THRESHOLD = 65
+_RESULT_ROLE_LABELS = {
+    "geometry_optimization": "Geometry optimization",
+    "energy_calculation": "Energy calculation",
+    "charge_analysis": "Charge analysis",
+    "bands": "Electronic band structure",
+    "pdos": "Projected density of states",
+    "band_unfolding": "Band unfolding",
+    "minimum_energy_path": "Minimum energy path",
+    "spm": "SPM simulation",
+    "vibrational_spectroscopy": "Vibrational spectroscopy",
+}
 _FUZZY_STOPWORDS = {
     "a",
     "an",
@@ -1299,6 +1310,13 @@ class ExportSimulationsWidget(ipw.VBox):
         self.simulation_details_vbox = SimulationDetailsWidget(
             self.openbis_session, True
         )
+        self.simulation_details_vbox.set_target_experiment(
+            self.select_experiment_widget.experiment_dropdown.value
+        )
+        self.select_experiment_widget.experiment_dropdown.observe(
+            self._selected_experiment_changed,
+            names="value",
+        )
 
         self.save_simulations_button = ipw.Button(
             tooltip="Import simulations",
@@ -1310,6 +1328,13 @@ class ExportSimulationsWidget(ipw.VBox):
         self.executable_resolution_box = ipw.VBox()
         self.executable_confirmation_message = ipw.HTML()
         self.export_message_html = ipw.HTML()
+        self.simulation_details_vbox.simulation_pk_input.observe(
+            self._clear_previous_export_feedback,
+            names="value",
+        )
+        self.simulation_details_vbox.check_simulation_button.on_click(
+            self._clear_previous_export_feedback
+        )
 
         # Increase search button icon size
         increase_search_button = ipw.HTML(
@@ -1341,6 +1366,16 @@ class ExportSimulationsWidget(ipw.VBox):
             self.save_simulations_button,
             self.export_message_html,
         ]
+
+    def _clear_previous_export_feedback(self, _change=None):
+        """Discard links and resolution prompts belonging to an earlier PK."""
+        self.export_message_html.value = ""
+        self._clear_resolution_controls()
+
+    def _selected_experiment_changed(self, change):
+        """Refresh result status when the target openBIS space changes."""
+        self._clear_previous_export_feedback()
+        self.simulation_details_vbox.set_target_experiment(change["new"])
 
     def load_simulations_details_widgets(self, change):
         used_aiida = self.used_aiida_checkbox.value
@@ -1777,9 +1812,7 @@ class ExportSimulationsWidget(ipw.VBox):
                     except aiida_utils.ExecutableResolutionError as error:
                         _popup(f"Cannot map AiiDA provenance to openBIS: {error}")
                         return
-                    except (
-                        Exception
-                    ) as error:  # noqa: BLE001 - show export errors in UI
+                    except Exception as error:  # noqa: BLE001 - show export errors in UI
                         _popup(f"Could not export the simulation: {error}")
                         return
 
@@ -1936,6 +1969,7 @@ class SimulationDetailsWidget(ipw.VBox):
         super().__init__()
         self.openbis_session = openbis_session
         self.used_aiida = used_aiida
+        self.target_experiment_id = "-1"
 
         self.select_molecules_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 18px;'>Select molecules</span>"
@@ -2025,7 +2059,7 @@ class SimulationDetailsWidget(ipw.VBox):
         self.preview_suggestions_title = ipw.HTML(
             value=(
                 "<span style='font-weight: bold; font-size: 18px;'>"
-                "ELN preview suggestions</span>"
+                "Simulation results</span>"
             )
         )
         self.preview_suggestions_status = ipw.HTML()
@@ -2141,6 +2175,9 @@ class SimulationDetailsWidget(ipw.VBox):
     def check_aiida_simulation(self, _button=None):
         """Validate a PK and prepare previews only for supported WorkChains."""
         self.simulation_check_status.value = ""
+        self._preview_entries = {}
+        self.preview_suggestions_box.children = []
+        self.preview_suggestions_status.value = ""
         self.simulations_dropdown.options = [("No checked simulation", "-1")]
         self.simulations_dropdown.value = "-1"
         pk = int(self.simulation_pk_input.value or 0)
@@ -2188,6 +2225,12 @@ class SimulationDetailsWidget(ipw.VBox):
         self.simulations_dropdown.options = [(label, workchain.pk)]
         self.simulations_dropdown.value = workchain.pk
 
+    def set_target_experiment(self, experiment_id):
+        """Set the collection used for pre-export duplicate detection."""
+        self.target_experiment_id = experiment_id
+        if self.simulations_dropdown.value != "-1":
+            self.load_aiida_preview_suggestions()
+
     def load_aiida_preview_suggestions(self, change=None):
         self._preview_entries = {}
         self.preview_suggestions_box.children = []
@@ -2195,21 +2238,60 @@ class SimulationDetailsWidget(ipw.VBox):
         if selected_simulation == "-1":
             self.preview_suggestions_status.value = ""
             return
+        if self.target_experiment_id in (None, "", "-1"):
+            self.preview_suggestions_status.value = (
+                "<p>Select an experiment to check which simulation results are "
+                "already present in openBIS.</p>"
+            )
+            return
 
-        self.preview_suggestions_status.value = "<p>Preparing preview suggestions…</p>"
+        self.preview_suggestions_status.value = "<p>Checking simulation results…</p>"
         try:
             suggestions = aiida_utils.render_workchain_preview_suggestions(
-                selected_simulation
+                selected_simulation,
+                openbis_session=self.openbis_session,
+                experiment_id=self.target_experiment_id,
             )
         except Exception as error:  # noqa: BLE001 - surface preview errors in UI
             self.preview_suggestions_status.value = (
-                "<p style='color:#b00020'>Could not prepare ELN previews: "
+                "<p style='color:#b00020'>Could not prepare simulation results: "
                 f"{html.escape(str(error))}</p>"
             )
             return
 
         cards = []
+        existing_count = 0
+        new_count = 0
         for suggestion in suggestions:
+            existing = suggestion.get("existing")
+            if existing is not None:
+                existing_count += 1
+                self._preview_entries[suggestion["key"]] = {
+                    "suggestion": suggestion,
+                    "existing": True,
+                }
+                role_label = _RESULT_ROLE_LABELS.get(
+                    suggestion["result_role"],
+                    suggestion["result_role"].replace("_", " ").capitalize(),
+                )
+                url = existing.get("url")
+                escaped_url = html.escape(str(url), quote=True)
+                link = (
+                    f" — <a href='{escaped_url}' target='_blank'>"
+                    "open in openBIS</a>"
+                    if url
+                    else f" — {html.escape(str(existing['permid']))}"
+                )
+                escaped_label = html.escape(role_label)
+                cards.append(
+                    ipw.HTML(
+                        f"<p style='color:#237804'><b>{escaped_label}</b> — "
+                        f"already present{link}</p>"
+                    )
+                )
+                continue
+
+            new_count += 1
             property_widget = SimulationPropertiesWidget(self.openbis_session)
             property_widget.load_widgets(suggestion["object_type"])
             property_widget.set_values(suggestion["properties"])
@@ -2258,6 +2340,7 @@ class SimulationDetailsWidget(ipw.VBox):
                 "suggestion": suggestion,
                 "uploader": uploader,
                 "property_widget": property_widget,
+                "existing": False,
             }
             cards.append(
                 ipw.VBox(
@@ -2280,12 +2363,19 @@ class SimulationDetailsWidget(ipw.VBox):
             )
 
         self.preview_suggestions_box.children = cards
-        self.preview_suggestions_status.value = (
-            f"<p>Prepared {len(cards)} ELN preview suggestion(s). "
-            "Review each image or drop a replacement before exporting.</p>"
-            if cards
-            else "<p>No supported simulation result previews were found.</p>"
-        )
+        if suggestions:
+            messages = []
+            if existing_count:
+                messages.append(f"{existing_count} already present")
+            if new_count:
+                messages.append(f"{new_count} new result(s) to review")
+            self.preview_suggestions_status.value = (
+                f"<p>Simulation results: {', '.join(messages)}.</p>"
+            )
+        else:
+            self.preview_suggestions_status.value = (
+                "<p>No supported simulation results were found.</p>"
+            )
 
     def preview_overrides(self):
         if not self._preview_entries:
@@ -2296,6 +2386,8 @@ class SimulationDetailsWidget(ipw.VBox):
 
         previews = {}
         for key, entry in self._preview_entries.items():
+            if entry.get("existing"):
+                continue
             uploaded = _first_uploaded_file(entry["uploader"])
             suggestion = entry["suggestion"]
             selected = uploaded or (
@@ -2319,6 +2411,7 @@ class SimulationDetailsWidget(ipw.VBox):
         return {
             key: entry["property_widget"].values(include_empty=True)
             for key, entry in self._preview_entries.items()
+            if not entry.get("existing")
         }
 
     def load_simulation_type_properties(self, change):
