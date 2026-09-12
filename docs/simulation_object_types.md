@@ -2029,6 +2029,13 @@ different user space creates a separate simulation object there. Shared
 inventory objects, including `ATOMISTIC_MODEL`, `AIIDA_NODE`, `CODE`,
 `COMPUTER`, and `EXECUTABLE`, continue to be reused globally.
 
+New `EXECUTABLE` records are placed in the dedicated **Executables**
+collection:
+
+```text
+/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/EXECUTABLE_COLLECTION
+```
+
 New `COMPUTER` records are placed according to their scope:
 
 - local Empa desktops and laptops:
