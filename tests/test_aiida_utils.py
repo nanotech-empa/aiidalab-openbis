@@ -950,9 +950,9 @@ def test_nanoribbon_export_uses_simplified_schema(
         assert geometry.props["cell_constraints"] == "x"
         assert geometry.props["final_energy_hartree"] == pytest.approx(-10.0)
         assert geometry.props["total_magnetization_bohr_magneton"] == 0.0
-        assert geometry.props[
-            "absolute_magnetization_bohr_magneton"
-        ] == pytest.approx(0.87)
+        assert geometry.props["absolute_magnetization_bohr_magneton"] == pytest.approx(
+            0.87
+        )
         assert geometry.props["aiida_node"] == "aiida-archive-permid"
         assert geometry.parents == [structures["input-structure"]]
         assert structures["optimized-structure"].parents == [geometry]
@@ -1491,8 +1491,7 @@ def make_cp2k_pdos_workchain():
             repository=FakeRepository(
                 {
                     "aiida.out": (
-                        "Fermi Energy [eV] : -2.0\n"
-                        "Fermi Energy [eV] : -1.5\n"
+                        "Fermi Energy [eV] : -2.0\nFermi Energy [eV] : -1.5\n"
                     ),
                     "aiida-ALPHA_k1-1.pdos": (
                         "# Projected DOS for atomic kind C\n"
@@ -1959,9 +1958,7 @@ def test_cp2k_geo_opt_export_adds_final_charge_analysis(
     ]
     assert geometry.parents == [structures["methane-structure"]]
     assert charge.parents == [structures["optimized-methane-structure"], geometry]
-    assert charge.props["name"].startswith(
-        "Final geometry population analysis CH4"
-    )
+    assert charge.props["name"].startswith("Final geometry population analysis CH4")
     assert charge.props["charge_analysis_method"] == "Mulliken; Hirshfeld"
     assert charge.props["aiida_node"] == "archive-permid"
     assert charge.props["executables"] == ["cp2k-executable"]
@@ -1980,7 +1977,9 @@ def test_cp2k_geo_opt_export_adds_final_charge_analysis(
 def test_cp2k_geo_opt_preview_definitions_include_charge_analysis(aiida_utils):
     workchain = make_cp2k_geo_opt_workchain()
 
-    roles = [definition[0] for definition in aiida_utils._preview_definitions(workchain)]
+    roles = [
+        definition[0] for definition in aiida_utils._preview_definitions(workchain)
+    ]
 
     assert roles == ["geometry_optimization", "charge_analysis"]
 
@@ -2344,9 +2343,7 @@ def test_stm_preview_selects_available_maps_near_plus_and_minus_half_volt(
     assert all(panel["cmap"] == "gist_heat" for panel in panels)
 
 
-def test_orbital_preview_selects_homo_and_lumo_for_every_spin(
-    monkeypatch, aiida_utils
-):
+def test_orbital_preview_selects_homo_and_lumo_for_every_spin(monkeypatch, aiida_utils):
     blocks = []
     for spin in (0, 1):
         blocks.append(
@@ -2380,9 +2377,7 @@ def test_orbital_preview_selects_homo_and_lumo_for_every_spin(
     assert all(panel["center_zero"] for panel in panels)
 
 
-def test_afm_preview_selects_plane_nearest_fifteen_angstrom(
-    monkeypatch, aiida_utils
-):
+def test_afm_preview_selects_plane_nearest_fifteen_angstrom(monkeypatch, aiida_utils):
     planes = np.arange(31 * 4, dtype=float).reshape((31, 2, 2))
     monkeypatch.setattr(
         aiida_utils,
@@ -2420,3 +2415,173 @@ def test_all_cp2k_spm_workchains_use_one_exporter(aiida_utils):
             aiida_utils.workchain_exporters[process_label]
             is aiida_utils.Cp2kSpmWorkChain_export
         )
+
+
+def _configure_atomistic_model_export(monkeypatch, aiida_utils, structure, session):
+    created = []
+    updated = []
+
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _uuid: structure)
+    monkeypatch.setattr(
+        aiida_utils,
+        "geo_to_png",
+        lambda _atoms: "/tmp/openbis-origin-preview.png",
+    )
+    monkeypatch.setattr(aiida_utils, "encode", lambda _atoms: "{}")
+    monkeypatch.setattr(aiida_utils.os, "remove", lambda _path: None)
+    monkeypatch.setattr(aiida_utils.utils, "write_json", lambda *_args: None)
+    monkeypatch.setattr(
+        aiida_utils.utils, "create_openbis_dataset", lambda *_args, **_kwargs: None
+    )
+
+    def create_openbis_object(_session, **kwargs):
+        obj = FakeOpenbisObject(kwargs["type"], kwargs["props"])
+        obj.parents = list(kwargs.get("parents") or [])
+        created.append(obj)
+        session.objects.setdefault(kwargs["type"], []).append(obj)
+        return obj
+
+    monkeypatch.setattr(
+        aiida_utils.utils, "create_openbis_object", create_openbis_object
+    )
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "update_openbis_object",
+        lambda obj: updated.append(obj),
+    )
+    return created, updated
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+def test_atomistic_model_export_links_molecule_origin(monkeypatch, aiida_utils):
+    molecule = FakeOpenbisObject("MOLECULE", {"name": "methane"})
+    molecule.permId = "molecule-permid"
+    session = FakeSession({"MOLECULE": [molecule]})
+    structure = aiida_utils.orm.StructureData(
+        ase=aiida_utils.Atoms("CH4", cell=[10, 10, 10], pbc=False)
+    )
+    structure.base.extras.set(
+        "eln",
+        {
+            "eln_type": "openbis",
+            "eln_instance": "https://openbis.example/",
+            "sample_uuid": molecule.permId,
+            "data_type": "MOLECULE",
+            "representation": "smiles",
+        },
+    )
+    created, _updated = _configure_atomistic_model_export(
+        monkeypatch, aiida_utils, structure, session
+    )
+
+    result = aiida_utils.structure_to_atomistic_model(
+        session, structure.uuid, {"structure_uuids": []}
+    )
+
+    assert result is created[0]
+    assert result.parents == [molecule]
+    assert result.props["wfms_uuid"] == structure.uuid
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+def test_manual_atomistic_model_is_reused_and_receives_first_aiida_uuid(
+    monkeypatch, aiida_utils
+):
+    source = FakeOpenbisObject("ATOMISTIC_MODEL", {"name": "Au", "wfms_uuid": ""})
+    source.permId = "atomistic-model-permid"
+    session = FakeSession({"ATOMISTIC_MODEL": [source]})
+    atoms = aiida_utils.Atoms("Au", cell=[5, 5, 5], pbc=True)
+    structure = aiida_utils.orm.StructureData(ase=atoms)
+    structure.base.extras.set(
+        "eln",
+        {
+            "eln_type": "openbis",
+            "eln_instance": "https://openbis.example",
+            "sample_uuid": source.permId,
+            "data_type": "ATOMISTIC_MODEL",
+            "representation": "file",
+            "structure_fingerprint": aiida_utils._structure_fingerprint(atoms),
+        },
+    )
+    created, updated = _configure_atomistic_model_export(
+        monkeypatch, aiida_utils, structure, session
+    )
+
+    result = aiida_utils.structure_to_atomistic_model(
+        session, structure.uuid, {"structure_uuids": []}
+    )
+
+    assert result is source
+    assert source.props["wfms_uuid"] == structure.uuid
+    assert updated == [source]
+    assert created == []
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+def test_modified_manual_atomistic_model_creates_distinct_object(
+    monkeypatch, aiida_utils
+):
+    source = FakeOpenbisObject("ATOMISTIC_MODEL", {"name": "Au", "wfms_uuid": ""})
+    source.permId = "atomistic-model-permid"
+    session = FakeSession({"ATOMISTIC_MODEL": [source]})
+    atoms = aiida_utils.Atoms("Au", cell=[5, 5, 5], pbc=True)
+    structure = aiida_utils.orm.StructureData(ase=atoms)
+    structure.base.extras.set(
+        "eln",
+        {
+            "eln_type": "openbis",
+            "eln_instance": "https://openbis.example",
+            "sample_uuid": source.permId,
+            "data_type": "ATOMISTIC_MODEL",
+            "representation": "file",
+            "structure_fingerprint": "fingerprint-before-editing",
+        },
+    )
+    created, updated = _configure_atomistic_model_export(
+        monkeypatch, aiida_utils, structure, session
+    )
+
+    result = aiida_utils.structure_to_atomistic_model(
+        session, structure.uuid, {"structure_uuids": []}
+    )
+
+    assert result is created[0]
+    assert result is not source
+    assert source.props["wfms_uuid"] == ""
+    assert updated == []
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+def test_atomistic_model_conflicting_uuid_is_never_overwritten(
+    monkeypatch, aiida_utils
+):
+    source = FakeOpenbisObject(
+        "ATOMISTIC_MODEL", {"name": "Au", "wfms_uuid": "different-uuid"}
+    )
+    source.permId = "atomistic-model-permid"
+    session = FakeSession({"ATOMISTIC_MODEL": [source]})
+    atoms = aiida_utils.Atoms("Au", cell=[5, 5, 5], pbc=True)
+    structure = aiida_utils.orm.StructureData(ase=atoms)
+    structure.base.extras.set(
+        "eln",
+        {
+            "eln_type": "openbis",
+            "eln_instance": "https://openbis.example",
+            "sample_uuid": source.permId,
+            "data_type": "ATOMISTIC_MODEL",
+            "representation": "file",
+            "structure_fingerprint": aiida_utils._structure_fingerprint(atoms),
+        },
+    )
+    created, updated = _configure_atomistic_model_export(
+        monkeypatch, aiida_utils, structure, session
+    )
+
+    with pytest.raises(ValueError, match="different AiiDA StructureData UUID"):
+        aiida_utils.structure_to_atomistic_model(
+            session, structure.uuid, {"structure_uuids": []}
+        )
+
+    assert source.props["wfms_uuid"] == "different-uuid"
+    assert created == []
+    assert updated == []
