@@ -2437,6 +2437,7 @@ def _configure_atomistic_model_export(monkeypatch, aiida_utils, structure, sessi
     def create_openbis_object(_session, **kwargs):
         obj = FakeOpenbisObject(kwargs["type"], kwargs["props"])
         obj.parents = list(kwargs.get("parents") or [])
+        obj.create_kwargs = kwargs
         created.append(obj)
         session.objects.setdefault(kwargs["type"], []).append(obj)
         return obj
@@ -2450,6 +2451,24 @@ def _configure_atomistic_model_export(monkeypatch, aiida_utils, structure, sessi
         lambda obj: updated.append(obj),
     )
     return created, updated
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+def test_new_atomistic_model_omits_empty_parents_argument(monkeypatch, aiida_utils):
+    session = FakeSession()
+    structure = aiida_utils.orm.StructureData(
+        ase=aiida_utils.Atoms("CH4", cell=[10, 10, 10], pbc=False)
+    )
+    created, _updated = _configure_atomistic_model_export(
+        monkeypatch, aiida_utils, structure, session
+    )
+
+    result = aiida_utils.structure_to_atomistic_model(
+        session, structure.uuid, {"structure_uuids": []}
+    )
+
+    assert result is created[0]
+    assert "parents" not in result.create_kwargs
 
 
 @pytest.mark.usefixtures("aiida_profile_clean")

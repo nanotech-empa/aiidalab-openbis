@@ -884,13 +884,16 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
             bool(i) for i in dimensionality[1]
         ]
 
-    parents = molecules or None
+    create_kwargs = {
+        "type": atom_model_type,
+        "props": dictionary,
+        "collection": OPENBIS_COLLECTIONS_PATHS["Atomistic Model"],
+    }
+    if molecules:
+        create_kwargs["parents"] = molecules
     obobject = utils.create_openbis_object(
         openbis_session,
-        type=atom_model_type,
-        props=dictionary,
-        collection=OPENBIS_COLLECTIONS_PATHS["Atomistic Model"],
-        parents=parents,
+        **create_kwargs,
     )
 
     geo_png_filename = geo_to_png(ase_geo)
