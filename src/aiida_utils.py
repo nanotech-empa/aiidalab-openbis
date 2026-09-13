@@ -21,6 +21,7 @@ from ase import Atoms
 from ase.io.jsonio import encode
 from ase.units import Bohr, Hartree
 
+from . import export_recovery as recovery
 from . import utils
 
 OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
@@ -843,10 +844,15 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
     atom_models_obis = _objects_by_property(
         openbis_session, atom_model_type, "WFMS_UUID", structure.uuid
     )
+    if len(atom_models_obis) > 1:
+        raise recovery.ExportVerificationError(
+            f"Multiple atomistic models reference {structure.uuid}."
+        )
     if atom_models_obis:
         atomistic_model = atom_models_obis[0]
         for linked_molecule in molecules:
             _ensure_openbis_parent(atomistic_model, linked_molecule)
+        _ensure_structure_datasets(openbis_session, atomistic_model, structure)
         return atomistic_model
 
     if source_atomistic_model is not None:
@@ -866,6 +872,9 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
                 utils.update_openbis_object(source_atomistic_model)
             for linked_molecule in molecules:
                 _ensure_openbis_parent(source_atomistic_model, linked_molecule)
+            _ensure_structure_datasets(
+                openbis_session, source_atomistic_model, structure
+            )
             return source_atomistic_model
         # The imported geometry was edited: preserve the source object and create a
         # distinct atomistic model for the actual workflow input.
@@ -896,25 +905,42 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
         **create_kwargs,
     )
 
-    geo_png_filename = geo_to_png(ase_geo)
-
-    utils.create_openbis_dataset(
-        openbis_session,
-        type="ELN_PREVIEW",
-        sample=obobject,
-        files=[geo_png_filename],
-    )
-
-    os.remove(geo_png_filename)
-
-    structure_json = encode(ase_geo)
-    utils.write_json(structure_json, "structure_json.json")
-    utils.create_openbis_dataset(
-        openbis_session, type="RAW_DATA", sample=obobject, files=["structure_json.json"]
-    )
-    os.remove("structure_json.json")
-
+    _ensure_structure_datasets(openbis_session, obobject, structure)
     return obobject
+
+
+def _has_structure_data(atomistic_model):
+    return any(
+        Path(name).suffix.lower()
+        in {".json", ".xyz", ".extxyz", ".cif", ".pdb", ".vasp"}
+        for _, name in recovery.dataset_files(atomistic_model, "RAW_DATA")
+    )
+
+
+def _ensure_structure_datasets(openbis_session, atomistic_model, structure):
+    """Complete structure attachments without replacing an existing representation."""
+    _upload_preview_content(
+        openbis_session,
+        atomistic_model,
+        lambda path: _render_structure_preview(structure, path),
+        "ase_geo",
+    )
+
+    def upload_structure():
+        with tempfile.TemporaryDirectory(
+            prefix="aiidalab-openbis-structure-"
+        ) as dirname:
+            path = Path(dirname) / "structure_json.json"
+            # ASE encode already returns JSON; serializing it again produces a
+            # JSON string that the structure importer cannot read as an Atoms.
+            path.write_text(encode(structure.get_ase()), encoding="utf-8")
+            utils.create_openbis_dataset(
+                openbis_session, type="RAW_DATA", sample=atomistic_model, files=[path]
+            )
+
+    recovery.ensure_upload(
+        lambda: _has_structure_data(atomistic_model), upload_structure
+    )
 
 
 def create_obis_object(obtype=None, parameters=None):
@@ -932,7 +958,11 @@ def create_and_export_AiiDA_archive(openbis_session, uuid):
     """Create one shared AiiDA archive object, or reuse the existing one."""
     aiida_node_type = OPENBIS_OBJECT_TYPES["AiiDA Node"]
     existing = _objects_by_property(openbis_session, aiida_node_type, "WFMS_UUID", uuid)
-    if existing:
+    if len(existing) > 1:
+        raise recovery.ExportVerificationError(
+            f"Multiple AIIDA_NODE objects reference {uuid}."
+        )
+    if existing and recovery.has_archive(existing[0]):
         return existing[0]
 
     with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-archive-") as dirname:
@@ -954,21 +984,28 @@ def create_and_export_AiiDA_archive(openbis_session, uuid):
                 f"Could not create the AiiDA archive for {uuid}: {result.stderr.strip()}"
             )
 
-        openbis_object = utils.create_openbis_object(
-            openbis_session,
-            type=aiida_node_type,
-            props={
-                "wfms_uuid": str(uuid),
-                "aiida_root_uuids": [str(uuid)],
-                "comments": "",
-            },
-            collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+        openbis_object = (
+            existing[0]
+            if existing
+            else utils.create_openbis_object(
+                openbis_session,
+                type=aiida_node_type,
+                props={
+                    "wfms_uuid": str(uuid),
+                    "aiida_root_uuids": [str(uuid)],
+                    "comments": "",
+                },
+                collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+            )
         )
-        utils.create_openbis_dataset(
-            openbis_session,
-            type="RAW_DATA",
-            sample=openbis_object,
-            files=[output_file],
+        recovery.ensure_upload(
+            lambda: recovery.has_archive(openbis_object),
+            lambda: utils.create_openbis_dataset(
+                openbis_session,
+                type="RAW_DATA",
+                sample=openbis_object,
+                files=[output_file],
+            ),
         )
         return openbis_object
 
@@ -2301,19 +2338,22 @@ def _cp2k_charge_analysis_files(workchain, directory):
 
 
 def _attach_cp2k_charge_analysis_data(openbis_session, charge_object, workchain):
-    """Attach compact charge tables only when a charge object was newly created."""
-    if not getattr(charge_object, "_aiidalab_created", False):
-        return
+    """Attach only missing charge tables, including after an interrupted export."""
     with tempfile.TemporaryDirectory(
         prefix="aiidalab-openbis-charge-analysis-"
     ) as dirname:
         files = _cp2k_charge_analysis_files(workchain, Path(dirname))
-        if files:
-            utils.create_openbis_dataset(
-                openbis_session,
-                type="RAW_DATA",
-                sample=charge_object,
-                files=files,
+        names = [path.name for path in files]
+        missing = recovery.missing_files(charge_object, "RAW_DATA", names)
+        if missing:
+            recovery.ensure_upload(
+                lambda: not recovery.missing_files(charge_object, "RAW_DATA", names),
+                lambda: utils.create_openbis_dataset(
+                    openbis_session,
+                    type="RAW_DATA",
+                    sample=charge_object,
+                    files=[path for path in files if path.name in missing],
+                ),
             )
 
 
@@ -2860,6 +2900,18 @@ def _upload_preview(openbis_session, openbis_object, renderer, stem):
 
 
 def _upload_preview_content(
+    openbis_session, openbis_object, renderer, stem, preview_override=None
+):
+    """Complete a missing preview without overwriting one already uploaded."""
+    return recovery.ensure_upload(
+        lambda: recovery.has_preview(openbis_object),
+        lambda: _write_preview_content(
+            openbis_session, openbis_object, renderer, stem, preview_override
+        ),
+    )
+
+
+def _write_preview_content(
     openbis_session, openbis_object, renderer, stem, preview_override=None
 ):
     """Upload either the generated suggestion or a user-selected replacement."""
@@ -3925,7 +3977,9 @@ def _mark_export_result(
 
 def _collection_space_code(openbis_session, collection_id):
     # Accept either the collection identifier used by the API or its UI permID.
-    collection_id = str(collection_id)
+    # pyBIS Sample.collection returns an Experiment; str(Experiment) contains
+    # only its code, so retain the full identifier when receiving an entity.
+    collection_id = str(getattr(collection_id, "identifier", collection_id))
     if collection_id.startswith("/"):
         return collection_id.strip("/").split("/", 1)[0]
 
@@ -3959,6 +4013,10 @@ def find_existing_simulation_result(
         )
         or []
     )
+    if len(existing) > 1:
+        raise recovery.ExportVerificationError(
+            f"Multiple {object_type} results reference {source_uuid} in {target_space}."
+        )
     return existing[0] if existing else None
 
 
@@ -3982,6 +4040,16 @@ def _create_simulation_object(
         source_uuid,
     )
     if existing is not None:
+        for parent in parents:
+            _ensure_openbis_parent(existing, parent)
+        # Only repair absent references, not previously reviewed properties.
+        for key in ("aiida_node", "executables"):
+            if not _openbis_property(existing, key) and properties.get(key):
+                existing.props[key] = properties[key]
+                utils.update_openbis_object(existing)
+        _upload_preview_content(
+            openbis_session, existing, renderer, preview_stem, preview_override
+        )
         return _mark_export_result(
             existing,
             created=False,
@@ -5313,6 +5381,8 @@ def render_workchain_preview_suggestions(
     experiment_id=None,
 ):
     """Prepare result reviews and identify results already present in openBIS."""
+    from .export_status import inspect_result
+
     workchain = orm.load_node(workchain_uuid)
     check_existing = openbis_session is not None and experiment_id not in (
         None,
@@ -5337,7 +5407,22 @@ def render_workchain_preview_suggestions(
                     else None
                 )
                 existing = None
+                checks = []
+                needs_preview = False
                 if existing_object is not None:
+                    report = inspect_result(
+                        openbis_session,
+                        target,
+                        role,
+                        existing_object,
+                        property_definitions,
+                    )
+                    checks = report.checks
+                    needs_preview = any(
+                        check.key == f"{target.uuid}:{role}/preview"
+                        and check.state == "missing"
+                        for check in checks
+                    )
                     existing = {
                         "permid": str(existing_object.permId),
                         "name": str(
@@ -5346,6 +5431,7 @@ def render_workchain_preview_suggestions(
                         ),
                         "url": _openbis_eln_url(existing_object),
                     }
+                if existing_object is not None and not needs_preview:
                     content = None
                     error = None
                 else:
@@ -5375,6 +5461,8 @@ def render_workchain_preview_suggestions(
                 }
                 if check_existing:
                     suggestion["existing"] = existing
+                    suggestion["export_checks"] = checks
+                    suggestion["needs_preview"] = needs_preview
                 suggestions.append(suggestion)
     return suggestions
 
@@ -5471,5 +5559,23 @@ def export_workchain(
             exported_objects.extend(normalize_exported_objects(export))
 
     exported_objects = tuple(exported_objects)
-    record_openbis_exports(openbis_session, exported_objects, collection=experiment_id)
+    from .export_status import inspect_workchain_export
+
+    report = inspect_workchain_export(openbis_session, experiment_id, workchain_uuid)
+    if report.unknown:
+        raise recovery.ExportVerificationError(
+            "The export status could not be verified."
+        )
+    if not report.complete:
+        raise recovery.ExportIncompleteError(
+            "Some expected export components are still missing."
+        )
+    try:
+        record_openbis_exports(
+            openbis_session, exported_objects, collection=experiment_id
+        )
+    except Exception as error:
+        raise recovery.LocalExportMetadataError(
+            "The remote export is complete, but local openBIS reference extras could not be updated."
+        ) from error
     return exported_objects

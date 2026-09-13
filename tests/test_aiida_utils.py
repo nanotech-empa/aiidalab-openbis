@@ -27,12 +27,32 @@ class FakeOpenbisObject:
         self.props = dict(props or {})
         self.parents = []
         self.children = []
+        self.datasets = []
+
+    def get_datasets(self):
+        return list(self.datasets)
+
+    def get_parents(self):
+        return list(self.parents)
+
+    def get_children(self):
+        return list(self.children)
 
     def add_parents(self, parent):
         self.parents.append(parent)
 
     def add_children(self, child):
         self.children.append(child)
+
+
+def publish_dataset(_session=None, *, type, sample, files, **_kwargs):
+    dataset = SimpleNamespace(
+        type=type,
+        permId=f"dataset-{len(sample.datasets)}",
+        file_list=[Path(path).name for path in files],
+    )
+    sample.datasets.append(dataset)
+    return dataset
 
 
 class FakeSession:
@@ -279,7 +299,10 @@ def configure_export_mocks(monkeypatch, aiida_utils, workchain):
     monkeypatch.setattr(
         aiida_utils,
         "_upload_preview",
-        lambda _session, obj, _renderer, stem: previews.append((obj, stem)),
+        lambda _session, obj, _renderer, stem: (
+            previews.append((obj, stem)),
+            publish_dataset(type="ELN_PREVIEW", sample=obj, files=[stem + ".png"]),
+        ),
     )
     return created_objects, previews, structures, session
 
@@ -811,7 +834,7 @@ def test_generated_archive_records_canonical_and_all_root_uuids(
 ):
     created = []
     datasets = []
-    aiida_node = SimpleNamespace(permId="aiida-node-permid")
+    aiida_node = FakeOpenbisObject("AIIDA_NODE")
 
     monkeypatch.setattr(aiida_utils, "_objects_by_property", lambda *_args: [])
 
@@ -828,7 +851,10 @@ def test_generated_archive_records_canonical_and_all_root_uuids(
     monkeypatch.setattr(
         aiida_utils.utils,
         "create_openbis_dataset",
-        lambda session, **kwargs: datasets.append((session, kwargs)),
+        lambda session, **kwargs: (
+            datasets.append((session, kwargs)),
+            publish_dataset(session, **kwargs),
+        ),
     )
 
     result = aiida_utils.create_and_export_AiiDA_archive(
@@ -885,6 +911,14 @@ def test_export_workchain_passes_preflight_executables_to_exporter(
     monkeypatch.setattr(aiida_utils, "_run_exporter", run_exporter)
     monkeypatch.setattr(
         aiida_utils, "record_openbis_exports", lambda *_args, **_kwargs: None
+    )
+    from src import export_status
+    from src.export_recovery import ExportCheck, ExportReport
+
+    monkeypatch.setattr(
+        export_status,
+        "inspect_workchain_export",
+        lambda *_args: ExportReport([ExportCheck("dispatch", "Dispatch", "complete")]),
     )
 
     result = aiida_utils.export_workchain(
@@ -978,6 +1012,7 @@ def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils)
         },
     )
     existing.collection = "/SPACE/PROJECT/COLLECTION_A"
+    publish_dataset(type="ELN_PREVIEW", sample=existing, files=["pdos.png"])
     session = FakeSession({"DOS": [existing]})
     rendered = []
     created = []
@@ -993,7 +1028,10 @@ def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils)
     monkeypatch.setattr(
         aiida_utils,
         "_upload_preview",
-        lambda *_args: rendered.append(True),
+        lambda _session, obj, _renderer, stem: (
+            rendered.append(True),
+            publish_dataset(type="ELN_PREVIEW", sample=obj, files=[stem + ".png"]),
+        ),
     )
     properties = {
         "name": "PDOS",
@@ -1035,6 +1073,7 @@ def test_simulation_identity_resolves_collection_permid_to_space(aiida_utils):
         },
     )
     queried_spaces = []
+    publish_dataset(type="ELN_PREVIEW", sample=existing, files=["stm.png"])
 
     class PermidCollectionSession:
         def get_collection(self, collection_id):
@@ -1146,7 +1185,7 @@ def test_upload_preview_content_uses_user_replacement(
         uploaded.append((kwargs["type"], path.suffix, path.read_bytes()))
 
     monkeypatch.setattr(aiida_utils.utils, "create_openbis_dataset", create_dataset)
-    aiida_utils._upload_preview_content(
+    aiida_utils._write_preview_content(
         object(),
         object(),
         lambda _path: pytest.fail("renderer should not run for a replacement"),
@@ -1171,7 +1210,7 @@ def test_upload_preview_content_resamples_with_preserved_aspect_ratio(
         uploaded.append(path.read_bytes())
 
     monkeypatch.setattr(aiida_utils.utils, "create_openbis_dataset", create_dataset)
-    aiida_utils._upload_preview_content(
+    aiida_utils._write_preview_content(
         object(),
         object(),
         lambda _path: pytest.fail("renderer should not run for a replacement"),
@@ -1239,6 +1278,7 @@ def test_preview_suggestions_skip_rendering_existing_results(
     )
     existing.collection = "/SPACE/PROJECT/OLD_COLLECTION"
     existing.get_eln_url = lambda: "https://openbis.example/existing"
+    publish_dataset(type="ELN_PREVIEW", sample=existing, files=["pdos.png"])
     session = FakeSession({"DOS": [existing]})
 
     monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _uuid: root)
@@ -1885,6 +1925,7 @@ def test_cp2k_scf_export_links_charge_to_structure_and_energy(monkeypatch, aiida
                 {Path(path).name: Path(path).read_bytes() for path in kwargs["files"]},
             )
         )
+        publish_dataset(_session, **kwargs)
 
     monkeypatch.setattr(aiida_utils.utils, "create_openbis_dataset", create_dataset)
 
@@ -1940,6 +1981,7 @@ def test_cp2k_geo_opt_export_adds_final_charge_analysis(
                 {Path(path).name: Path(path).read_text() for path in kwargs["files"]},
             )
         )
+        publish_dataset(_session, **kwargs)
 
     monkeypatch.setattr(aiida_utils.utils, "create_openbis_dataset", create_dataset)
 
@@ -2420,6 +2462,9 @@ def test_all_cp2k_spm_workchains_use_one_exporter(aiida_utils):
 def _configure_atomistic_model_export(monkeypatch, aiida_utils, structure, session):
     created = []
     updated = []
+    # This fixture isolates provenance behavior; attachment recovery has its own
+    # stateful tests, including an actual ASE JSON round-trip.
+    monkeypatch.setattr(aiida_utils, "_ensure_structure_datasets", lambda *_args: None)
 
     monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _uuid: structure)
     monkeypatch.setattr(

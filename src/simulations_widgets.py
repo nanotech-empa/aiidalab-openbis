@@ -17,7 +17,14 @@ import pandas as pd
 from aiida import orm
 from IPython.display import Javascript, display
 
-from . import aiida_utils, simulation_schema, utils, widgets
+from . import (
+    aiida_utils,
+    export_recovery,
+    export_status,
+    simulation_schema,
+    utils,
+    widgets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +138,7 @@ def _declared_archive_root_uuids(aiida_node_object):
     workflow_uuid = aiida_utils._openbis_property(aiida_node_object, "wfms_uuid")
     if workflow_uuid:
         roots.append(str(workflow_uuid))
-    root_uuids = aiida_utils._openbis_property(
-        aiida_node_object, "aiida_root_uuids"
-    )
+    root_uuids = aiida_utils._openbis_property(aiida_node_object, "aiida_root_uuids")
     if isinstance(root_uuids, str):
         roots.append(root_uuids)
     elif root_uuids:
@@ -644,8 +649,7 @@ class ImportSimulationsWidget(ipw.VBox):
         )
         score_label = f" [{match_score}% match]" if match_score is not None else ""
         return (
-            f"{name} - {type_code} ({simulation.permId}) "
-            f"[{availability}]{score_label}"
+            f"{name} - {type_code} ({simulation.permId}) [{availability}]{score_label}"
         )
 
     @classmethod
@@ -714,9 +718,7 @@ class ImportSimulationsWidget(ipw.VBox):
     def _simulation_dependencies(self, selected_simulations):
         """Return selected simulations plus archive-bearing scientific ancestors."""
         simulation_types = set(SIMULATION_TYPES.values())
-        traversable_types = simulation_types | {
-            OPENBIS_OBJECT_TYPES["Atomistic Model"]
-        }
+        traversable_types = simulation_types | {OPENBIS_OBJECT_TYPES["Atomistic Model"]}
         ordered = []
         visited = set()
 
@@ -725,9 +727,7 @@ class ImportSimulationsWidget(ipw.VBox):
             if permid in visited:
                 return
             visited.add(permid)
-            type_code = ImportSimulationsWidget._simulation_type_code(
-                openbis_object
-            )
+            type_code = ImportSimulationsWidget._simulation_type_code(openbis_object)
             if type_code not in traversable_types:
                 return
 
@@ -901,9 +901,7 @@ class ImportSimulationsWidget(ipw.VBox):
                 root_items.append(f"<li>{label} - {uuid}</li>")
         return (
             f"Imported AiiDA archive for {simulation_names}. "
-            f"Root processes ({len(workchains)}):<ul>"
-            + "".join(root_items)
-            + "</ul>"
+            f"Root processes ({len(workchains)}):<ul>" + "".join(root_items) + "</ul>"
         )
 
     def import_aiida_nodes(self, b):
@@ -1342,6 +1340,14 @@ class ExportSimulationsWidget(ipw.VBox):
         self.executable_resolution_box = ipw.VBox()
         self.executable_confirmation_message = ipw.HTML()
         self.export_message_html = ipw.HTML()
+        self.export_status_html = ipw.HTML()
+        self.retry_export_button = ipw.Button(
+            description="Retry incomplete steps",
+            icon="refresh",
+            layout=ipw.Layout(display="none", width="240px"),
+        )
+        self.retry_export_button.on_click(self.export_simulation_to_openbis)
+        self._exporting = False
         self.simulation_details_vbox.simulation_pk_input.observe(
             self._clear_previous_export_feedback,
             names="value",
@@ -1378,12 +1384,17 @@ class ExportSimulationsWidget(ipw.VBox):
             self.executable_resolution_box,
             self.executable_confirmation_message,
             self.save_simulations_button,
+            self.export_status_html,
+            self.retry_export_button,
             self.export_message_html,
         ]
 
     def _clear_previous_export_feedback(self, _change=None):
         """Discard links and resolution prompts belonging to an earlier PK."""
         self.export_message_html.value = ""
+        if hasattr(self, "export_status_html"):
+            self.export_status_html.value = ""
+            self.retry_export_button.layout.display = "none"
         self._clear_resolution_controls()
 
     def _selected_experiment_changed(self, change):
@@ -1561,9 +1572,9 @@ class ExportSimulationsWidget(ipw.VBox):
         if selected == _CREATE_NEW:
             name = pending["name"].value.strip()
             if not name:
-                pending["status"].value = (
-                    "<p style='color:#b00020'>Name is required.</p>"
-                )
+                pending[
+                    "status"
+                ].value = "<p style='color:#b00020'>Name is required.</p>"
                 return False
             exact_name_matches = list(
                 self.openbis_session.get_objects(
@@ -1604,7 +1615,9 @@ class ExportSimulationsWidget(ipw.VBox):
             else:
                 location = pending["location"].value
                 if not location:
-                    pending["status"].value = (
+                    pending[
+                        "status"
+                    ].value = (
                         "<p style='color:#b00020'>A computer location is required.</p>"
                     )
                     return False
@@ -1680,9 +1693,9 @@ class ExportSimulationsWidget(ipw.VBox):
             if selector.value == _CREATE_NEW:
                 create_missing = True
             else:
-                self._provenance_overrides["Executable"][
-                    aiida_code_uuid
-                ] = selector.value
+                self._provenance_overrides["Executable"][aiida_code_uuid] = (
+                    selector.value
+                )
         return True, create_missing
 
     def _clear_resolution_controls(self):
@@ -1740,6 +1753,59 @@ class ExportSimulationsWidget(ipw.VBox):
             return aiida_node
 
     def export_simulation_to_openbis(self, b):
+        """Keep controls locked until export and verification have both finished."""
+        if getattr(self, "_exporting", False):
+            return
+        self._exporting = True
+        controls = [
+            getattr(self, name, None)
+            for name in ("save_simulations_button", "retry_export_button")
+        ]
+        for control in controls:
+            if control is not None:
+                control.disabled = True
+        try:
+            ExportSimulationsWidget._export_simulation_to_openbis(self, b)
+        finally:
+            self._exporting = False
+            for control in controls:
+                if control is not None:
+                    control.disabled = False
+
+    def _show_export_report(self, experiment_id, workchain_uuid, error=None):
+        report = export_status.inspect_workchain_export(
+            self.openbis_session, experiment_id, workchain_uuid
+        )
+        if (
+            report.complete
+            and error is not None
+            and not isinstance(error, export_recovery.LocalExportMetadataError)
+        ):
+            report.checks.append(
+                export_recovery.ExportCheck(
+                    "last-operation",
+                    "Last export operation",
+                    "unknown",
+                    "The files are present, but the failed operation still needs verification.",
+                )
+            )
+        self.export_status_html.value = export_recovery.report_html(
+            report, attempted=True, error=error
+        )
+        pending = not report.complete or isinstance(
+            error, export_recovery.LocalExportMetadataError
+        )
+        self.retry_export_button.layout.display = "" if pending else "none"
+        self.retry_export_button.description = (
+            "Verify export and retry"
+            if report.unknown
+            else "Retry local metadata update"
+            if isinstance(error, export_recovery.LocalExportMetadataError)
+            else "Retry incomplete steps"
+        )
+        return report
+
+    def _export_simulation_to_openbis(self, b):
         selected_experiment_id = self.select_experiment_widget.experiment_dropdown.value
         if selected_experiment_id in (None, "", "-1"):
             _popup("Select an experiment before exporting.")
@@ -1808,6 +1874,7 @@ class ExportSimulationsWidget(ipw.VBox):
                         property_overrides = (
                             self.simulation_details_vbox.property_overrides()
                         )
+                        self.export_status_html.value = "<p role='status'>Export in progress — existing data will be reused.</p>"
                         exported = aiida_utils.export_workchain(
                             self.openbis_session,
                             selected_experiment_id,
@@ -1827,25 +1894,37 @@ class ExportSimulationsWidget(ipw.VBox):
                         _popup(f"Cannot map AiiDA provenance to openBIS: {error}")
                         return
                     except Exception as error:  # noqa: BLE001 - show export errors in UI
-                        _popup(f"Could not export the simulation: {error}")
+                        ExportSimulationsWidget._show_export_report(
+                            self, selected_experiment_id, selected_simulation_id, error
+                        )
                         return
 
                     self._clear_resolution_controls()
                     exported_objects = aiida_utils.normalize_exported_objects(exported)
-                    for exported_object in exported_objects:
-                        if not getattr(exported_object, "_aiidalab_created", True):
-                            continue
-                        first_atom_model = utils.find_first_atomistic_model(
-                            self.openbis_session,
-                            exported_object,
-                            OPENBIS_OBJECT_TYPES["Atomistic Model"],
+                    try:
+                        for exported_object in exported_objects:
+                            first_atom_model = utils.find_first_atomistic_model(
+                                self.openbis_session,
+                                exported_object,
+                                OPENBIS_OBJECT_TYPES["Atomistic Model"],
+                            )
+                            if (
+                                first_atom_model is not None
+                                and len(first_atom_model.parents) == 0
+                            ):
+                                first_atom_model.parents = atom_model_parents
+                                utils.update_openbis_object(first_atom_model)
+                    except Exception as error:  # noqa: BLE001 - persist a failed relationship update
+                        ExportSimulationsWidget._show_export_report(
+                            self, selected_experiment_id, selected_simulation_id, error
                         )
-                        if (
-                            first_atom_model is not None
-                            and len(first_atom_model.parents) == 0
-                        ):
-                            first_atom_model.parents = atom_model_parents
-                            utils.update_openbis_object(first_atom_model)
+                        return
+
+                    report = ExportSimulationsWidget._show_export_report(
+                        self, selected_experiment_id, selected_simulation_id
+                    )
+                    if not report.complete:
+                        return
 
                     links = []
                     for exported_object in exported_objects:
@@ -1918,9 +1997,7 @@ class ExportSimulationsWidget(ipw.VBox):
                     return
 
                 try:
-                    simulation_props = (
-                        self.simulation_details_vbox.simulation_properties_widget.values()
-                    )
+                    simulation_props = self.simulation_details_vbox.simulation_properties_widget.values()
                     selected_executables = list(
                         self.simulation_details_vbox.executables_multi_selector.value
                     )
@@ -2171,7 +2248,10 @@ class SimulationDetailsWidget(ipw.VBox):
             if uuid in visited:
                 break
             visited.add(uuid)
-            if getattr(candidate, "process_label", "") in aiida_utils.workchain_exporters:
+            if (
+                getattr(candidate, "process_label", "")
+                in aiida_utils.workchain_exporters
+            ):
                 return candidate
             # Container workflows such as QeAppWorkChain do not have a direct
             # exporter: one export action dispatches their supported child
@@ -2341,11 +2421,19 @@ class SimulationDetailsWidget(ipw.VBox):
 
         cards = []
         existing_count = 0
+        incomplete_count = 0
         new_count = 0
         for suggestion in suggestions:
             existing = suggestion.get("existing")
             if existing is not None:
-                existing_count += 1
+                checks = suggestion.get("export_checks", [])
+                complete = bool(checks) and all(
+                    check.state == "complete" for check in checks
+                )
+                if complete:
+                    existing_count += 1
+                else:
+                    incomplete_count += 1
                 self._preview_entries[suggestion["key"]] = {
                     "suggestion": suggestion,
                     "existing": True,
@@ -2357,18 +2445,54 @@ class SimulationDetailsWidget(ipw.VBox):
                 url = existing.get("url")
                 escaped_url = html.escape(str(url), quote=True)
                 link = (
-                    f" — <a href='{escaped_url}' target='_blank'>"
-                    "open in openBIS</a>"
+                    f" — <a href='{escaped_url}' target='_blank'>open in openBIS</a>"
                     if url
                     else f" — {html.escape(str(existing['permid']))}"
                 )
                 escaped_label = html.escape(role_label)
-                cards.append(
-                    ipw.HTML(
-                        f"<p style='color:#237804'><b>{escaped_label}</b> — "
-                        f"already present{link}</p>"
+                state = (
+                    "already present — complete"
+                    if complete
+                    else (
+                        "status could not be verified"
+                        if any(check.state == "unknown" for check in checks)
+                        else "incomplete export — needs completion"
                     )
                 )
+                color = "#237804" if complete else "#8a6d3b"
+                cards.append(
+                    ipw.HTML(
+                        f"<p style='color:{color}'><b>{escaped_label}</b> — "
+                        f"{state}{link}</p>"
+                    )
+                )
+                if not complete:
+                    cards.append(
+                        ipw.HTML(
+                            export_recovery.report_html(
+                                export_recovery.ExportReport(checks)
+                            )
+                        )
+                    )
+                if suggestion.get("needs_preview"):
+                    uploader = ipw.FileUpload(
+                        accept=".jpg,.jpeg,.png",
+                        multiple=False,
+                        description="Replace preview",
+                    )
+                    self._preview_entries[suggestion["key"]]["uploader"] = uploader
+                    if suggestion["content"] is not None:
+                        cards.append(
+                            _preview_image_widget(
+                                suggestion["content"], suggestion["name"]
+                            )
+                        )
+                    cards.append(uploader)
+                    cards.append(
+                        ipw.HTML(
+                            "<p>The saved properties will be kept. Save again to complete missing components.</p>"
+                        )
+                    )
                 continue
 
             new_count += 1
@@ -2401,9 +2525,7 @@ class SimulationDetailsWidget(ipw.VBox):
                 if uploaded is None:
                     return
                 preview_box.children = [
-                    _preview_image_widget(
-                        uploaded["content"], uploaded["name"]
-                    )
+                    _preview_image_widget(uploaded["content"], uploaded["name"])
                 ]
                 status.value = (
                     "<p style='color:#237804'>Replacement image selected.</p>"
@@ -2441,6 +2563,10 @@ class SimulationDetailsWidget(ipw.VBox):
             messages = []
             if existing_count:
                 messages.append(f"{existing_count} already present")
+            if incomplete_count:
+                messages.append(
+                    f"{incomplete_count} incomplete or unverified — save again to retry"
+                )
             if new_count:
                 messages.append(f"{new_count} new result(s) to review")
             self.preview_suggestions_status.value = (
@@ -2460,7 +2586,7 @@ class SimulationDetailsWidget(ipw.VBox):
 
         previews = {}
         for key, entry in self._preview_entries.items():
-            if entry.get("existing"):
+            if entry.get("existing") and not entry["suggestion"].get("needs_preview"):
                 continue
             uploaded = _first_uploaded_file(entry["uploader"])
             suggestion = entry["suggestion"]
@@ -2674,14 +2800,10 @@ class MultiCheckboxWidget(ipw.HBox):
             )
             for label, code in self.options
         }
-        label_widget = ipw.Label(
-            value=description, layout=ipw.Layout(width="220px")
-        )
+        label_widget = ipw.Label(value=description, layout=ipw.Layout(width="220px"))
         options_widget = ipw.Box(
             children=tuple(self._checkboxes.values()),
-            layout=ipw.Layout(
-                display="flex", flex_flow="row wrap", width="630px"
-            ),
+            layout=ipw.Layout(display="flex", flex_flow="row wrap", width="630px"),
         )
         super().__init__(
             children=(label_widget, options_widget),
@@ -2700,8 +2822,7 @@ class MultiCheckboxWidget(ipw.HBox):
         unknown = selected.difference(self._checkboxes)
         if unknown:
             raise ValueError(
-                "Unknown controlled-vocabulary values: "
-                + ", ".join(sorted(unknown))
+                "Unknown controlled-vocabulary values: " + ", ".join(sorted(unknown))
             )
         for code, checkbox in self._checkboxes.items():
             checkbox.value = code in selected
