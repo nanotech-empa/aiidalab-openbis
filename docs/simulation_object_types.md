@@ -115,6 +115,47 @@ created from one `Cp2kScfWorkChain` share one archive, while a preceding
 `Cp2kGeoOptWorkChain` has a separate archive. Shared inventory objects,
 including `AIIDA_NODE`, remain globally reusable.
 
+### Incomplete exports and explicit retries
+
+Existence of a simulation object alone does not mean that its export completed.
+For supported AiiDA workflows, the app checks the current openBIS objects,
+structure/result relationships and published dataset file inventories. This is
+a read-only check; no new scientific property or schema status flag is required.
+
+After an interrupted export, a persistent report identifies missing components,
+with a **Retry incomplete steps** button. Entering the same PK and clicking
+**Check** reconstructs the per-result status after a notebook/kernel restart:
+complete existing results remain collapsed, while incomplete or unverified
+results are visibly marked. Saved scientific properties are not presented as
+editable new results during recovery.
+
+A retry reuses existing objects and uploads only missing components:
+
+- One shared `.aiida` archive per existing main-WorkChain boundary.
+- Atomistic-model structure data and previews.
+- Simulation previews and required structure/source-result relationships.
+- Compact charge-analysis extracts and, for Bader, `ACF.dat`, `AVF.dat` and
+  `BCF.dat`. Already published files are not uploaded again.
+
+If an upload raises an exception, the app first reads the server inventory
+again. If the expected files are visible, the upload is considered delivered.
+If the inventory cannot be read, the status is **unverified**, not **missing**;
+the app does not blindly repeat that upload. This protocol supports explicit
+retries from one export interface; it is not a distributed transaction or a
+lock against concurrent exports from different kernels.
+
+The app reports success only after the final component checks pass. A missing
+preview is still reported as an incomplete export, but does not block importing
+the scientific AiiDA archive. A missing `.aiida` archive does block that import.
+The checks establish that expected files have been published, not a byte-level
+integrity check of every archive. Manual/unclassified file uploads are outside
+this workflow-derived recovery protocol.
+
+Valid existing archives are never replaced just because their stored extras
+predate newer local annotations. Updating local openBIS-reference extras is a
+separate final step: failure there produces an explicit warning that the remote
+export completed but the local metadata update failed.
+
 ### Root processes in manually uploaded archives
 
 A manually uploaded `.aiida` file always belongs to one automatically

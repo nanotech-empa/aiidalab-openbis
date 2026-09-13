@@ -76,6 +76,13 @@ def test_aiida_export_links_selected_molecule_to_atomistic_model(
     )
     updated = []
     messages = []
+    from src.export_recovery import ExportCheck, ExportReport
+
+    monkeypatch.setattr(
+        simulations_widgets.export_status,
+        "inspect_workchain_export",
+        lambda *_args: ExportReport([ExportCheck("result", "Result", "complete")]),
+    )
 
     monkeypatch.setattr(simulations_widgets, "_popup", messages.append)
     monkeypatch.setattr(
@@ -127,6 +134,8 @@ def test_aiida_export_links_selected_molecule_to_atomistic_model(
         _provenance_overrides={},
         _clear_resolution_controls=lambda: None,
         export_message_html=SimpleNamespace(value=""),
+        export_status_html=SimpleNamespace(value=""),
+        retry_export_button=SimpleNamespace(layout=SimpleNamespace(display="none")),
     )
 
     simulations_widgets.ExportSimulationsWidget.export_simulation_to_openbis(
@@ -788,15 +797,11 @@ def test_absolute_magnetization_schema_is_optional_and_additive(
     simulations_widgets,
 ):
     schema = simulations_widgets.simulation_schema
-    definition = schema.PROPERTY_TYPES[
-        "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON"
-    ]
+    definition = schema.PROPERTY_TYPES["ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON"]
 
     assert definition["dataType"] == "REAL"
     for object_code, object_definition in schema.OBJECT_TYPES.items():
-        property_codes = [
-            item["code"] for item in object_definition["assignments"]
-        ]
+        property_codes = [item["code"] for item in object_definition["assignments"]]
         if "TOTAL_MAGNETIZATION_BOHR_MAGNETON" not in property_codes:
             continue
         assert property_codes[-1] == "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON"
@@ -1266,6 +1271,13 @@ def test_existing_result_is_shown_as_status_without_editor(
     suggestion = {
         "key": "source:geometry_optimization",
         "result_role": "geometry_optimization",
+        "export_checks": [
+            simulations_widgets.export_recovery.ExportCheck(
+                "source:geometry_optimization/object",
+                "Geometry optimization",
+                "complete",
+            )
+        ],
         "existing": {
             "permid": "existing-permid",
             "url": "https://openbis.example/existing",
