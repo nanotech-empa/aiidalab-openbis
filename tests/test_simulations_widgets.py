@@ -63,6 +63,81 @@ def test_export_requires_experiment_selection(
     assert messages == ["Select an experiment before exporting."]
 
 
+def test_aiida_export_links_selected_molecule_to_atomistic_model(
+    monkeypatch, simulations_widgets
+):
+    molecule_permid = "molecule-permid"
+    atomistic_model = SimpleNamespace(parents=[])
+    exported_result = SimpleNamespace(
+        permId="simulation-permid",
+        parents=[],
+        props={"name": "Geometry optimization"},
+        _aiidalab_created=True,
+    )
+    updated = []
+    messages = []
+
+    monkeypatch.setattr(simulations_widgets, "_popup", messages.append)
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "export_workchain",
+        lambda *_args, **_kwargs: exported_result,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "normalize_exported_objects",
+        lambda exported: [exported],
+    )
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "_openbis_eln_url",
+        lambda _object: "",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "find_first_atomistic_model",
+        lambda *_args, **_kwargs: atomistic_model,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "update_openbis_object",
+        updated.append,
+    )
+
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        select_experiment_widget=SimpleNamespace(
+            experiment_dropdown=SimpleNamespace(value="experiment-permid")
+        ),
+        simulation_details_vbox=SimpleNamespace(
+            molecules_accordion=SimpleNamespace(
+                children=[
+                    SimpleNamespace(dropdown=SimpleNamespace(value=molecule_permid))
+                ]
+            ),
+            reacprod_concepts_accordion=SimpleNamespace(children=[]),
+            material_type_dropdown=SimpleNamespace(value="-1"),
+            simulations_dropdown=SimpleNamespace(value="workflow-uuid"),
+            preview_overrides=lambda: {},
+            property_overrides=lambda: {},
+        ),
+        used_aiida_checkbox=SimpleNamespace(value=True),
+        _apply_pending_reference_resolution=lambda: True,
+        _apply_executable_selections=lambda: (True, False),
+        _provenance_overrides={},
+        _clear_resolution_controls=lambda: None,
+        export_message_html=SimpleNamespace(value=""),
+    )
+
+    simulations_widgets.ExportSimulationsWidget.export_simulation_to_openbis(
+        widget, None
+    )
+
+    assert atomistic_model.parents == [molecule_permid]
+    assert updated == [atomistic_model]
+    assert messages == ["Exported 1 simulation result(s) successfully."]
+
+
 def test_resolution_options_include_existing_and_create(simulations_widgets):
     options = simulations_widgets.ExportSimulationsWidget._resolution_options(
         (("perm-2", "Zulu"), ("perm-1", "Alpha")),
@@ -1256,6 +1331,68 @@ def test_new_pk_clears_previous_export_feedback(simulations_widgets):
     assert cleared == [True]
 
 
+def test_inferred_molecules_are_prepopulated_and_replaced(
+    monkeypatch,
+    simulations_widgets,
+):
+    class FakeMoleculeWidget(simulations_widgets.ipw.VBox):
+        def __init__(self, _session, _accordion, object_index):
+            super().__init__()
+            self.object_index = object_index
+            self.title = ""
+            self.dropdown = simulations_widgets.ipw.Dropdown(
+                options=[("Select a molecule...", "-1")], value="-1"
+            )
+
+    molecule = SimpleNamespace(
+        permId="molecule-permid",
+        props={"name": "methane", "empa_number": "1001"},
+    )
+    structure = object()
+    accordion = simulations_widgets.ipw.Accordion()
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        molecules_accordion=accordion,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets, "MoleculeWidget", FakeMoleculeWidget
+    )
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "original_structure",
+        lambda _uuid: "structure-uuid",
+    )
+    monkeypatch.setattr(simulations_widgets.orm, "load_node", lambda _uuid: structure)
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "openbis_molecules_for_structure",
+        lambda _session, _structure: (molecule,),
+    )
+
+    simulations_widgets.SimulationDetailsWidget._populate_inferred_molecules(
+        widget, SimpleNamespace(uuid="workchain-uuid")
+    )
+
+    inferred = accordion.children[0]
+    assert inferred.dropdown.value == molecule.permId
+    assert getattr(inferred, simulations_widgets._INFERRED_MOLECULE_ATTR) is True
+
+    manual = FakeMoleculeWidget(None, accordion, 1)
+    manual.dropdown.options = [
+        ("Select a molecule...", "-1"),
+        ("305 (example)", "manual-permid"),
+    ]
+    manual.dropdown.value = "manual-permid"
+    manual.title = "example"
+    accordion.children = [inferred, manual]
+
+    simulations_widgets.SimulationDetailsWidget._clear_inferred_molecules(widget)
+
+    assert accordion.children == (manual,)
+    assert manual.object_index == 0
+    assert manual.dropdown.value == "manual-permid"
+
+
 def test_unsupported_pk_clears_previous_preview_state(
     monkeypatch,
     simulations_widgets,
@@ -1272,6 +1409,7 @@ def test_unsupported_pk_clears_previous_preview_state(
             value=1,
         ),
         simulation_pk_input=SimpleNamespace(value=6136),
+        _clear_inferred_molecules=lambda: None,
         _exportable_ancestor=lambda _node: None,
     )
 

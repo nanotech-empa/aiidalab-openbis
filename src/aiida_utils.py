@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -8,8 +9,9 @@ import random
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import numpy as np
 from aiida import orm
@@ -620,24 +622,254 @@ def aiida_data_to_json(data_uuid):
     return json_string
 
 
-def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
-    """Check if this atomistic model is already in OBIS otherwise create.
-    Output: uuid of the oBIS object for linking
-    """
-    uuid = structure_uuid
-    structure = orm.load_node(uuid)
+ELN_ORIGIN_EXTRA = "eln"
+ELN_ORIGINS_EXTRA = "eln_origins"
 
+
+def _structure_fingerprint(atoms):
+    """Return a stable digest for exact structure-origin identity checks."""
+    payload = {
+        "symbols": atoms.get_chemical_symbols(),
+        "positions": atoms.get_positions().round(12).tolist(),
+        "cell": atoms.cell.array.round(12).tolist(),
+        "pbc": [bool(value) for value in atoms.pbc],
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _normalize_openbis_instance(value):
+    value = str(value or "").strip().rstrip("/")
+    if not value:
+        return ""
+    parsed = urlsplit(value if "://" in value else f"https://{value}")
+    return f"{parsed.netloc.lower()}{parsed.path.rstrip('/')}"
+
+
+def _openbis_origin_object(openbis_session, structure, expected_type):
+    origin = structure.base.extras.get(ELN_ORIGIN_EXTRA, None)
+    if not isinstance(origin, Mapping):
+        return None, None
+    if str(origin.get("eln_type", "openbis")).lower() != "openbis":
+        return None, None
+    if str(origin.get("data_type", "")).upper() != expected_type:
+        return origin, None
+
+    source_instance = _normalize_openbis_instance(origin.get("eln_instance"))
+    session_instance = _normalize_openbis_instance(getattr(openbis_session, "url", ""))
+    if source_instance and session_instance and source_instance != session_instance:
+        raise ValueError(
+            "The input structure originates from a different openBIS instance "
+            f"({origin.get('eln_instance')})."
+        )
+
+    permid = origin.get("sample_uuid")
+    if not permid:
+        raise ValueError(
+            "The input structure has incomplete openBIS provenance: sample_uuid "
+            "is missing."
+        )
+    try:
+        openbis_object = openbis_session.get_object(str(permid))
+    except Exception as error:
+        raise ValueError(
+            f"The referenced openBIS object {permid} is not available."
+        ) from error
+    if _openbis_type_code(openbis_object) != expected_type:
+        raise ValueError(
+            f"The referenced openBIS object {permid} is not a {expected_type}."
+        )
+    return origin, openbis_object
+
+
+def _openbis_origin_records(structure):
+    """Return unique current and historical openBIS structure origins."""
+    origins = []
+    current = structure.base.extras.get(ELN_ORIGIN_EXTRA, None)
+    historical = structure.base.extras.get(ELN_ORIGINS_EXTRA, []) or []
+    for candidate in (current, *historical):
+        if not isinstance(candidate, Mapping):
+            continue
+        origin = dict(candidate)
+        if origin not in origins:
+            origins.append(origin)
+    return origins
+
+
+def _origin_belongs_to_session(openbis_session, origin):
+    if str(origin.get("eln_type", "openbis")).lower() != "openbis":
+        return False
+    source_instance = _normalize_openbis_instance(origin.get("eln_instance"))
+    session_instance = _normalize_openbis_instance(getattr(openbis_session, "url", ""))
+    return not (source_instance and session_instance) or (
+        source_instance == session_instance
+    )
+
+
+def _relationship_items(value):
+    """Normalize pyBIS and serialized relationship values at the API boundary."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return () if value in ("", "--NOT FETCHED--") else (value,)
+    if isinstance(value, Mapping) or hasattr(value, "permId"):
+        return (value,)
+    if isinstance(value, Iterable):
+        return tuple(value)
+    return (value,)
+
+
+def _relationship_object(openbis_session, value):
+    if _openbis_type_code(value):
+        return value
+    if isinstance(value, Mapping):
+        reference = (
+            value.get("sample_uuid") or value.get("permId") or value.get("identifier")
+        )
+    else:
+        reference = value
+    if not reference:
+        return None
+    return _find_object_by_permid(openbis_session, reference)
+
+
+def _related_openbis_objects(openbis_session, openbis_object, relation):
+    try:
+        detailed = openbis_session.get_object(_openbis_reference(openbis_object))
+    except Exception:
+        detailed = openbis_object
+    getter = getattr(detailed, f"get_{relation}", None)
+    try:
+        values = getter() if callable(getter) else getattr(detailed, relation, ())
+    except Exception:
+        values = getattr(detailed, relation, ())
+    return tuple(
+        related
+        for related in (
+            _relationship_object(openbis_session, value)
+            for value in _relationship_items(values)
+        )
+        if related is not None
+    )
+
+
+def openbis_molecules_for_structure(openbis_session, structure):
+    """Resolve explicitly linked molecule concepts for an AiiDA structure."""
+    molecule_type = OPENBIS_OBJECT_TYPES["Molecule"]
     atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
+    molecules = {}
+    atomistic_models = {}
+
+    def add_molecule(candidate):
+        if candidate is not None and _openbis_type_code(candidate) == molecule_type:
+            molecules[_openbis_reference(candidate)] = candidate
+
+    def add_atomistic_model(candidate):
+        if candidate is not None and _openbis_type_code(candidate) == atom_model_type:
+            atomistic_models[_openbis_reference(candidate)] = candidate
+
+    for origin in _openbis_origin_records(structure):
+        if not _origin_belongs_to_session(openbis_session, origin):
+            continue
+        reference = origin.get("sample_uuid")
+        source = (
+            _find_object_by_permid(openbis_session, reference) if reference else None
+        )
+        data_type = str(origin.get("data_type", "")).upper()
+        if data_type == molecule_type:
+            add_molecule(source)
+        elif data_type == atom_model_type:
+            add_atomistic_model(source)
+
+        relationships = origin.get("relationships", {})
+        if isinstance(relationships, Mapping):
+            for value in _relationship_items(relationships.get("parents")):
+                add_molecule(_relationship_object(openbis_session, value))
+
+    # The local structure may predate importer-side relationship metadata. The
+    # UUID query recovers its exact openBIS atomistic model without guessing by
+    # formula or composition.
+    for candidate in _objects_by_property(
+        openbis_session, atom_model_type, "WFMS_UUID", structure.uuid
+    ):
+        add_atomistic_model(candidate)
+
+    for atomistic_model in atomistic_models.values():
+        for parent in _related_openbis_objects(
+            openbis_session, atomistic_model, "parents"
+        ):
+            add_molecule(parent)
+    return tuple(molecules.values())
+
+
+def _openbis_reference(value):
+    return str(
+        getattr(value, "permId", None) or getattr(value, "identifier", None) or value
+    )
+
+
+def _ensure_openbis_parent(openbis_object, parent):
+    parent_id = _openbis_reference(parent)
+    current = {
+        _openbis_reference(item)
+        for item in (getattr(openbis_object, "parents", []) or [])
+    }
+    if parent_id in current:
+        return
+    openbis_object.add_parents(parent)
+    utils.update_openbis_object(openbis_object)
+
+
+def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
+    """Return the matching atomistic model or create it with ELN provenance."""
+    del uuids  # Kept for API compatibility with existing exporters.
+    structure = orm.load_node(structure_uuid)
+    atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
+    ase_geo = structure.get_ase()
+
+    _molecule_origin, molecule = _openbis_origin_object(
+        openbis_session, structure, "MOLECULE"
+    )
+    atomistic_origin, source_atomistic_model = _openbis_origin_object(
+        openbis_session, structure, atom_model_type
+    )
+    molecules = list(openbis_molecules_for_structure(openbis_session, structure))
+    if molecule is not None and all(
+        _openbis_reference(item) != _openbis_reference(molecule) for item in molecules
+    ):
+        molecules.append(molecule)
 
     # Atomistic models are shared inventory objects and are reused globally.
     atom_models_obis = _objects_by_property(
-        openbis_session, atom_model_type, "WFMS_UUID", uuid
+        openbis_session, atom_model_type, "WFMS_UUID", structure.uuid
     )
     if atom_models_obis:
-        return atom_models_obis[0]
+        atomistic_model = atom_models_obis[0]
+        for linked_molecule in molecules:
+            _ensure_openbis_parent(atomistic_model, linked_molecule)
+        return atomistic_model
 
-    # check if the geometry is optimized
-    ase_geo = structure.get_ase()
+    if source_atomistic_model is not None:
+        expected = str(atomistic_origin.get("structure_fingerprint") or "")
+        current = _structure_fingerprint(ase_geo)
+        if expected and expected == current:
+            existing_uuid = str(
+                _openbis_property(source_atomistic_model, "wfms_uuid") or ""
+            )
+            if existing_uuid and existing_uuid != str(structure.uuid):
+                raise ValueError(
+                    "The source ATOMISTIC_MODEL already references a different "
+                    f"AiiDA StructureData UUID ({existing_uuid}); it was not overwritten."
+                )
+            if not existing_uuid:
+                source_atomistic_model.props["wfms_uuid"] = str(structure.uuid)
+                utils.update_openbis_object(source_atomistic_model)
+            for linked_molecule in molecules:
+                _ensure_openbis_parent(source_atomistic_model, linked_molecule)
+            return source_atomistic_model
+        # The imported geometry was edited: preserve the source object and create a
+        # distinct atomistic model for the actual workflow input.
+
     dimensionality = guess_dimensionality(ase_geo)
     dictionary = {
         "name": ase_geo.get_chemical_formula(),
@@ -652,11 +884,16 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
             bool(i) for i in dimensionality[1]
         ]
 
+    create_kwargs = {
+        "type": atom_model_type,
+        "props": dictionary,
+        "collection": OPENBIS_COLLECTIONS_PATHS["Atomistic Model"],
+    }
+    if molecules:
+        create_kwargs["parents"] = molecules
     obobject = utils.create_openbis_object(
         openbis_session,
-        type=atom_model_type,
-        props=dictionary,
-        collection=OPENBIS_COLLECTIONS_PATHS["Atomistic Model"],
+        **create_kwargs,
     )
 
     geo_png_filename = geo_to_png(ase_geo)
@@ -1864,8 +2101,7 @@ def _render_cp2k_pdos_preview(workchain, path):
                     process
                     for process in workchain.called_descendants
                     if getattr(process, "label", "") == "overlap"
-                    or getattr(process, "process_label", "")
-                    == "OverlapCalculation"
+                    or getattr(process, "process_label", "") == "OverlapCalculation"
                 ),
                 None,
             )
@@ -3425,7 +3661,9 @@ def _nearest_available_index(values, target, require_in_range=False):
     values = np.asarray(values, dtype=float).ravel()
     if values.size == 0:
         return None
-    if require_in_range and not float(np.min(values)) <= target <= float(np.max(values)):
+    if require_in_range and not float(np.min(values)) <= target <= float(
+        np.max(values)
+    ):
         return None
     return int(np.argmin(np.abs(values - target)))
 
@@ -3482,15 +3720,16 @@ def _spm_preview_panels(workchain):
             workchain
         ):
             energies = np.asarray(general_info.get("energies", []), dtype=float)
-            orbital_indexes = np.asarray(
-                general_info.get("orb_indexes", []), dtype=int
-            )
+            orbital_indexes = np.asarray(general_info.get("orb_indexes", []), dtype=int)
             homo = general_info.get("homo")
             if homo is None:
                 continue
             spin = int(general_info.get("spin", 0))
             spin_label = "alpha" if spin == 0 else "beta"
-            for frontier_label, frontier_index in (("HOMO", int(homo)), ("LUMO", int(homo) + 1)):
+            for frontier_label, frontier_index in (
+                ("HOMO", int(homo)),
+                ("LUMO", int(homo) + 1),
+            ):
                 positions = np.flatnonzero(orbital_indexes == frontier_index)
                 if not len(positions):
                     continue
@@ -3529,9 +3768,7 @@ def _spm_preview_panels(workchain):
     panels = []
     selected = set()
     for target in (-0.5, 0.5):
-        energy_index = _nearest_available_index(
-            energies, target, require_in_range=True
-        )
+        energy_index = _nearest_available_index(energies, target, require_in_range=True)
         if energy_index is None:
             continue
         candidates = []
@@ -3598,9 +3835,7 @@ def _render_spm_preview(workchain, path):
                     make_plot,
                 )
 
-                extent, _ratio, geometry = _grid_geometry(
-                    general_info, image.shape
-                )
+                extent, _ratio, geometry = _grid_geometry(general_info, image.shape)
                 make_plot(
                     figure,
                     axis,
@@ -4286,9 +4521,7 @@ def _cp2k_geo_opt_property_definitions(
     if system_parameters.get("constraints"):
         properties["constraints_description"] = str(system_parameters["constraints"])
     if cell_optimization and system_parameters.get("cell_opt_constraint"):
-        properties["cell_constraints"] = str(
-            system_parameters["cell_opt_constraint"]
-        )
+        properties["cell_constraints"] = str(system_parameters["cell_opt_constraint"])
     if motion.get("max_grad_au"):
         properties["final_max_force_hartree_per_bohr"] = float(
             motion["max_grad_au"][-1]
@@ -5081,8 +5314,10 @@ def render_workchain_preview_suggestions(
 ):
     """Prepare result reviews and identify results already present in openBIS."""
     workchain = orm.load_node(workchain_uuid)
-    check_existing = (
-        openbis_session is not None and experiment_id not in (None, "", "-1")
+    check_existing = openbis_session is not None and experiment_id not in (
+        None,
+        "",
+        "-1",
     )
     suggestions = []
     with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-suggestions-") as dirname:

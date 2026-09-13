@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytest_plugins = ["aiida.tools.pytest_fixtures"]
+
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 APP_DISCOVERY_ROOT = APP_ROOT.parent
