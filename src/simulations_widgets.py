@@ -1,5 +1,6 @@
 import html
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -18,6 +19,8 @@ from IPython.display import Javascript, display
 
 from . import aiida_utils, simulation_schema, utils, widgets
 
+logger = logging.getLogger(__name__)
+
 OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
 MATERIALS_CONCEPTS_TYPES = OPENBIS_CONFIG["OpenBIS Materials Concepts Types"]
 SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
@@ -27,6 +30,7 @@ OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
 WORKCHAIN_VIEWERS = OPENBIS_CONFIG["Workchain Viewers"]
 
 _CREATE_NEW = "__create_new_openbis_object__"
+_INFERRED_MOLECULE_ATTR = "_aiidalab_inferred_openbis_molecule"
 _DOWNLOAD_ROOT = Path(__file__).resolve().parent.parent / "temp_dataset_download"
 _DOWNLOAD_LIFETIME_SECONDS = 600
 _FUZZY_MATCH_THRESHOLD = 65
@@ -2182,8 +2186,62 @@ class SimulationDetailsWidget(ipw.VBox):
             candidate = getattr(candidate, "caller", None)
         return None
 
+    def _clear_inferred_molecules(self):
+        """Remove only molecule selectors inferred for the previously checked PK."""
+        retained = [
+            child
+            for child in self.molecules_accordion.children
+            if not getattr(child, _INFERRED_MOLECULE_ATTR, False)
+        ]
+        self.molecules_accordion.children = retained
+        for index, molecule_widget in enumerate(retained):
+            molecule_widget.object_index = index
+            if molecule_widget.title:
+                self.molecules_accordion.set_title(index, molecule_widget.title)
+
+    def _populate_inferred_molecules(self, workchain):
+        """Show explicit openBIS molecule relations carried by the input structure."""
+        structure_uuid = aiida_utils.original_structure(workchain.uuid)
+        structure = orm.load_node(structure_uuid)
+        inferred = aiida_utils.openbis_molecules_for_structure(
+            self.openbis_session, structure
+        )
+        selected = {
+            str(child.dropdown.value)
+            for child in self.molecules_accordion.children
+            if child.dropdown.value != "-1"
+        }
+        for molecule in inferred:
+            permid = str(molecule.permId)
+            if permid in selected:
+                continue
+            molecule_widget = widgets.MoleculeWidget(
+                self.openbis_session,
+                self.molecules_accordion,
+                len(self.molecules_accordion.children),
+            )
+            object.__setattr__(molecule_widget, _INFERRED_MOLECULE_ATTR, True)
+            options = list(molecule_widget.dropdown.options)
+            option_values = {
+                str(option[1] if isinstance(option, tuple) else option)
+                for option in options
+            }
+            if permid not in option_values:
+                name = aiida_utils._openbis_property(molecule, "name") or permid
+                empa_number = aiida_utils._openbis_property(molecule, "empa_number")
+                label = f"{empa_number} ({name})" if empa_number else str(name)
+                options.append((label, permid))
+                molecule_widget.dropdown.options = options
+            self.molecules_accordion.children = [
+                *self.molecules_accordion.children,
+                molecule_widget,
+            ]
+            molecule_widget.dropdown.value = permid
+            selected.add(permid)
+
     def check_aiida_simulation(self, _button=None):
         """Validate a PK and prepare previews only for supported WorkChains."""
+        self._clear_inferred_molecules()
         self.simulation_check_status.value = ""
         self._preview_entries = {}
         self.preview_suggestions_box.children = []
@@ -2231,6 +2289,18 @@ class SimulationDetailsWidget(ipw.VBox):
         self.simulation_check_status.value = (
             f"<p style='color:#237804'>{prefix}{suffix}</p>"
         )
+        try:
+            self._populate_inferred_molecules(workchain)
+        except Exception as error:  # noqa: BLE001 - relationship display is optional
+            logger.warning(
+                "Could not resolve molecule links for workflow %s.",
+                workchain.uuid,
+                exc_info=True,
+            )
+            self.simulation_check_status.value += (
+                "<p style='color:#8a6d3b'>Could not inspect the input "
+                f"structure's openBIS molecule links: {html.escape(str(error))}</p>"
+            )
         label = f"{workchain.process_label} (PK: {workchain.pk})"
         self.simulations_dropdown.options = [(label, workchain.pk)]
         self.simulations_dropdown.value = workchain.pk

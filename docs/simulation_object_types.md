@@ -55,11 +55,25 @@ when additional elements are present.
 The openBIS structure importer stores source identity in the standard AiiDA
 `eln` extra. The mapping contains the openBIS instance, object permID and type,
 selected representation, optional dataset and file identifiers, and an exact
-structure fingerprint. `StructureManagerWidget` preserves this extra when a
-user edits or stores the imported geometry.
+structure fingerprint. It also records the source object's explicitly linked
+openBIS parents and children as JSON-safe `relationships` entries containing
+`sample_uuid` and `data_type`. `StructureManagerWidget` preserves this metadata
+when a user edits or stores the imported geometry.
+
+When the same `StructureData` is selected from more than one ELN object, `eln`
+records the most recently selected origin and `eln_origins` preserves distinct
+previous origins. These are metadata-only extras: the importer does not clone or
+modify the immutable structure content and does not add inputs to a workflow.
+The metadata is also added when an ATOMISTIC_MODEL resolves to a StructureData
+UUID that is already present in the local AiiDA profile.
 
 For a `MOLECULE` source, the exporter links the resulting
 `ATOMISTIC_MODEL` back to that concept automatically. For an
+`ATOMISTIC_MODEL` source, the exporter restores its explicitly recorded
+`MOLECULE` parents. As a compatibility fallback for older imported structures,
+it can find the exact ATOMISTIC_MODEL by `WFMS_UUID` and read its live parents;
+it never guesses concepts from a formula. The export form preselects these
+molecule links for review and permits the user to remove them. For an
 `ATOMISTIC_MODEL` source, an unchanged manually uploaded structure is reused.
 If its `WFMS_UUID` is empty, the exporter fills it with the UUID of the first
 AiiDA `StructureData`. A changed geometry creates a new `ATOMISTIC_MODEL`;

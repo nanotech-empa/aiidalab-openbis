@@ -2484,6 +2484,69 @@ def test_atomistic_model_export_links_molecule_origin(monkeypatch, aiida_utils):
 
 
 @pytest.mark.usefixtures("aiida_profile_clean")
+def test_atomistic_model_origin_restores_serialized_molecule_parent(
+    monkeypatch, aiida_utils
+):
+    molecule = FakeOpenbisObject("MOLECULE", {"name": "methane"})
+    molecule.permId = "molecule-permid"
+    source = FakeOpenbisObject("ATOMISTIC_MODEL", {"name": "CH4", "wfms_uuid": ""})
+    source.permId = "atomistic-model-permid"
+    session = FakeSession({"MOLECULE": [molecule], "ATOMISTIC_MODEL": [source]})
+    atoms = aiida_utils.Atoms("CH4", cell=[10, 10, 10], pbc=False)
+    structure = aiida_utils.orm.StructureData(ase=atoms)
+    structure.base.extras.set(
+        "eln",
+        {
+            "eln_type": "openbis",
+            "eln_instance": "https://openbis.example",
+            "sample_uuid": source.permId,
+            "data_type": "ATOMISTIC_MODEL",
+            "representation": "aiida",
+            "structure_fingerprint": aiida_utils._structure_fingerprint(atoms),
+            "relationships": {
+                "parents": [
+                    {
+                        "sample_uuid": molecule.permId,
+                        "data_type": "MOLECULE",
+                    }
+                ]
+            },
+        },
+    )
+    created, updated = _configure_atomistic_model_export(
+        monkeypatch, aiida_utils, structure, session
+    )
+
+    assert aiida_utils.openbis_molecules_for_structure(session, structure) == (
+        molecule,
+    )
+    result = aiida_utils.structure_to_atomistic_model(
+        session, structure.uuid, {"structure_uuids": []}
+    )
+
+    assert result is source
+    assert source.parents == [molecule]
+    assert updated == [source, source]
+    assert created == []
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
+def test_existing_atomistic_model_parent_recovers_legacy_structure_link(
+    aiida_utils,
+):
+    molecule = FakeOpenbisObject("MOLECULE", {"name": "methane"})
+    source = FakeOpenbisObject("ATOMISTIC_MODEL", {"name": "CH4"})
+    source.parents = [molecule]
+    structure = aiida_utils.orm.StructureData(ase=aiida_utils.Atoms("CH4"))
+    source.props["wfms_uuid"] = str(structure.uuid)
+    session = FakeSession({"MOLECULE": [molecule], "ATOMISTIC_MODEL": [source]})
+
+    assert aiida_utils.openbis_molecules_for_structure(session, structure) == (
+        molecule,
+    )
+
+
+@pytest.mark.usefixtures("aiida_profile_clean")
 def test_manual_atomistic_model_is_reused_and_receives_first_aiida_uuid(
     monkeypatch, aiida_utils
 ):

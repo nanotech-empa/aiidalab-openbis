@@ -1256,6 +1256,68 @@ def test_new_pk_clears_previous_export_feedback(simulations_widgets):
     assert cleared == [True]
 
 
+def test_inferred_molecules_are_prepopulated_and_replaced(
+    monkeypatch,
+    simulations_widgets,
+):
+    class FakeMoleculeWidget(simulations_widgets.ipw.VBox):
+        def __init__(self, _session, _accordion, object_index):
+            super().__init__()
+            self.object_index = object_index
+            self.title = ""
+            self.dropdown = simulations_widgets.ipw.Dropdown(
+                options=[("Select a molecule...", "-1")], value="-1"
+            )
+
+    molecule = SimpleNamespace(
+        permId="molecule-permid",
+        props={"name": "methane", "empa_number": "1001"},
+    )
+    structure = object()
+    accordion = simulations_widgets.ipw.Accordion()
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        molecules_accordion=accordion,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets, "MoleculeWidget", FakeMoleculeWidget
+    )
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "original_structure",
+        lambda _uuid: "structure-uuid",
+    )
+    monkeypatch.setattr(simulations_widgets.orm, "load_node", lambda _uuid: structure)
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "openbis_molecules_for_structure",
+        lambda _session, _structure: (molecule,),
+    )
+
+    simulations_widgets.SimulationDetailsWidget._populate_inferred_molecules(
+        widget, SimpleNamespace(uuid="workchain-uuid")
+    )
+
+    inferred = accordion.children[0]
+    assert inferred.dropdown.value == molecule.permId
+    assert getattr(inferred, simulations_widgets._INFERRED_MOLECULE_ATTR) is True
+
+    manual = FakeMoleculeWidget(None, accordion, 1)
+    manual.dropdown.options = [
+        ("Select a molecule...", "-1"),
+        ("305 (example)", "manual-permid"),
+    ]
+    manual.dropdown.value = "manual-permid"
+    manual.title = "example"
+    accordion.children = [inferred, manual]
+
+    simulations_widgets.SimulationDetailsWidget._clear_inferred_molecules(widget)
+
+    assert accordion.children == (manual,)
+    assert manual.object_index == 0
+    assert manual.dropdown.value == "manual-permid"
+
+
 def test_unsupported_pk_clears_previous_preview_state(
     monkeypatch,
     simulations_widgets,
@@ -1272,6 +1334,7 @@ def test_unsupported_pk_clears_previous_preview_state(
             value=1,
         ),
         simulation_pk_input=SimpleNamespace(value=6136),
+        _clear_inferred_molecules=lambda: None,
         _exportable_ancestor=lambda _node: None,
     )
 

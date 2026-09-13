@@ -623,6 +623,7 @@ def aiida_data_to_json(data_uuid):
 
 
 ELN_ORIGIN_EXTRA = "eln"
+ELN_ORIGINS_EXTRA = "eln_origins"
 
 
 def _structure_fingerprint(atoms):
@@ -681,6 +682,126 @@ def _openbis_origin_object(openbis_session, structure, expected_type):
     return origin, openbis_object
 
 
+def _openbis_origin_records(structure):
+    """Return unique current and historical openBIS structure origins."""
+    origins = []
+    current = structure.base.extras.get(ELN_ORIGIN_EXTRA, None)
+    historical = structure.base.extras.get(ELN_ORIGINS_EXTRA, []) or []
+    for candidate in (current, *historical):
+        if not isinstance(candidate, Mapping):
+            continue
+        origin = dict(candidate)
+        if origin not in origins:
+            origins.append(origin)
+    return origins
+
+
+def _origin_belongs_to_session(openbis_session, origin):
+    if str(origin.get("eln_type", "openbis")).lower() != "openbis":
+        return False
+    source_instance = _normalize_openbis_instance(origin.get("eln_instance"))
+    session_instance = _normalize_openbis_instance(getattr(openbis_session, "url", ""))
+    return not (source_instance and session_instance) or (
+        source_instance == session_instance
+    )
+
+
+def _relationship_items(value):
+    """Normalize pyBIS and serialized relationship values at the API boundary."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return () if value in ("", "--NOT FETCHED--") else (value,)
+    if isinstance(value, Mapping) or hasattr(value, "permId"):
+        return (value,)
+    if isinstance(value, Iterable):
+        return tuple(value)
+    return (value,)
+
+
+def _relationship_object(openbis_session, value):
+    if _openbis_type_code(value):
+        return value
+    if isinstance(value, Mapping):
+        reference = (
+            value.get("sample_uuid") or value.get("permId") or value.get("identifier")
+        )
+    else:
+        reference = value
+    if not reference:
+        return None
+    return _find_object_by_permid(openbis_session, reference)
+
+
+def _related_openbis_objects(openbis_session, openbis_object, relation):
+    try:
+        detailed = openbis_session.get_object(_openbis_reference(openbis_object))
+    except Exception:
+        detailed = openbis_object
+    getter = getattr(detailed, f"get_{relation}", None)
+    try:
+        values = getter() if callable(getter) else getattr(detailed, relation, ())
+    except Exception:
+        values = getattr(detailed, relation, ())
+    return tuple(
+        related
+        for related in (
+            _relationship_object(openbis_session, value)
+            for value in _relationship_items(values)
+        )
+        if related is not None
+    )
+
+
+def openbis_molecules_for_structure(openbis_session, structure):
+    """Resolve explicitly linked molecule concepts for an AiiDA structure."""
+    molecule_type = OPENBIS_OBJECT_TYPES["Molecule"]
+    atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
+    molecules = {}
+    atomistic_models = {}
+
+    def add_molecule(candidate):
+        if candidate is not None and _openbis_type_code(candidate) == molecule_type:
+            molecules[_openbis_reference(candidate)] = candidate
+
+    def add_atomistic_model(candidate):
+        if candidate is not None and _openbis_type_code(candidate) == atom_model_type:
+            atomistic_models[_openbis_reference(candidate)] = candidate
+
+    for origin in _openbis_origin_records(structure):
+        if not _origin_belongs_to_session(openbis_session, origin):
+            continue
+        reference = origin.get("sample_uuid")
+        source = (
+            _find_object_by_permid(openbis_session, reference) if reference else None
+        )
+        data_type = str(origin.get("data_type", "")).upper()
+        if data_type == molecule_type:
+            add_molecule(source)
+        elif data_type == atom_model_type:
+            add_atomistic_model(source)
+
+        relationships = origin.get("relationships", {})
+        if isinstance(relationships, Mapping):
+            for value in _relationship_items(relationships.get("parents")):
+                add_molecule(_relationship_object(openbis_session, value))
+
+    # The local structure may predate importer-side relationship metadata. The
+    # UUID query recovers its exact openBIS atomistic model without guessing by
+    # formula or composition.
+    for candidate in _objects_by_property(
+        openbis_session, atom_model_type, "WFMS_UUID", structure.uuid
+    ):
+        add_atomistic_model(candidate)
+
+    for atomistic_model in atomistic_models.values():
+        for parent in _related_openbis_objects(
+            openbis_session, atomistic_model, "parents"
+        ):
+            add_molecule(parent)
+    return tuple(molecules.values())
+
+
 def _openbis_reference(value):
     return str(
         getattr(value, "permId", None) or getattr(value, "identifier", None) or value
@@ -706,12 +827,17 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
     atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
     ase_geo = structure.get_ase()
 
-    molecule_origin, molecule = _openbis_origin_object(
+    _molecule_origin, molecule = _openbis_origin_object(
         openbis_session, structure, "MOLECULE"
     )
     atomistic_origin, source_atomistic_model = _openbis_origin_object(
         openbis_session, structure, atom_model_type
     )
+    molecules = list(openbis_molecules_for_structure(openbis_session, structure))
+    if molecule is not None and all(
+        _openbis_reference(item) != _openbis_reference(molecule) for item in molecules
+    ):
+        molecules.append(molecule)
 
     # Atomistic models are shared inventory objects and are reused globally.
     atom_models_obis = _objects_by_property(
@@ -719,8 +845,8 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
     )
     if atom_models_obis:
         atomistic_model = atom_models_obis[0]
-        if molecule is not None:
-            _ensure_openbis_parent(atomistic_model, molecule)
+        for linked_molecule in molecules:
+            _ensure_openbis_parent(atomistic_model, linked_molecule)
         return atomistic_model
 
     if source_atomistic_model is not None:
@@ -738,6 +864,8 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
             if not existing_uuid:
                 source_atomistic_model.props["wfms_uuid"] = str(structure.uuid)
                 utils.update_openbis_object(source_atomistic_model)
+            for linked_molecule in molecules:
+                _ensure_openbis_parent(source_atomistic_model, linked_molecule)
             return source_atomistic_model
         # The imported geometry was edited: preserve the source object and create a
         # distinct atomistic model for the actual workflow input.
@@ -756,7 +884,7 @@ def structure_to_atomistic_model(openbis_session, structure_uuid, uuids):
             bool(i) for i in dimensionality[1]
         ]
 
-    parents = [molecule] if molecule is not None else None
+    parents = molecules or None
     obobject = utils.create_openbis_object(
         openbis_session,
         type=atom_model_type,
