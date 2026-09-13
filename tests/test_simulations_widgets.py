@@ -63,6 +63,81 @@ def test_export_requires_experiment_selection(
     assert messages == ["Select an experiment before exporting."]
 
 
+def test_aiida_export_links_selected_molecule_to_atomistic_model(
+    monkeypatch, simulations_widgets
+):
+    molecule_permid = "molecule-permid"
+    atomistic_model = SimpleNamespace(parents=[])
+    exported_result = SimpleNamespace(
+        permId="simulation-permid",
+        parents=[],
+        props={"name": "Geometry optimization"},
+        _aiidalab_created=True,
+    )
+    updated = []
+    messages = []
+
+    monkeypatch.setattr(simulations_widgets, "_popup", messages.append)
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "export_workchain",
+        lambda *_args, **_kwargs: exported_result,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "normalize_exported_objects",
+        lambda exported: [exported],
+    )
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "_openbis_eln_url",
+        lambda _object: "",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "find_first_atomistic_model",
+        lambda *_args, **_kwargs: atomistic_model,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "update_openbis_object",
+        updated.append,
+    )
+
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        select_experiment_widget=SimpleNamespace(
+            experiment_dropdown=SimpleNamespace(value="experiment-permid")
+        ),
+        simulation_details_vbox=SimpleNamespace(
+            molecules_accordion=SimpleNamespace(
+                children=[
+                    SimpleNamespace(dropdown=SimpleNamespace(value=molecule_permid))
+                ]
+            ),
+            reacprod_concepts_accordion=SimpleNamespace(children=[]),
+            material_type_dropdown=SimpleNamespace(value="-1"),
+            simulations_dropdown=SimpleNamespace(value="workflow-uuid"),
+            preview_overrides=lambda: {},
+            property_overrides=lambda: {},
+        ),
+        used_aiida_checkbox=SimpleNamespace(value=True),
+        _apply_pending_reference_resolution=lambda: True,
+        _apply_executable_selections=lambda: (True, False),
+        _provenance_overrides={},
+        _clear_resolution_controls=lambda: None,
+        export_message_html=SimpleNamespace(value=""),
+    )
+
+    simulations_widgets.ExportSimulationsWidget.export_simulation_to_openbis(
+        widget, None
+    )
+
+    assert atomistic_model.parents == [molecule_permid]
+    assert updated == [atomistic_model]
+    assert messages == ["Exported 1 simulation result(s) successfully."]
+
+
 def test_resolution_options_include_existing_and_create(simulations_widgets):
     options = simulations_widgets.ExportSimulationsWidget._resolution_options(
         (("perm-2", "Zulu"), ("perm-1", "Alpha")),
