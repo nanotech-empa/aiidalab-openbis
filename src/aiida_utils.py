@@ -65,16 +65,6 @@ def creator_of_structure(struc_uuid):
     return the_creator.uuid
 
 
-def original_structure(workchain_uuid):
-    wc = orm.load_node(workchain_uuid)
-    input_structure = wc.inputs.structure
-    creator = creator_of_structure(input_structure.uuid)
-    node_now = orm.load_node(creator)
-    if not isinstance(node_now, orm.StructureData):
-        return node_now.inputs.structure.uuid
-    return creator
-
-
 def find_bandgap(bandsdata_uuid, number_electrons=None, fermi_energy=None):
     """
     Tries to guess whether the bandsdata represent an insulator.
@@ -801,6 +791,41 @@ def openbis_molecules_for_structure(openbis_session, structure):
         ):
             add_molecule(parent)
     return tuple(molecules.values())
+
+
+def openbis_molecules_for_input_structure(openbis_session, structure):
+    """Suggest molecules from the actual input, then unambiguous preprocessing.
+
+    These are UI suggestions only: this lookup never changes the exported
+    structure, archive boundaries, or user-selected molecule relationships.
+    """
+    visited = set()
+    while structure is not None and structure.uuid not in visited:
+        visited.add(structure.uuid)
+        molecules = openbis_molecules_for_structure(openbis_session, structure)
+        if molecules:
+            return molecules
+
+        creator = structure.creator
+        if not isinstance(creator, orm.CalcFunctionNode):
+            break
+        # Do not leave a parent workflow through one of its internal functions.
+        if creator.caller is not None:
+            break
+        # Preprocessing functions such as legacy set_spins use NODE instead of
+        # structure. Inspect typed INPUT_CALC links, not function argument names.
+        inputs = {
+            node.uuid: node
+            for node in creator.base.links.get_incoming(
+                node_class=orm.StructureData,
+                link_type=LinkType.INPUT_CALC,
+            ).all_nodes()
+        }
+        if len(inputs) != 1:
+            # A merge of multiple structures has no unique molecule origin.
+            break
+        structure = next(iter(inputs.values()))
+    return ()
 
 
 def _openbis_reference(value):

@@ -1371,18 +1371,13 @@ def test_inferred_molecules_are_prepopulated_and_replaced(
     )
     monkeypatch.setattr(
         simulations_widgets.aiida_utils,
-        "original_structure",
-        lambda _uuid: "structure-uuid",
-    )
-    monkeypatch.setattr(simulations_widgets.orm, "load_node", lambda _uuid: structure)
-    monkeypatch.setattr(
-        simulations_widgets.aiida_utils,
-        "openbis_molecules_for_structure",
+        "openbis_molecules_for_input_structure",
         lambda _session, _structure: (molecule,),
     )
 
     simulations_widgets.SimulationDetailsWidget._populate_inferred_molecules(
-        widget, SimpleNamespace(uuid="workchain-uuid")
+        widget,
+        SimpleNamespace(inputs=SimpleNamespace(structure=structure)),
     )
 
     inferred = accordion.children[0]

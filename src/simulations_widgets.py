@@ -2281,10 +2281,8 @@ class SimulationDetailsWidget(ipw.VBox):
 
     def _populate_inferred_molecules(self, workchain):
         """Show explicit openBIS molecule relations carried by the input structure."""
-        structure_uuid = aiida_utils.original_structure(workchain.uuid)
-        structure = orm.load_node(structure_uuid)
-        inferred = aiida_utils.openbis_molecules_for_structure(
-            self.openbis_session, structure
+        inferred = aiida_utils.openbis_molecules_for_input_structure(
+            self.openbis_session, workchain.inputs.structure
         )
         selected = {
             str(child.dropdown.value)
