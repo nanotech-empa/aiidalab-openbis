@@ -727,12 +727,12 @@ def _relationship_object(openbis_session, value):
 def _related_openbis_objects(openbis_session, openbis_object, relation):
     try:
         detailed = openbis_session.get_object(_openbis_reference(openbis_object))
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional suggestions use available relationships
         detailed = openbis_object
     getter = getattr(detailed, f"get_{relation}", None)
     try:
         values = getter() if callable(getter) else getattr(detailed, relation, ())
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional suggestions use available relationships
         values = getattr(detailed, relation, ())
     return tuple(
         related
@@ -979,16 +979,47 @@ def create_obis_object(obtype=None, parameters=None):
     return obisuuid
 
 
-def create_and_export_AiiDA_archive(openbis_session, uuid):
-    """Create one shared AiiDA archive object, or reuse the existing one."""
+def find_aiida_archive(openbis_session, uuid):
+    """Find the unique archive record for one main process UUID."""
     aiida_node_type = OPENBIS_OBJECT_TYPES["AiiDA Node"]
     existing = _objects_by_property(openbis_session, aiida_node_type, "WFMS_UUID", uuid)
     if len(existing) > 1:
         raise recovery.ExportVerificationError(
             f"Multiple AIIDA_NODE objects reference {uuid}."
         )
-    if existing and recovery.has_archive(existing[0]):
-        return existing[0]
+    return existing[0] if existing else None
+
+
+def upload_aiida_archive(openbis_session, uuid, archive_path):
+    """Upload a prepared archive, or complete/reuse its existing scalar-UUID record."""
+    existing = find_aiida_archive(openbis_session, uuid)
+    obj = (
+        existing
+        if existing is not None
+        else utils.create_openbis_object(
+            openbis_session,
+            type=OPENBIS_OBJECT_TYPES["AiiDA Node"],
+            props={"wfms_uuid": str(uuid), "comments": ""},
+            collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+        )
+    )
+    recovery.ensure_upload(
+        lambda: recovery.has_archive(obj),
+        lambda: utils.create_openbis_dataset(
+            openbis_session,
+            type="RAW_DATA",
+            sample=obj,
+            files=[archive_path],
+        ),
+    )
+    return obj
+
+
+def create_and_export_AiiDA_archive(openbis_session, uuid):
+    """Create one shared AiiDA archive object, or reuse the existing one."""
+    existing = find_aiida_archive(openbis_session, uuid)
+    if existing is not None and recovery.has_archive(existing):
+        return existing
 
     with tempfile.TemporaryDirectory(prefix="aiidalab-openbis-archive-") as dirname:
         output_file = Path(dirname) / "archive.aiida"
@@ -1009,30 +1040,7 @@ def create_and_export_AiiDA_archive(openbis_session, uuid):
                 f"Could not create the AiiDA archive for {uuid}: {result.stderr.strip()}"
             )
 
-        openbis_object = (
-            existing[0]
-            if existing
-            else utils.create_openbis_object(
-                openbis_session,
-                type=aiida_node_type,
-                props={
-                    "wfms_uuid": str(uuid),
-                    "aiida_root_uuids": [str(uuid)],
-                    "comments": "",
-                },
-                collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
-            )
-        )
-        recovery.ensure_upload(
-            lambda: recovery.has_archive(openbis_object),
-            lambda: utils.create_openbis_dataset(
-                openbis_session,
-                type="RAW_DATA",
-                sample=openbis_object,
-                files=[output_file],
-            ),
-        )
-        return openbis_object
+        return upload_aiida_archive(openbis_session, uuid, output_file)
 
 
 def normalize_exported_objects(export):
@@ -3192,7 +3200,7 @@ def _render_qe_electronic_preview(workchain, path):
             model.plot, path, "Electronic bands and density of states"
         )
         return
-    except Exception:  # noqa: BLE001 - optional app integration has a safe fallback
+    except Exception:
         logger.warning(
             "Could not reuse the QE Results plot; using the generic preview.",
             exc_info=True,
@@ -3235,7 +3243,7 @@ def _render_nanoribbon_bands_pdos_preview(workchain, path):
         figure.savefig(path, dpi=180, bbox_inches="tight")
         plt.close(figure)
         return
-    except Exception:  # noqa: BLE001 - optional app integration has a safe fallback
+    except Exception:
         logger.warning(
             "Could not reuse the nanoribbon Results plot; using the generic preview.",
             exc_info=True,
@@ -3266,10 +3274,10 @@ def _vibroscopy_output_namespace(workchain):
 def _render_qe_vibrational_preview(workchain, path):
     """Reuse the default QE phonon, IR, and Raman result data in one preview."""
     try:
-        from matplotlib.figure import Figure
         from aiidalab_qe.common.bands_pdos.bandpdosplotly import BandsPdosPlotly
         from aiidalab_qe_vibroscopy.app.widgets.phononmodel import PhononModel
         from aiidalab_qe_vibroscopy.app.widgets.ramanmodel import RamanModel
+        from matplotlib.figure import Figure
 
         phonon_model = PhononModel(vibro=workchain)
         phonon_model.fetch_data()
@@ -3341,7 +3349,7 @@ def _render_qe_vibrational_preview(workchain, path):
             axis.set_ylabel("Normalized intensity")
         figure.savefig(path, dpi=180)
         return
-    except Exception:  # noqa: BLE001 - optional app integration has a safe fallback
+    except Exception:
         logger.warning(
             "Could not reuse the QE vibroscopy Results plots; using the generic preview.",
             exc_info=True,
