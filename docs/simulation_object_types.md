@@ -17,7 +17,8 @@ AiiDA simulation exported from the local database:
     aiida_node → AIIDA_NODE object containing the .aiida archive
 
 Simulation uploaded manually with an AiiDA archive:
-    aiida_node → AIIDA_NODE object containing the uploaded .aiida archive
+    one record per main process:
+        aiida_node → AIIDA_NODE containing its regenerated single-root .aiida archive
 
 Simulation without an AiiDA archive:
     input_output_bundle dataset containing relevant input/output files
@@ -148,45 +149,64 @@ The app reports success only after the final component checks pass. A missing
 preview is still reported as an incomplete export, but does not block importing
 the scientific AiiDA archive. A missing `.aiida` archive does block that import.
 The checks establish that expected files have been published, not a byte-level
-integrity check of every archive. Manual/unclassified file uploads are outside
-this workflow-derived recovery protocol.
+integrity check of every archive. Manual uploads with an AiiDA archive use the
+same verified-upload protocol for each derived archive, simulation, link and
+attachment. File-only manual uploads remain outside this recovery protocol.
 
 Valid existing archives are never replaced just because their stored extras
 predate newer local annotations. Updating local openBIS-reference extras is a
 separate final step: failure there produces an explicit warning that the remote
 export completed but the local metadata update failed.
 
-### Root processes in manually uploaded archives
+### One root per AiiDA archive
 
-A manually uploaded `.aiida` file always belongs to one automatically
-created `AIIDA_NODE`; it is not attached directly to the simulation object.
-Other uploaded input/output files remain datasets of the simulation object.
+An `AIIDA_NODE` identifies exactly one main process with the scalar
+`WFMS_UUID`. There is no multivalue UUID property or UUID list in comments.
+For an `ATOMISTIC_MODEL`, the same scalar property still identifies its
+structure node, not a workflow.
 
-Before writing to openBIS, the app opens the archive through AiiDA's read-only
-SQLite ZIP backend and identifies every `ProcessNode` without an incoming
-`CALL_CALC` or `CALL_WORK` link. These are the archive root processes.
+Before writing to openBIS, manual upload opens the supplied `.aiida` through
+AiiDA's read-only SQLite ZIP backend. Main processes are `ProcessNode` records
+without an incoming `CALL_CALC` or `CALL_WORK` link **inside that archive**.
+An archive with no process roots is rejected as a simulation archive.
 
-`AIIDA_ROOT_UUIDS` stores every identified root UUID. For one root,
-`WFMS_UUID` also stores that UUID as the canonical archive root used by existing
-viewer and duplicate-detection code. For zero or more than one root,
-`WFMS_UUID` is left empty because it is a singular legacy property. Earlier
-records that stored root UUID markers in `COMMENTS` remain readable, but new
-records use the structured `AIIDA_ROOT_UUIDS` property.
+If the file has N roots, select **Unclassified Simulation**: the app shows N
+separate editable property forms, initialized from the shared parameters and
+named after their respective main workflows. The user reviews every record
+and explicitly confirms before saving. Preview, other attachments, executables
+and selected parents are shared; scientific properties can be edited separately.
+Changing the source file or shared settings requires a fresh review.
 
-Automatically generated archives contain one main/root WorkChain, so both
-properties contain its UUID. UUIDs of result-producing descendants are not
-added to `AIIDA_ROOT_UUIDS`; each simulation object records its concrete
-producer in `AIIDA_SOURCE_UUID` instead.
+The app generates **N single-root archives** directly from the archive backend,
+without importing or modifying anything in the user's AiiDA database. Each
+preserves the root's call tree, data and UUIDs. Shared inputs retain the same
+UUID in different archives. Traversal does not follow data creators or process
+callers backwards into other main workflows.
 
-On import, the archive is inspected again and all root UUIDs are reported. A
-viewer link is offered independently for every root process type supported by
-the receiving AiiDAlab installation. Importing still restores the complete
-archive provenance graph and relies on AiiDA's UUID deduplication.
+Only these N derived archives are uploaded, each attached to its matching
+`AIIDA_NODE`. **The original uploaded archive is not also stored on openBIS.**
+The user's original file is untouched. Other input/output attachments remain
+datasets of the respective simulation objects.
 
-A manually uploaded archive can describe an unsupported or unclassified AiiDA
-workflow. In that case the simulation may omit `AIIDA_SOURCE_UUID`, because
-the app cannot reliably assign the simulation result to one concrete producing
-process, but it must still link to its `AIIDA_NODE`.
+Each manual simulation links its archive and stores its root in
+`AIIDA_SOURCE_UUID`; type + source UUID + target space identify it for retry.
+Retry reuses existing objects, preserves their reviewed properties and uploads
+only missing files. Unknown server inventory blocks speculative replacement.
+After a kernel restart, upload the same source and attachments and review
+again to resume. Concurrent exports from independent sessions are not locked.
+
+Automatic exports retain one archive per main-workflow boundary, shared by
+its classified results. Those results use `AIIDA_SOURCE_UUID` for the actual
+result-producing process, which may differ from the archive's `WFMS_UUID`.
+
+Import verifies that the archive has exactly one main process matching
+`WFMS_UUID` before importing. AiiDA UUID deduplication then restores its graph
+without duplicating shared nodes; a viewer is offered if installed.
+
+The preproduction `AIIDA_ROOT_UUIDS` assignment is no longer provisioned.
+Existing development-server records/schema require an explicit audited cleanup
+or re-export before retiring that assignment; deploying this code does not
+silently delete server properties, archives or experiments.
 
 ## AiiDA export resolution
 

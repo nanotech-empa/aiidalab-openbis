@@ -1,3 +1,4 @@
+import hashlib
 import html
 import json
 import logging
@@ -18,9 +19,11 @@ from aiida import orm
 from IPython.display import Javascript, display
 
 from . import (
+    aiida_archives,
     aiida_utils,
     export_recovery,
     export_status,
+    manual_simulations,
     simulation_schema,
     utils,
     widgets,
@@ -102,52 +105,11 @@ def _preview_image_widget(content, filename):
     return ipw.Image(**kwargs)
 
 
-_AIIDA_ROOT_UUID_RE = re.compile(
-    r"^AiiDA root process UUID:\s*([0-9a-fA-F-]{36})\s*$",
-    re.MULTILINE,
-)
-
-
-def _archive_root_processes(archive_path):
-    """Return process roots stored in an AiiDA archive without importing it."""
-    from aiida.storage.sqlite_zip.backend import SqliteZipBackend
-
-    storage = SqliteZipBackend(SqliteZipBackend.create_profile(str(archive_path)))
-    try:
-        processes = (
-            orm.QueryBuilder(backend=storage)
-            .append(orm.ProcessNode, project="*")
-            .all(flat=True)
-        )
-        roots = [
-            {
-                "uuid": str(process.uuid),
-                "process_label": str(process.process_label or process.node_type),
-            }
-            for process in processes
-            if process.caller is None
-        ]
-        return tuple(sorted(roots, key=lambda item: item["uuid"]))
-    finally:
-        storage.close()
-
-
-def _declared_archive_root_uuids(aiida_node_object):
-    """Read root UUID markers from an AIIDA_NODE, including older records."""
-    roots = []
-    workflow_uuid = aiida_utils._openbis_property(aiida_node_object, "wfms_uuid")
-    if workflow_uuid:
-        roots.append(str(workflow_uuid))
-    root_uuids = aiida_utils._openbis_property(aiida_node_object, "aiida_root_uuids")
-    if isinstance(root_uuids, str):
-        roots.append(root_uuids)
-    elif root_uuids:
-        roots.extend(str(uuid) for uuid in root_uuids)
-    # Records created before AIIDA_ROOT_UUIDS was introduced stored roots in
-    # COMMENTS. Keep this read-only fallback until those records are migrated.
-    comments = aiida_utils._openbis_property(aiida_node_object, "comments") or ""
-    roots.extend(_AIIDA_ROOT_UUID_RE.findall(str(comments)))
-    return tuple(dict.fromkeys(roots))
+def _declared_archive_root_uuid(aiida_node_object):
+    """The single main process declared by this archive object."""
+    return aiida_archives.workflow_uuid(
+        aiida_utils._openbis_property(aiida_node_object, "wfms_uuid")
+    )
 
 
 class ImportSimulationsWidget(ipw.VBox):
@@ -825,6 +787,7 @@ class ImportSimulationsWidget(ipw.VBox):
             self.openbis_session,
             sample_ident=aiida_node_permid,
         )
+        root_uuid = _declared_archive_root_uuid(aiida_node_object)
         dataset, filename = self._find_aiida_archive_dataset(aiida_node_object)
 
         with tempfile.TemporaryDirectory(
@@ -836,9 +799,7 @@ class ImportSimulationsWidget(ipw.VBox):
                 dataset,
                 filename,
             )
-            archive_roots = tuple(
-                item["uuid"] for item in _archive_root_processes(archive_path)
-            )
+            aiida_archives.validate_root(archive_path, root_uuid)
             result = subprocess.run(
                 ["verdi", "archive", "import", str(archive_path)],
                 capture_output=True,
@@ -849,8 +810,7 @@ class ImportSimulationsWidget(ipw.VBox):
                 message = result.stderr.strip() or result.stdout.strip()
                 raise RuntimeError(message or "AiiDA archive import failed.")
 
-        root_uuids = archive_roots or _declared_archive_root_uuids(aiida_node_object)
-        return tuple(orm.load_node(uuid) for uuid in root_uuids)
+        return (orm.load_node(root_uuid),)
 
     @classmethod
     def _import_success_message(cls, simulations, workchains):
@@ -1302,6 +1262,8 @@ class ExportSimulationsWidget(ipw.VBox):
         }
         self._pending_reference_resolution = None
         self._executable_selection_widgets = {}
+        self._manual_archive_review = None
+        self.manual_archive_review_box = ipw.VBox()
 
         self.select_experiment_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 20px;'>Select experiment</span>"
@@ -1383,6 +1345,7 @@ class ExportSimulationsWidget(ipw.VBox):
             self.provenance_resolution_box,
             self.executable_resolution_box,
             self.executable_confirmation_message,
+            self.manual_archive_review_box,
             self.save_simulations_button,
             self.export_status_html,
             self.retry_export_button,
@@ -1392,6 +1355,9 @@ class ExportSimulationsWidget(ipw.VBox):
     def _clear_previous_export_feedback(self, _change=None):
         """Discard links and resolution prompts belonging to an earlier PK."""
         self.export_message_html.value = ""
+        self._manual_archive_review = None
+        if hasattr(self, "manual_archive_review_box"):
+            self.manual_archive_review_box.children = []
         if hasattr(self, "export_status_html"):
             self.export_status_html.value = ""
             self.retry_export_button.layout.display = "none"
@@ -1403,6 +1369,7 @@ class ExportSimulationsWidget(ipw.VBox):
         self.simulation_details_vbox.set_target_experiment(change["new"])
 
     def load_simulations_details_widgets(self, change):
+        self._clear_previous_export_feedback()
         used_aiida = self.used_aiida_checkbox.value
         self.simulation_details_vbox.load_widgets(used_aiida)
 
@@ -1718,39 +1685,184 @@ class ExportSimulationsWidget(ipw.VBox):
             )
         return archives[0] if archives else None
 
-    def _create_manual_aiida_node(self, archive_file, simulation_name):
-        with tempfile.TemporaryDirectory(
-            prefix="aiidalab-openbis-manual-archive-"
-        ) as dirname:
-            archive_path = Path(dirname) / Path(archive_file["name"]).name
-            archive_path.write_bytes(archive_file["content"])
-            roots = _archive_root_processes(archive_path)
-
-            properties = {
-                "name": f"AiiDA archive for {simulation_name}",
-                "description": (
-                    "AiiDA provenance archive uploaded with a simulation record."
-                ),
-                "comments": "",
+    def _review_manual_archive(self, source, signature, simulation_type, properties):
+        review = self._manual_archive_review
+        if review is None or review["signature"] != signature:
+            roots = aiida_archives.root_processes(source)
+            if not roots:
+                raise ValueError(
+                    "No main process was found in the .aiida archive. "
+                    "A structure-only archive cannot identify a simulation."
+                )
+            if (
+                len(roots) > 1
+                and simulation_type
+                != SIMULATION_EXPORT_TYPES["Unclassified Simulation"]
+            ):
+                raise ValueError(
+                    "This archive has multiple main processes. Select Unclassified "
+                    "Simulation to review and export one object per process."
+                )
+            cards = [
+                ipw.HTML(
+                    f"<h4>Review {len(roots)} simulation record(s)</h4>"
+                    "<p>One simulation and one single-root AiiDA archive will be created "
+                    "for each main process below (existing records will be reused, keeping their saved properties). "
+                    "The original .aiida file will not be uploaded. Other attachments, "
+                    "preview, executables and selected parents are shared by these records. "
+                    "Review and edit each record before confirming. Nothing has been exported yet.</p>"
+                )
+            ]
+            editors = []
+            for root in roots:
+                editor = SimulationPropertiesWidget(self.openbis_session)
+                editor.load_widgets(simulation_type)
+                editor.set_values(
+                    dict(
+                        properties,
+                        name=manual_simulations.simulation_name(
+                            properties.get("name") or simulation_type,
+                            root,
+                        ),
+                    )
+                )
+                editors.append(editor)
+                cards.append(
+                    ipw.VBox(
+                        [
+                            ipw.HTML(
+                                f"<h4>{html.escape(root.get('label') or root['process_label'])}</h4>"
+                                f"<p>WFMS_UUID: <code>{html.escape(root['uuid'])}</code></p>"
+                            ),
+                            editor,
+                        ],
+                        layout=ipw.Layout(
+                            border="1px solid #ccc", padding="12px", margin="6px 0"
+                        ),
+                    )
+                )
+            confirmed = ipw.Checkbox(
+                description="I have reviewed these records; export them on Save",
+                indent=False,
+                layout=ipw.Layout(width="auto"),
+            )
+            cards.append(confirmed)
+            self.manual_archive_review_box.children = cards
+            review = {
+                "signature": signature,
+                "roots": roots,
+                "editors": editors,
+                "confirmed": confirmed,
             }
-            if roots:
-                properties["aiida_root_uuids"] = [root["uuid"] for root in roots]
-            if len(roots) == 1:
-                properties["wfms_uuid"] = roots[0]["uuid"]
+            self._manual_archive_review = review
+            self.export_status_html.value = ""
+            self.export_message_html.value = ""
+            self.retry_export_button.layout.display = "none"
+            return None
+        if not review["confirmed"].value:
+            _popup(
+                "Review the individual records and tick the confirmation checkbox before saving."
+            )
+            return None
+        # Validate every editor before writing the first object.
+        reviewed = []
+        for editor in review["editors"]:
+            props = editor.values()
+            if properties.get("executables"):
+                props["executables"] = list(properties["executables"])
+            reviewed.append(props)
+        return review["roots"], reviewed
 
-            aiida_node = utils.create_openbis_object(
-                self.openbis_session,
-                type=OPENBIS_OBJECT_TYPES["AiiDA Node"],
-                collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
-                props=properties,
+    def _export_manual_archive(
+        self,
+        archive_file,
+        collection,
+        simulation_type,
+        properties,
+        parents,
+        previews,
+        raw_files,
+    ):
+        manual_simulations.attachment_names(previews)
+        manual_simulations.attachment_names(raw_files)
+        digest = hashlib.sha256(
+            json.dumps(
+                [collection, simulation_type, properties, parents],
+                sort_keys=True,
+            ).encode()
+        )
+        for item in (archive_file, *previews, *raw_files):
+            # Fixed-size digests avoid concatenation ambiguities and additional
+            # copies of large uploads; any changed input requires fresh review.
+            digest.update(hashlib.sha256(item["name"].encode()).digest())
+            digest.update(hashlib.sha256(item["content"]).digest())
+        with tempfile.TemporaryDirectory(
+            prefix="aiidalab-openbis-manual-"
+        ) as directory:
+            source = Path(directory) / "source.aiida"
+            source.write_bytes(archive_file["content"])
+            plan = self._review_manual_archive(
+                source, digest.hexdigest(), simulation_type, properties
             )
-            utils.create_openbis_dataset(
+            if plan is None:
+                return
+            roots, reviewed = plan
+            error = None
+            try:
+                for root, props in zip(roots, reviewed):
+                    manual_simulations.export_root(
+                        self.openbis_session,
+                        collection,
+                        simulation_type,
+                        props,
+                        parents,
+                        source,
+                        root,
+                        previews,
+                        raw_files,
+                    )
+            except Exception as failure:  # noqa: BLE001 - report partial batch and allow verified retry
+                error = failure
+            report, results = manual_simulations.inspect_export(
                 self.openbis_session,
-                type="RAW_DATA",
-                sample=aiida_node,
-                files=[archive_path],
+                collection,
+                simulation_type,
+                roots,
+                previews,
+                raw_files,
+                parents,
             )
-            return aiida_node
+            if error is not None and report.complete:
+                report.checks.append(
+                    export_recovery.ExportCheck(
+                        "last-operation",
+                        "Last export operation",
+                        "unknown",
+                        "The failed operation needs verification before completion.",
+                    )
+                )
+            self.export_status_html.value = export_recovery.report_html(
+                report,
+                attempted=True,
+                error=error,
+            )
+            self.retry_export_button.layout.display = "none" if report.complete else ""
+            self.retry_export_button.description = "Retry incomplete steps"
+            links = []
+            for obj in results:
+                name = aiida_utils._openbis_property(obj, "name") or obj.permId
+                url = aiida_utils._openbis_eln_url(obj)
+                label = html.escape(str(name))
+                links.append(
+                    f'<li><a href="{html.escape(url, quote=True)}" target="_blank">{label}</a></li>'
+                    if url
+                    else f"<li>{label}</li>"
+                )
+            self.export_message_html.value = (
+                "<p>Simulation results in openBIS:</p><ul>" + "".join(links) + "</ul>"
+                if links
+                else ""
+            )
 
     def export_simulation_to_openbis(self, b):
         """Keep controls locked until export and verification have both finished."""
@@ -2009,11 +2121,22 @@ class ExportSimulationsWidget(ipw.VBox):
                     )
                     archive_file = self._uploaded_aiida_archive(data_uploader)
                     if archive_file is not None:
-                        aiida_node = self._create_manual_aiida_node(
+                        self._export_manual_archive(
                             archive_file,
-                            simulation_props.get("name") or simulation_type,
+                            selected_experiment_id,
+                            simulation_type,
+                            simulation_props,
+                            simulation_parents,
+                            utils.uploaded_files(
+                                self.simulation_details_vbox.upload_image_preview_uploader
+                            ),
+                            tuple(
+                                item
+                                for item in utils.uploaded_files(data_uploader)
+                                if Path(item["name"]).suffix.lower() != ".aiida"
+                            ),
                         )
-                        simulation_props["aiida_node"] = str(aiida_node.permId)
+                        return
 
                     simulation_obj = utils.create_openbis_object(
                         self.openbis_session,
@@ -2369,7 +2492,7 @@ class SimulationDetailsWidget(ipw.VBox):
         )
         try:
             self._populate_inferred_molecules(workchain)
-        except Exception as error:  # noqa: BLE001 - relationship display is optional
+        except Exception as error:
             logger.warning(
                 "Could not resolve molecule links for workflow %s.",
                 workchain.uuid,

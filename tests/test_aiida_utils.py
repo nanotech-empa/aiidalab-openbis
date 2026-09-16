@@ -828,7 +828,7 @@ def test_export_workchain_preflights_before_archive(monkeypatch, aiida_utils):
     assert archives == []
 
 
-def test_generated_archive_records_canonical_and_all_root_uuids(
+def test_generated_archive_records_one_scalar_root_uuid(
     monkeypatch,
     aiida_utils,
 ):
@@ -865,7 +865,6 @@ def test_generated_archive_records_canonical_and_all_root_uuids(
     assert result is aiida_node
     assert created[0][1]["props"] == {
         "wfms_uuid": "11111111-1111-1111-1111-111111111111",
-        "aiida_root_uuids": ["11111111-1111-1111-1111-111111111111"],
         "comments": "",
     }
     assert datasets[0][1]["sample"] is aiida_node

@@ -183,15 +183,6 @@ PROPERTY_TYPES = {
             sample_type="AIIDA_NODE",
         ),
         prop("AIIDA_SOURCE_UUID", "AiiDA source UUID", "VARCHAR"),
-        prop(
-            "AIIDA_ROOT_UUIDS",
-            "AiiDA root UUIDs",
-            "VARCHAR",
-            description=(
-                "UUIDs of all root ProcessNodes contained in an AiiDA archive"
-            ),
-            multi_value=True,
-        ),
         prop("CELL_OPTIMIZATION", "Cell optimization", "BOOLEAN"),
         prop("FINAL_ENERGY_HARTREE", "Final energy (Hartree)", "REAL"),
         prop(
@@ -355,12 +346,8 @@ PROVENANCE = [
     assignment("AIIDA_SOURCE_UUID", False, "Provenance"),
 ]
 
-# AIIDA_NODE predates the simulation schema and already contains records. New
-# optional assignments must therefore be added without replacing or reordering
-# the existing externally managed object-type definition.
-ADDITIVE_OBJECT_TYPE_ASSIGNMENTS = {
-    "AIIDA_NODE": [assignment("AIIDA_ROOT_UUIDS", False, "Provenance")],
-}
+# Existing simulation definitions may need explicitly additive assignments.
+ADDITIVE_OBJECT_TYPE_ASSIGNMENTS = {}
 SPIN = [
     assignment("SPIN_MULTIPLICITY", False, "Electronic properties"),
     assignment("TOTAL_MAGNETIZATION_BOHR_MAGNETON", False, "Electronic properties"),
@@ -373,10 +360,7 @@ def object_type(
     # Absolute magnetization was added after the simulation object types were
     # populated in openBIS. Append it so every pre-existing assignment keeps its
     # ordinal; the additive migration below then remains safe for stored records.
-    if any(
-        item["code"] == "TOTAL_MAGNETIZATION_BOHR_MAGNETON"
-        for item in assignments
-    ):
+    if any(item["code"] == "TOTAL_MAGNETIZATION_BOHR_MAGNETON" for item in assignments):
         assignments = assignments + [
             assignment(
                 "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON",
@@ -615,8 +599,7 @@ for _object_code, _definition in OBJECT_TYPES.items():
 def base_assignments(object_code: str, assignments):
     """Exclude append-only migrations from exact assignment comparisons."""
     additive_codes = {
-        item["code"]
-        for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(object_code, [])
+        item["code"] for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(object_code, [])
     }
     return [item for item in assignments if item["code"] not in additive_codes]
 
@@ -779,8 +762,7 @@ def audit(session) -> dict[str, Any]:
         desired_items = base_assignments(code, expected["assignments"])
         desired = {item["code"]: item for item in desired_items}
         additive_codes = {
-            item["code"]
-            for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(code, [])
+            item["code"] for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(code, [])
         }
         current = {
             property_code: row
@@ -1047,8 +1029,7 @@ def apply_object_type_assignments(session, code: str, expected: dict[str, Any]):
     desired_items = base_assignments(code, expected["assignments"])
     desired_codes = {item["code"] for item in desired_items}
     additive_codes = {
-        item["code"]
-        for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(code, [])
+        item["code"] for item in ADDITIVE_OBJECT_TYPE_ASSIGNMENTS.get(code, [])
     }
     current_base = {
         property_code: row
