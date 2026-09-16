@@ -9,6 +9,8 @@ import html
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
+from . import upload_diagnostics
+
 
 class ExportVerificationError(RuntimeError):
     """The remote state is unknown; retrying a write could duplicate data."""
@@ -57,7 +59,7 @@ def report_html(report, *, attempted=False, error=None):
         if check.state == "unknown" and check.detail
     ]
     if error is not None:
-        details.append(str(error))
+        details.append(upload_diagnostics.error_summary(error))
     detail_html = (
         (
             "<details><summary>Technical details</summary><pre>"
@@ -155,15 +157,24 @@ def ensure_upload(present, upload):
     There is no automatic second upload in this function. A failed read-back leaves
     the state unknown, while a confirmed incomplete upload can be retried explicitly.
     """
-    if present():
+
+    def verified_present():
+        with upload_diagnostics.phase("remote_inventory"):
+            found = present()
+            trace = upload_diagnostics.CURRENT.get()
+            if trace is not None:
+                trace.event("remote_inventory_result", present=bool(found))
+            return found
+
+    if verified_present():
         return False
     try:
         upload()
     except Exception:
-        if present():
+        if verified_present():
             return True
         raise
-    if not present():
+    if not verified_present():
         raise ExportIncompleteError(
             "The upload returned, but its expected files are not visible on openBIS. "
             "Verify the export before retrying."

@@ -197,7 +197,8 @@ def test_unknown_server_state_never_creates_replacements(monkeypatch, manual_cas
     monkeypatch.setattr(case.session, "get_objects", unavailable)
     case.run()
     assert case.created == case.uploads == []
-    assert "Cannot read inventory" in case.widget.export_status_html.value
+    assert "ConnectionError" in case.widget.export_status_html.value
+    assert "Cannot read inventory" not in case.widget.export_status_html.value
     assert "Export completed" not in case.widget.export_status_html.value
 
 

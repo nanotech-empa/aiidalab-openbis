@@ -84,3 +84,44 @@ def test_double_click_guard_and_controls_restored(
     assert not widget._exporting
     assert not widget.save_simulations_button.disabled
     assert not widget.retry_export_button.disabled
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_upload_diagnostic_report_survives_failure(
+    monkeypatch, simulations_widgets, fails
+):
+    import base64
+    import json
+    import re
+
+    from src import upload_diagnostics
+
+    module = simulations_widgets
+    widget = SimpleNamespace(
+        save_simulations_button=module.ipw.Button(),
+        retry_export_button=module.ipw.Button(),
+        export_status_html=module.ipw.HTML(value="Existing export status"),
+    )
+
+    def export(self, button):
+        with upload_diagnostics.phase("dataset_save"):
+            if fails:
+                raise BrokenPipeError(32, "secret-token-not-for-report")
+
+    monkeypatch.setattr(
+        module.ExportSimulationsWidget, "_export_simulation_to_openbis", export
+    )
+    if fails:
+        with pytest.raises(BrokenPipeError):
+            module.ExportSimulationsWidget.export_simulation_to_openbis(widget, None)
+    else:
+        module.ExportSimulationsWidget.export_simulation_to_openbis(widget, None)
+    markup = widget.export_status_html.value
+    assert "Existing export status" in markup
+    assert "Upload diagnostic report" in markup
+    payload = base64.b64decode(re.search(r"base64,([^\"]+)", markup).group(1))
+    assert b"secret-token-not-for-report" not in payload
+    report = json.loads(payload)
+    assert report["events"][-1]["event"] == "attempt_finished"
+    assert any(event["event"] == "phase_failed" for event in report["events"]) == fails
+    assert not widget.save_simulations_button.disabled

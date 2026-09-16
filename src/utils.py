@@ -12,6 +12,8 @@ import yaml
 from IPython.display import Javascript, display
 from pybis import Openbis
 
+from . import upload_diagnostics
+
 string_io = io.StringIO()
 ELN_CONFIG = Path.home() / ".aiidalab" / "aiidalab-eln-config.json"
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -169,8 +171,7 @@ def uploaded_files(files_widget):
         items = value.items()
     else:
         items = (
-            (file_info.get("name", "uploaded-file"), file_info)
-            for file_info in value
+            (file_info.get("name", "uploaded-file"), file_info) for file_info in value
         )
     return tuple(
         {"name": str(filename), "content": bytes(file_info["content"])}
@@ -247,9 +248,19 @@ def get_next_collection_code(openbis_session, collection_type):
 
 
 def create_openbis_dataset(openbis_session, **kwargs):
-    with contextlib.redirect_stdout(string_io):
-        openbis_ds = openbis_session.new_dataset(**kwargs)
-        openbis_ds.save()
+    # pyBIS may print an authenticated request on error; discard library stdout.
+    with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
+        upload_diagnostics.record_files(kwargs.get("files") or [])
+        sample_id = upload_diagnostics.public_id(
+            getattr(kwargs.get("sample"), "permId", None)
+        )
+        with upload_diagnostics.phase("dataset_preparation", sample_permid=sample_id):
+            openbis_ds = openbis_session.new_dataset(**kwargs)
+        with (
+            upload_diagnostics.observe_dataset(openbis_ds),
+            upload_diagnostics.phase("dataset_save", sample_permid=sample_id),
+        ):
+            openbis_ds.save()
 
 
 def delete_openbis_object(openbis_object):
