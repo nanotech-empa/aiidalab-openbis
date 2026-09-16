@@ -1876,13 +1876,21 @@ class ExportSimulationsWidget(ipw.VBox):
         for control in controls:
             if control is not None:
                 control.disabled = True
+        trace = None
         try:
-            ExportSimulationsWidget._export_simulation_to_openbis(self, b)
+            with utils.upload_diagnostics.attempt() as trace:
+                ExportSimulationsWidget._export_simulation_to_openbis(self, b)
         finally:
             self._exporting = False
             for control in controls:
                 if control is not None:
                     control.disabled = False
+            if trace is not None and any(
+                event["event"] == "phase_started" for event in trace.events
+            ):
+                status = getattr(self, "export_status_html", None)
+                if status is not None:
+                    status.value += trace.render()
 
     def _show_export_report(self, experiment_id, workchain_uuid, error=None):
         report = export_status.inspect_workchain_export(

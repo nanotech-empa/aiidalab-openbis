@@ -8,6 +8,7 @@ archived extras with live extras: older annotations never invalidate an archive.
 import tempfile
 from pathlib import Path
 
+from . import upload_diagnostics
 from .export_recovery import (
     ExportCheck,
     ExportReport,
@@ -157,7 +158,12 @@ def inspect_result(session, workchain, role, obj, definitions, au=None):
                 )
     except Exception as error:  # noqa: BLE001 - failed inspection is unknown, never empty
         report.checks.append(
-            ExportCheck(key + "/verification", label, "unknown", str(error))
+            ExportCheck(
+                key + "/verification",
+                label,
+                "unknown",
+                upload_diagnostics.error_summary(error),
+            )
         )
     return report
 
@@ -194,6 +200,11 @@ def inspect_workchain_export(session, experiment_id, workchain_uuid):
                 )
     except Exception as error:  # noqa: BLE001 - persist diagnostics instead of claiming success
         report.checks.append(
-            ExportCheck("verification", "Export verification", "unknown", str(error))
+            ExportCheck(
+                "verification",
+                "Export verification",
+                "unknown",
+                upload_diagnostics.error_summary(error),
+            )
         )
     return report

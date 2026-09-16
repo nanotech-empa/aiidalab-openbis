@@ -7,6 +7,14 @@ import pytest
 pytest_plugins = ["aiida.tools.pytest_fixtures"]
 
 
+@pytest.fixture(autouse=True)
+def isolated_upload_diagnostics(monkeypatch, tmp_path):
+    """Keep widget test diagnostics out of the deployed app logs."""
+    from src import upload_diagnostics
+
+    monkeypatch.setattr(upload_diagnostics, "LOG_DIR", tmp_path / "upload_diagnostics")
+
+
 APP_ROOT = Path(__file__).resolve().parents[1]
 APP_DISCOVERY_ROOT = APP_ROOT.parent
 STRAY_LOG_DIR = APP_DISCOVERY_ROOT / "logs"

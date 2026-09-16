@@ -7,7 +7,7 @@ extras are created or updated by this export path.
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from . import aiida_archives
+from . import aiida_archives, upload_diagnostics
 from . import export_recovery as recovery
 
 
@@ -162,7 +162,7 @@ def inspect_export(
                     uuid,
                     label,
                     "unknown",
-                    str(error),
+                    upload_diagnostics.error_summary(error),
                 )
             )
     return report, tuple(results)

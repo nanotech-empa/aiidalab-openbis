@@ -22,7 +22,7 @@ from ase.io.jsonio import encode
 from ase.units import Bohr, Hartree
 
 from . import export_recovery as recovery
-from . import utils
+from . import upload_diagnostics, utils
 
 OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
 OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
@@ -993,16 +993,19 @@ def find_aiida_archive(openbis_session, uuid):
 def upload_aiida_archive(openbis_session, uuid, archive_path):
     """Upload a prepared archive, or complete/reuse its existing scalar-UUID record."""
     existing = find_aiida_archive(openbis_session, uuid)
-    obj = (
-        existing
-        if existing is not None
-        else utils.create_openbis_object(
-            openbis_session,
-            type=OPENBIS_OBJECT_TYPES["AiiDA Node"],
-            props={"wfms_uuid": str(uuid), "comments": ""},
-            collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+    with upload_diagnostics.phase(
+        "archive_record", workflow_uuid=upload_diagnostics.public_id(uuid)
+    ):
+        obj = (
+            existing
+            if existing is not None
+            else utils.create_openbis_object(
+                openbis_session,
+                type=OPENBIS_OBJECT_TYPES["AiiDA Node"],
+                props={"wfms_uuid": str(uuid), "comments": ""},
+                collection=OPENBIS_COLLECTIONS_PATHS["AiiDA Node"],
+            )
         )
-    )
     recovery.ensure_upload(
         lambda: recovery.has_archive(obj),
         lambda: utils.create_openbis_dataset(
@@ -1034,11 +1037,16 @@ def create_and_export_AiiDA_archive(openbis_session, uuid):
             "-N",
             str(uuid),
         ]
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Could not create the AiiDA archive for {uuid}: {result.stderr.strip()}"
+        with upload_diagnostics.phase(
+            "archive_creation", workflow_uuid=upload_diagnostics.public_id(uuid)
+        ):
+            result = subprocess.run(
+                command, capture_output=True, text=True, check=False
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Could not create the AiiDA archive for {uuid}: {result.stderr.strip()}"
+                )
 
         return upload_aiida_archive(openbis_session, uuid, output_file)
 
