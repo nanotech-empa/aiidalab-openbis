@@ -166,7 +166,7 @@ def uploaded_files(files_widget):
     value = files_widget.value
     # ipywidgets 7 exposes a filename-keyed mapping, whereas ipywidgets 8
     # exposes a tuple of uploaded-file mappings. Supporting both shapes keeps
-    # uploads working in the Python 3.9 and 3.12 AiiDAlab environments.
+    # uploads working across widget versions without changing the upload contract.
     if isinstance(value, dict):
         items = value.items()
     else:

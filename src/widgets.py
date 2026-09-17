@@ -584,8 +584,9 @@ class MoleculeWidget(ipw.VBox):
             obj_name = obj_props.get("name", "")
             obj_empa_number = obj_props.get("empa_number", "")
             obj_empa_number_name = f"{obj_empa_number} ({obj_name})"
-            self.parent_accordion.set_title(self.object_index, obj_empa_number_name)
-            self.title = obj_name
+            if self.object_index < len(self.parent_accordion.children):
+                self.parent_accordion.set_title(self.object_index, obj_empa_number_name)
+            self.title = obj_empa_number_name
 
             obj_details_html = ipw.HTML()
             obj_details_string = (
@@ -619,16 +620,15 @@ class MoleculeWidget(ipw.VBox):
 
     def remove_molecule(self, b):
         molecules_accordion_children = list(self.parent_accordion.children)
-        num_molecules = len(molecules_accordion_children)
         molecules_accordion_children.pop(self.object_index)
 
         for index, molecule in enumerate(molecules_accordion_children):
-            if index >= self.object_index:
-                molecule.object_index -= 1
-                self.parent_accordion.set_title(molecule.object_index, molecule.title)
+            molecule.object_index = index
 
-        self.parent_accordion.set_title(num_molecules - 1, "")
         self.parent_accordion.children = molecules_accordion_children
+        self.parent_accordion.titles = tuple(
+            molecule.title for molecule in molecules_accordion_children
+        )
 
 
 class ReacProdConceptWidget(ipw.VBox):
@@ -675,7 +675,8 @@ class ReacProdConceptWidget(ipw.VBox):
             )
             obj_props = obj.props.all()
             obj_name = obj_props.get("name", "")
-            self.parent_accordion.set_title(self.object_index, obj_name)
+            if self.object_index < len(self.parent_accordion.children):
+                self.parent_accordion.set_title(self.object_index, obj_name)
             self.title = obj_name
 
             obj_details_html = ipw.HTML()
@@ -696,18 +697,16 @@ class ReacProdConceptWidget(ipw.VBox):
 
     def remove_reacprod_concept(self, b):
         reacprod_concepts_accordion_children = list(self.parent_accordion.children)
-        num_reacprod_concepts = len(reacprod_concepts_accordion_children)
         reacprod_concepts_accordion_children.pop(self.object_index)
 
         for index, reacprod_concept in enumerate(reacprod_concepts_accordion_children):
-            if index >= self.object_index:
-                reacprod_concept.object_index -= 1
-                self.parent_accordion.set_title(
-                    reacprod_concept.object_index, reacprod_concept.title
-                )
+            reacprod_concept.object_index = index
 
-        self.parent_accordion.set_title(num_reacprod_concepts - 1, "")
         self.parent_accordion.children = reacprod_concepts_accordion_children
+        self.parent_accordion.titles = tuple(
+            reacprod_concept.title
+            for reacprod_concept in reacprod_concepts_accordion_children
+        )
 
 
 class SelectInstrumentWidget(ipw.VBox):
@@ -2384,10 +2383,8 @@ class CreateSubstanceWidget(ipw.VBox):
         self.supplier_dropdown.value = "-1"
         self.receive_date.value = None
 
-        for index, _ in enumerate(self.molecules_accordion.children):
-            self.molecules_accordion.set_title(index, "")
-
         self.molecules_accordion.children = []
+        self.molecules_accordion.titles = ()
 
         self.evaporation_temperatures_table.reset_table()
 

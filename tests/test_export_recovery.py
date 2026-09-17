@@ -1,4 +1,4 @@
-"""Offline retry contracts, runnable directly under the Python 3.9 support floor."""
+"""Offline retry contracts for the supported Python runtime."""
 
 import unittest
 from types import SimpleNamespace
