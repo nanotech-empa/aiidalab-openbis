@@ -10,9 +10,9 @@
                 "</div>"
             ],
             "Simulations": [
-                "<div id='box' style='display: flex; pointer-events: none;'>",
+                "<div style='display: flex;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='3_import_export_simulations.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Import/export simulations from/to openBIS</a></li>",
+                "<li><a href='3_import_export_simulations.ipynb' style='font-size: 13px;' target='_blank'>Import/export simulations from/to openBIS</a></li>",
                 "</div>",
                 "</div>"
             ],
