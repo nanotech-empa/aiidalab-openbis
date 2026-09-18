@@ -1,6 +1,22 @@
 # D2.1 - Metadata schema to store and access microscopy data
 Common metadata schema to store and access microscopy data from simulations and experiments in a single platform.
 
+## Supported runtime
+
+This integrated version requires **Python >=3.12** and **AiiDA >=2.8,<3**.
+Python 3.9–3.11 and AiiDA versions below 2.8 are no longer supported or tested.
+The previous branch-specific backwards-compatibility window is closed here.
+The AiiDA 3 upper bound is retained from the existing requirements.
+
+The integrated runtime has been exercised with Python 3.12.11, AiiDA 2.8.0,
+AiiDAlab 26.5.2 and ipywidgets 8.1.8. Other dependency pins are unchanged;
+the packaging branch's `aiidalab-eln>=0.1.4` requirement is included.
+This support floor is a maintainer policy, not a claim that every older
+combination necessarily fails or every future version has been tested.
+
+See [integration notes](docs/runtime_integration.md) for the source branches,
+validation scope and remaining production checks.
+
 ## Authors
 - Aliaksandr Yakutovich
 - Fabio Lopes

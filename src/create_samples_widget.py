@@ -1,6 +1,5 @@
 import ipywidgets as ipw
 from . import utils
-import os
 import json
 import pandas as pd
 import logging
@@ -19,12 +18,10 @@ OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects
     "Paths"
 ]
 
-if not os.path.exists("logs"):
-    os.mkdir("logs")
-
+utils.LOG_DIR.mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename=utils.LOG_FILE_PATH,
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",

@@ -1,5 +1,4 @@
 import os
-import pathlib
 import sys
 import unittest
 from unittest.mock import MagicMock
@@ -9,12 +8,10 @@ repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
-# Ensure logs folder exists where sample_preparation_widgets expects it
-(pathlib.Path.cwd().parent / "logs").mkdir(parents=True, exist_ok=True)
-(pathlib.Path.cwd() / "logs").mkdir(parents=True, exist_ok=True)
-
-# Mock external packages that might not be installed or configured in test environment
-for mod in [
+# Mock external packages that might not be installed or configured in the test
+# environment. Restore sys.modules after importing the unit under test so these
+# collection-time mocks cannot leak into unrelated AiiDA/ASE/widget tests.
+_mocked_modules = [
     "rdkit",
     "rdkit.Chem",
     "rdkit.Chem.AllChem",
@@ -29,13 +26,17 @@ for mod in [
     "scipy",
     "sklearn",
     "pybis",
-]:
+]
+_missing = object()
+_original_modules = {name: sys.modules.get(name, _missing) for name in _mocked_modules}
+for mod in _mocked_modules:
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
 # Mock get_interface_config_info before widgets import it
 from src import utils
 
+_original_get_interface_config_info = utils.get_interface_config_info
 utils.get_interface_config_info = MagicMock(
     return_value={
         "object_types": {"Process": "PROCESS", "Process Step": "PROCESS_STEP"},
@@ -58,6 +59,13 @@ from src.sample_preparation_widgets import (
     strip_step_number,
     validate_and_sort_process_steps,
 )
+
+utils.get_interface_config_info = _original_get_interface_config_info
+for _name, _module in _original_modules.items():
+    if _module is _missing:
+        sys.modules.pop(_name, None)
+    else:
+        sys.modules[_name] = _module
 
 
 class MockOpenBISObject:
