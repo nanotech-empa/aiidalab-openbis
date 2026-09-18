@@ -971,7 +971,7 @@ class RegisterPreparationWidget(ipw.VBox):
             self.openbis_session, type=OPENBIS_OBJECT_TYPES["Process"]
         )
         processes_options = [
-            (obj.props["name"], obj.permId) for obj in openbis_processes
+            (obj.props["name"] or "No name", obj.permId) for obj in openbis_processes
         ]
         processes_options.sort()
         processes_options.insert(0, ("Select a process...", "-1"))
