@@ -287,10 +287,10 @@ def test_status_accepts_pybis_collection_entities(export_case, aiida_utils):
     assert report.complete
 
 
-@pytest.mark.parametrize(
-    "kind", ["ATOMISTIC_MODEL", "AIIDA_NODE", "ENERGY_CALCULATION"]
-)
-def test_duplicate_identity_is_unverified_and_stops_recovery(export_case, kind):
+@pytest.mark.parametrize("kind", ["ATOMISTIC_MODEL", "AIIDA_NODE"])
+def test_duplicate_inventory_identity_is_unverified_and_stops_recovery(
+    export_case, kind
+):
     case = export_case
     case.run()
     original = case.session.objects[kind][0]
@@ -299,4 +299,15 @@ def test_duplicate_identity_is_unverified_and_stops_recovery(export_case, kind):
     uploads = list(case.uploads)
     with pytest.raises(ExportVerificationError):
         case.run()
+    assert case.uploads == uploads
+
+
+def test_duplicate_simulation_identity_uses_latest_for_recovery(export_case):
+    case = export_case
+    case.run()
+    original = case.session.objects["ENERGY_CALCULATION"][0]
+    case.session.objects["ENERGY_CALCULATION"].append(original)
+    assert case.report().complete
+    uploads = list(case.uploads)
+    case.run()
     assert case.uploads == uploads

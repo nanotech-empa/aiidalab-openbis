@@ -67,7 +67,7 @@ def test_aiida_export_links_selected_molecule_to_atomistic_model(
     monkeypatch, simulations_widgets
 ):
     molecule_permid = "molecule-permid"
-    atomistic_model = SimpleNamespace(parents=[])
+    atomistic_model = SimpleNamespace(parents=["slab-permid"])
     exported_result = SimpleNamespace(
         permId="simulation-permid",
         parents=[],
@@ -142,7 +142,7 @@ def test_aiida_export_links_selected_molecule_to_atomistic_model(
         widget, None
     )
 
-    assert atomistic_model.parents == [molecule_permid]
+    assert atomistic_model.parents == ["slab-permid", molecule_permid]
     assert updated == [atomistic_model]
     assert messages == ["Exported 1 simulation result(s) successfully."]
 
@@ -1060,6 +1060,34 @@ def test_property_overrides_are_collected_only_for_new_results(
     }
 
 
+@pytest.mark.parametrize(
+    ("process_label", "simulation_type", "viewer"),
+    [
+        ("Cp2kScfWorkChain", "BAND_UNFOLDING", "view_cp2k_unfolding.ipynb"),
+        ("Cp2kReplicaWorkChain", "MINIMUM_ENERGY_PATH", "view_replica.ipynb"),
+        ("Cp2kPdosWorkChain", "DOS", "view_pdos.ipynb"),
+    ],
+)
+def test_cp2k_imports_route_to_installed_viewers(
+    simulations_widgets,
+    process_label,
+    simulation_type,
+    viewer,
+):
+    simulations = [_simulation("Imported result", "sim-1", simulation_type)]
+    workchain = SimpleNamespace(
+        process_label=process_label,
+        pk=42,
+        uuid="workflow-uuid",
+    )
+
+    link = simulations_widgets.ImportSimulationsWidget._import_success_message(
+        simulations, workchain
+    )
+
+    assert f"{viewer}?pk=42" in link
+
+
 def test_viewer_link_opens_new_tab(simulations_widgets):
     simulations = [_simulation("Geometry", "sim-1", "GEOMETRY_OPTIMISATION")]
     workchain = SimpleNamespace(process_label="Cp2kGeoOptWorkChain", pk=42)
@@ -1156,9 +1184,21 @@ def test_existing_result_is_shown_as_status_without_editor(
         "render_workchain_preview_suggestions",
         lambda *_args, **_kwargs: [suggestion],
     )
+    suggestion["accessible_existing"] = [
+        {
+            "permid": "existing-permid",
+            "name": "Existing geometry",
+            "url": "https://openbis.example/existing",
+            "collection": "/SPACE/PROJECT/COLLECTION",
+        }
+    ]
     widget = SimpleNamespace(
         _preview_entries={},
         preview_suggestions_box=SimpleNamespace(children=[]),
+        existing_exports_warning=SimpleNamespace(value=""),
+        existing_exports_confirmation=simulations_widgets.ipw.Checkbox(
+            layout=simulations_widgets.ipw.Layout(display="none")
+        ),
         simulations_dropdown=SimpleNamespace(value=6708),
         target_experiment_id="experiment-permid",
         preview_suggestions_status=SimpleNamespace(value=""),
@@ -1179,6 +1219,9 @@ def test_existing_result_is_shown_as_status_without_editor(
     assert "already present" in status
     assert "open in openBIS" in status
     assert "1 already present" in widget.preview_suggestions_status.value
+    assert "already has simulation results" in widget.existing_exports_warning.value
+    assert widget.existing_exports_confirmation.layout.display == ""
+    assert widget.existing_exports_confirmation.value is False
 
 
 def test_target_experiment_refreshes_checked_simulation(simulations_widgets):
@@ -1209,6 +1252,69 @@ def test_new_pk_clears_previous_export_feedback(simulations_widgets):
 
     assert widget.export_message_html.value == ""
     assert cleared == [True]
+
+
+def test_clear_all_resets_import_search(simulations_widgets):
+    widget = SimpleNamespace(
+        molecules_accordion=SimpleNamespace(children=[object()]),
+        reacprod_concepts_accordion=SimpleNamespace(children=[object()]),
+        material_type_dropdown=SimpleNamespace(value="SLAB"),
+        material_details_vbox=SimpleNamespace(children=[object()]),
+        name_search_text=SimpleNamespace(value="name"),
+        comments_search_text=SimpleNamespace(value="comments"),
+        text_match_mode_dropdown=SimpleNamespace(value="all_words"),
+        simulation_type_search_dropdown=SimpleNamespace(value="DOS"),
+        archive_status_dropdown=SimpleNamespace(value="archive"),
+        search_logical_operator_dropdown=SimpleNamespace(value="OR", disabled=False),
+        search_operator_help=SimpleNamespace(value="old"),
+        found_simulations_select_multiple=SimpleNamespace(
+            value=("result",), options=(("Result", "result"),)
+        ),
+        found_simulations_label=SimpleNamespace(value="Found simulations: 1"),
+        _simulation_archive_by_permid={"result": True},
+        import_simulations_message_html=SimpleNamespace(value="old"),
+        download_simulation_data_message_html=SimpleNamespace(value="old"),
+        _update_action_buttons=lambda: None,
+    )
+
+    simulations_widgets.ImportSimulationsWidget.clear_simulation_selection(widget)
+
+    assert widget.molecules_accordion.children == []
+    assert widget.reacprod_concepts_accordion.children == []
+    assert widget.material_type_dropdown.value == "-1"
+    assert widget.name_search_text.value == ""
+    assert widget.comments_search_text.value == ""
+    assert widget.text_match_mode_dropdown.value == "fuzzy"
+    assert widget.simulation_type_search_dropdown.value == ""
+    assert widget.archive_status_dropdown.value == "all"
+    assert widget.search_logical_operator_dropdown.value == "AND"
+    assert widget.search_logical_operator_dropdown.disabled is True
+    assert widget.found_simulations_select_multiple.options == ()
+    assert widget.found_simulations_label.value == "Found simulations: 0"
+    assert widget._simulation_archive_by_permid == {}
+
+
+def test_existing_export_confirmation_is_required(simulations_widgets):
+    checkbox = simulations_widgets.ipw.Checkbox(
+        value=False, layout=simulations_widgets.ipw.Layout(display="")
+    )
+    widget = SimpleNamespace(existing_exports_confirmation=checkbox)
+
+    assert not simulations_widgets.SimulationDetailsWidget.existing_export_confirmed(
+        widget
+    )
+    assert not simulations_widgets.SimulationDetailsWidget.duplicate_existing_requested(
+        widget
+    )
+    checkbox.value = True
+    assert simulations_widgets.SimulationDetailsWidget.existing_export_confirmed(widget)
+    assert simulations_widgets.SimulationDetailsWidget.duplicate_existing_requested(
+        widget
+    )
+    checkbox.layout.display = "none"
+    assert not simulations_widgets.SimulationDetailsWidget.duplicate_existing_requested(
+        widget
+    )
 
 
 def test_inferred_molecules_are_prepopulated_and_replaced(

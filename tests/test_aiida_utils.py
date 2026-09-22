@@ -1008,6 +1008,7 @@ def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils)
         {
             "name": "unused",
             "aiida_source_uuid": "source-uuid",
+            "aiida_node": "shared-aiida-node",
         },
     )
     existing.collection = "/SPACE/PROJECT/COLLECTION_A"
@@ -1021,6 +1022,7 @@ def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils)
         obj.collection = collection
         obj.parents = list(parents)
         created.append(obj)
+        session.objects.setdefault(type, []).append(obj)
         return obj
 
     monkeypatch.setattr(aiida_utils.utils, "create_openbis_object", create)
@@ -1035,6 +1037,7 @@ def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils)
     properties = {
         "name": "PDOS",
         "aiida_source_uuid": "source-uuid",
+        "aiida_node": "shared-aiida-node",
     }
 
     reused_in_same_space = aiida_utils._create_simulation_object(
@@ -1055,13 +1058,44 @@ def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils)
         object(),
         "pdos",
     )
+    duplicate_properties = aiida_utils._apply_property_overrides(
+        properties,
+        {aiida_utils._ALLOW_DUPLICATE_SIMULATIONS: True},
+        SimpleNamespace(uuid="source-uuid"),
+        "pdos",
+    )
+    duplicated_in_same_space = aiida_utils._create_simulation_object(
+        session,
+        "/SPACE/OTHER_PROJECT/COLLECTION_B",
+        "DOS",
+        duplicate_properties,
+        ["parent"],
+        object(),
+        "pdos",
+    )
 
     assert reused_in_same_space is existing
     assert reused_in_same_space._aiidalab_created is False
     assert exported_to_different_space is created[0]
     assert exported_to_different_space._aiidalab_created is True
     assert exported_to_different_space.parents == ["parent"]
-    assert rendered == [True]
+    assert exported_to_different_space.props["aiida_node"] == "shared-aiida-node"
+    assert duplicated_in_same_space is created[1]
+    assert duplicated_in_same_space is not existing
+    assert duplicated_in_same_space.props["aiida_node"] == "shared-aiida-node"
+    assert (
+        aiida_utils._DUPLICATE_SIMULATION_MARKER not in duplicated_in_same_space.props
+    )
+    assert (
+        aiida_utils.find_existing_simulation_result(
+            session,
+            "/SPACE/OTHER_PROJECT/COLLECTION_B",
+            "DOS",
+            "source-uuid",
+        )
+        is duplicated_in_same_space
+    )
+    assert rendered == [True, True]
 
 
 def test_simulation_identity_resolves_collection_permid_to_space(aiida_utils):
@@ -1321,6 +1355,14 @@ def test_preview_suggestions_skip_rendering_existing_results(
         "name": "Existing PDOS",
         "url": "https://openbis.example/existing",
     }
+    assert suggestions[0]["accessible_existing"] == [
+        {
+            "permid": existing.permId,
+            "name": "Existing PDOS",
+            "url": "https://openbis.example/existing",
+            "collection": "/SPACE/PROJECT/OLD_COLLECTION",
+        }
+    ]
 
 
 def test_reviewed_properties_override_values_but_not_provenance(aiida_utils):
@@ -1350,6 +1392,46 @@ def test_reviewed_properties_override_values_but_not_provenance(aiida_utils):
     assert reviewed["comments"] == "Reviewed comments"
     assert "projection_description" not in reviewed
     assert reviewed["aiida_node"] == "archive"
+
+
+def test_nonfinite_properties_are_omitted_as_whole_fields(aiida_utils):
+    workchain = SimpleNamespace(uuid="source-uuid")
+
+    reviewed = aiida_utils._apply_property_overrides(
+        {
+            "name": "Finite result",
+            "fermi_energy_ev": [-1.0, float("nan")],
+            "electronic_gap_ev": float("inf"),
+            "charge": 0.0,
+        },
+        None,
+        workchain,
+        "charge_analysis",
+    )
+
+    assert reviewed == {"name": "Finite result", "charge": 0.0}
+
+
+def test_pybis_eln_url_is_normalized(aiida_utils):
+    obj = SimpleNamespace(
+        get_eln_url=lambda: "https://openbis.example/webapp/eln-lims/?viewName=example"
+    )
+
+    assert aiida_utils._openbis_eln_url(obj) == (
+        "https://openbis.example/openbis/webapp/eln-lims/?viewName=example"
+    )
+
+
+def test_duplicate_aiida_nodes_remain_an_explicit_provenance_error(aiida_utils):
+    first = FakeOpenbisObject("AIIDA_NODE", {"wfms_uuid": "workflow-uuid"})
+    second = FakeOpenbisObject("AIIDA_NODE", {"wfms_uuid": "workflow-uuid"})
+    session = FakeSession({"AIIDA_NODE": [first, second]})
+
+    with pytest.raises(
+        aiida_utils.recovery.ExportVerificationError,
+        match="Multiple AIIDA_NODE objects reference workflow-uuid",
+    ):
+        aiida_utils.find_aiida_archive(session, "workflow-uuid")
 
 
 def test_mark_export_result_bypasses_pybis_attribute_validation(aiida_utils):

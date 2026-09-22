@@ -108,6 +108,15 @@ Within one openBIS space, the exporter therefore searches by object type and
 instead of creating a duplicate. The same AiiDA result may still be published
 as a distinct simulation object in another openBIS space.
 
+Before export, the app searches every openBIS space visible to the user for the
+same simulation identity. Accessible simulation objects are shown and export is
+blocked until the user explicitly confirms that another `SIMULATION` object is
+intended. Confirmation overrides the normal same-space reuse for that export,
+but the new simulation links the same globally reused `AIIDA_NODE`; the archive
+is not uploaded twice. Multiple `AIIDA_NODE` records for one workflow UUID are
+reported as ambiguous provenance and block export instead of selecting one
+silently.
+
 This identity does not determine archive boundaries. The exporter
 creates or reuses one `AIIDA_NODE` for each main AiiDA WorkChain selected by
 the provenance traversal. Multiple result objects from that block share its

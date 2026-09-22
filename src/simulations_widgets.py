@@ -38,6 +38,7 @@ SIMULATION_EXPORT_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
 OPENBIS_OBJECT_TYPES = OPENBIS_CONFIG["OpenBIS Types"]
 OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
 WORKCHAIN_VIEWERS = OPENBIS_CONFIG["Workchain Viewers"]
+WORKCHAIN_RESULT_VIEWERS = OPENBIS_CONFIG.get("Workchain Result Viewers", {})
 
 _CREATE_NEW = "__create_new_openbis_object__"
 _INFERRED_MOLECULE_ATTR = "_aiidalab_inferred_openbis_molecule"
@@ -133,7 +134,10 @@ class ImportSimulationsWidget(ipw.VBox):
         )
 
         self.search_simulations_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Search simulations</span>"
+            value=(
+                "<span style='font-weight: bold; font-size: 20px;'>"
+                "Search simulations in openBIS</span>"
+            )
         )
 
         self.molecules_accordion = ipw.Accordion()
@@ -180,7 +184,7 @@ class ImportSimulationsWidget(ipw.VBox):
 
         self.material_details_vbox = ipw.VBox()
 
-        search_text_style = {"description_width": "120px"}
+        search_text_style = {"description_width": "140px"}
         search_text_layout = ipw.Layout(width="600px")
         self.name_search_text = ipw.Text(
             description="Name",
@@ -202,7 +206,7 @@ class ImportSimulationsWidget(ipw.VBox):
             ],
             value="fuzzy",
             style=search_text_style,
-            layout=ipw.Layout(width="380px"),
+            layout=search_text_layout,
         )
         simulation_type_options = [("All simulation types", "")]
         simulation_type_options.extend(SIMULATION_TYPES.items())
@@ -211,7 +215,7 @@ class ImportSimulationsWidget(ipw.VBox):
             options=simulation_type_options,
             value="",
             style=search_text_style,
-            layout=ipw.Layout(width="380px"),
+            layout=search_text_layout,
         )
         self.archive_status_dropdown = ipw.Dropdown(
             description="Archive status",
@@ -222,7 +226,7 @@ class ImportSimulationsWidget(ipw.VBox):
             ],
             value="all",
             style=search_text_style,
-            layout=ipw.Layout(width="380px"),
+            layout=search_text_layout,
         )
         self.search_filters_box = ipw.VBox(
             [
@@ -234,15 +238,16 @@ class ImportSimulationsWidget(ipw.VBox):
             ]
         )
 
-        self.search_logical_operator_label = ipw.Label(value="Match materials:")
         self.search_logical_operator_dropdown = ipw.Dropdown(
+            description="Match materials",
             value="AND",
             options=[
                 ("All selected materials", "AND"),
                 ("Any selected material", "OR"),
             ],
             disabled=True,
-            layout=ipw.Layout(width="230px"),
+            style=search_text_style,
+            layout=search_text_layout,
         )
         self.search_button = ipw.Button(
             description="Search",
@@ -253,7 +258,6 @@ class ImportSimulationsWidget(ipw.VBox):
         )
         self.search_logical_operator_hbox = ipw.HBox(
             children=[
-                self.search_logical_operator_label,
                 self.search_logical_operator_dropdown,
                 self.search_button,
             ]
@@ -273,9 +277,9 @@ class ImportSimulationsWidget(ipw.VBox):
             style={"description_width": "110px"},
         )
         self.clear_simulations_button = ipw.Button(
-            description="Clear selection",
+            description="Clear all",
             icon="times",
-            layout=ipw.Layout(width="150px"),
+            layout=ipw.Layout(width="120px"),
         )
         self.found_simulations_hbox = ipw.HBox(
             children=[
@@ -747,7 +751,29 @@ class ImportSimulationsWidget(ipw.VBox):
         self._update_action_buttons()
 
     def clear_simulation_selection(self, _button=None):
+        """Clear material filters, text filters, results and pending messages."""
+        self.molecules_accordion.children = []
+        self.reacprod_concepts_accordion.children = []
+        self.material_type_dropdown.value = "-1"
+        self.material_details_vbox.children = []
+        self.name_search_text.value = ""
+        self.comments_search_text.value = ""
+        self.text_match_mode_dropdown.value = "fuzzy"
+        self.simulation_type_search_dropdown.value = ""
+        self.archive_status_dropdown.value = "all"
+        self.search_logical_operator_dropdown.value = "AND"
+        self.search_logical_operator_dropdown.disabled = True
+        self.search_operator_help.value = (
+            "<small>No material filters selected: all simulations are searched. "
+            "All/Any applies only when two or more materials are selected.</small>"
+        )
         self.found_simulations_select_multiple.value = ()
+        self.found_simulations_select_multiple.options = ()
+        self.found_simulations_label.value = "Found simulations: 0"
+        self._simulation_archive_by_permid = {}
+        self.import_simulations_message_html.value = ""
+        self.download_simulation_data_message_html.value = ""
+        self._update_action_buttons()
 
     @staticmethod
     def _find_aiida_archive_dataset(aiida_node_object):
@@ -812,6 +838,19 @@ class ImportSimulationsWidget(ipw.VBox):
 
         return (orm.load_node(root_uuid),)
 
+    @staticmethod
+    def _viewer_link(simulations, workchain):
+        viewer = WORKCHAIN_VIEWERS.get(workchain.process_label)
+        if viewer:
+            return viewer
+        result_viewers = WORKCHAIN_RESULT_VIEWERS.get(workchain.process_label, {})
+        for simulation in simulations:
+            type_code = ImportSimulationsWidget._simulation_type_code(simulation)
+            viewer = result_viewers.get(type_code)
+            if viewer:
+                return viewer
+        return None
+
     @classmethod
     def _import_success_message(cls, simulations, workchains):
         simulation_names = cls._simulation_names(simulations)
@@ -829,7 +868,7 @@ class ImportSimulationsWidget(ipw.VBox):
 
         if len(workchains) == 1:
             workchain = workchains[0]
-            viewer_link = WORKCHAIN_VIEWERS.get(workchain.process_label)
+            viewer_link = cls._viewer_link(simulations, workchain)
             if viewer_link:
                 notebook_link = f"{viewer_link}?pk={workchain.pk}"
                 return (
@@ -847,7 +886,7 @@ class ImportSimulationsWidget(ipw.VBox):
         for workchain in workchains:
             label = html.escape(workchain.process_label)
             uuid = html.escape(str(workchain.uuid))
-            viewer_link = WORKCHAIN_VIEWERS.get(workchain.process_label)
+            viewer_link = cls._viewer_link(simulations, workchain)
             if viewer_link:
                 notebook_link = html.escape(
                     f"{viewer_link}?pk={workchain.pk}",
@@ -1988,13 +2027,37 @@ class ExportSimulationsWidget(ipw.VBox):
                     if not selections_valid:
                         return
                     try:
+                        confirmation = getattr(
+                            self.simulation_details_vbox,
+                            "existing_export_confirmed",
+                            lambda: True,
+                        )
+                        if not confirmation():
+                            _popup(
+                                "Confirm the existing openBIS simulation results "
+                                "before exporting."
+                            )
+                            return
+                        duplicate_existing = getattr(
+                            self.simulation_details_vbox,
+                            "duplicate_existing_requested",
+                            lambda: False,
+                        )()
                         preview_overrides = (
                             self.simulation_details_vbox.preview_overrides()
                         )
                         property_overrides = (
                             self.simulation_details_vbox.property_overrides()
                         )
-                        self.export_status_html.value = "<p role='status'>Export in progress — existing data will be reused.</p>"
+                        action = (
+                            "creating another simulation while reusing its "
+                            "AIIDA_NODE archive"
+                            if duplicate_existing
+                            else "existing data will be reused"
+                        )
+                        self.export_status_html.value = (
+                            f"<p role='status'>Export in progress — {action}.</p>"
+                        )
                         exported = aiida_utils.export_workchain(
                             self.openbis_session,
                             selected_experiment_id,
@@ -2003,6 +2066,7 @@ class ExportSimulationsWidget(ipw.VBox):
                             provenance_overrides=self._provenance_overrides,
                             preview_overrides=preview_overrides,
                             property_overrides=property_overrides,
+                            allow_duplicate_simulations=duplicate_existing,
                         )
                     except aiida_utils.MissingExecutablesError as error:
                         self._show_missing_executables(error)
@@ -2012,6 +2076,15 @@ class ExportSimulationsWidget(ipw.VBox):
                         return
                     except aiida_utils.ExecutableResolutionError as error:
                         _popup(f"Cannot map AiiDA provenance to openBIS: {error}")
+                        return
+                    except export_recovery.ExportVerificationError as error:
+                        _popup(
+                            "Export stopped because openBIS contains ambiguous "
+                            "provenance records. " + str(error)
+                        )
+                        ExportSimulationsWidget._show_export_report(
+                            self, selected_experiment_id, selected_simulation_id, error
+                        )
                         return
                     except Exception as error:  # noqa: BLE001 - show export errors in UI
                         ExportSimulationsWidget._show_export_report(
@@ -2028,11 +2101,23 @@ class ExportSimulationsWidget(ipw.VBox):
                                 exported_object,
                                 OPENBIS_OBJECT_TYPES["Atomistic Model"],
                             )
-                            if (
-                                first_atom_model is not None
-                                and len(first_atom_model.parents) == 0
-                            ):
-                                first_atom_model.parents = atom_model_parents
+                            if first_atom_model is None:
+                                continue
+                            current_parents = list(first_atom_model.parents or [])
+                            current_ids = {
+                                str(getattr(parent, "permId", parent))
+                                for parent in current_parents
+                            }
+                            missing_parents = [
+                                parent
+                                for parent in atom_model_parents
+                                if str(getattr(parent, "permId", parent))
+                                not in current_ids
+                            ]
+                            if missing_parents:
+                                first_atom_model.parents = (
+                                    current_parents + missing_parents
+                                )
                                 utils.update_openbis_object(first_atom_model)
                     except Exception as error:  # noqa: BLE001 - persist a failed relationship update
                         ExportSimulationsWidget._show_export_report(
@@ -2287,6 +2372,14 @@ class SimulationDetailsWidget(ipw.VBox):
         self.preview_suggestions_status = ipw.HTML()
         self.preview_suggestions_box = ipw.VBox()
         self._preview_entries = {}
+        self.existing_exports_warning = ipw.HTML()
+        self.existing_exports_confirmation = ipw.Checkbox(
+            description=("Create another simulation and reuse the existing AIIDA_NODE"),
+            value=False,
+            indent=False,
+            layout=ipw.Layout(display="none", width="600px"),
+            style={"description_width": "initial"},
+        )
 
         self.select_simulation_type_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 18px;'>Select simulation type</span>"
@@ -2523,6 +2616,9 @@ class SimulationDetailsWidget(ipw.VBox):
     def load_aiida_preview_suggestions(self, change=None):
         self._preview_entries = {}
         self.preview_suggestions_box.children = []
+        self.existing_exports_warning.value = ""
+        self.existing_exports_confirmation.value = False
+        self.existing_exports_confirmation.layout.display = "none"
         selected_simulation = self.simulations_dropdown.value
         if selected_simulation == "-1":
             self.preview_suggestions_status.value = ""
@@ -2552,7 +2648,10 @@ class SimulationDetailsWidget(ipw.VBox):
         existing_count = 0
         incomplete_count = 0
         new_count = 0
+        accessible_existing = {}
         for suggestion in suggestions:
+            for record in suggestion.get("accessible_existing", []):
+                accessible_existing[record["permid"]] = record
             existing = suggestion.get("existing")
             if existing is not None:
                 checks = suggestion.get("export_checks", [])
@@ -2688,6 +2787,24 @@ class SimulationDetailsWidget(ipw.VBox):
             )
 
         self.preview_suggestions_box.children = cards
+        if accessible_existing:
+            links = []
+            for record in accessible_existing.values():
+                label = html.escape(str(record.get("name") or record["permid"]))
+                url = html.escape(str(record.get("url") or ""), quote=True)
+                collection = html.escape(str(record.get("collection") or ""))
+                linked = (
+                    f'<a href="{url}" target="_blank">{label}</a>' if url else label
+                )
+                links.append(f"<li>{linked} — {collection}</li>")
+            self.existing_exports_warning.value = (
+                "<p style='color:#8a6d3b'><b>This workflow already has simulation "
+                "results in openBIS.</b> Continue only if you intentionally want "
+                "another SIMULATION object. The new simulation will reference the "
+                "same AIIDA_NODE archive; the archive itself is not duplicated."
+                "</p><ul>" + "".join(links) + "</ul>"
+            )
+            self.existing_exports_confirmation.layout.display = ""
         if suggestions:
             messages = []
             if existing_count:
@@ -2705,6 +2822,18 @@ class SimulationDetailsWidget(ipw.VBox):
             self.preview_suggestions_status.value = (
                 "<p>No supported simulation results were found.</p>"
             )
+
+    def existing_export_confirmed(self):
+        return (
+            self.existing_exports_confirmation.layout.display == "none"
+            or self.existing_exports_confirmation.value
+        )
+
+    def duplicate_existing_requested(self):
+        return (
+            self.existing_exports_confirmation.layout.display != "none"
+            and self.existing_exports_confirmation.value
+        )
 
     def preview_overrides(self):
         if not self._preview_entries:
@@ -2765,6 +2894,8 @@ class SimulationDetailsWidget(ipw.VBox):
                 self.simulation_check_status,
                 self.preview_suggestions_title,
                 self.preview_suggestions_status,
+                self.existing_exports_warning,
+                self.existing_exports_confirmation,
                 self.preview_suggestions_box,
             ]
 

@@ -4,12 +4,14 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import random
 import re
 import subprocess
 import tempfile
 from collections.abc import Iterable, Mapping
+from numbers import Real
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -1078,7 +1080,7 @@ def _openbis_collection_id(openbis_object, fallback=""):
 
 def _openbis_eln_url(openbis_object):
     try:
-        return str(openbis_object.get_eln_url())
+        return utils.normalize_openbis_eln_url(openbis_object.get_eln_url())
     except (AttributeError, TypeError, ValueError):
         return ""
 
@@ -3976,11 +3978,36 @@ def _preview_override(preview_overrides, workchain, result_role):
     return preview_overrides.get(f"{workchain.uuid}:{result_role}")
 
 
+def _contains_nonfinite(value):
+    """Return whether a property value contains NaN or infinity."""
+    if isinstance(value, Real) and not isinstance(value, bool):
+        return not math.isfinite(float(value))
+    if isinstance(value, Mapping):
+        return any(_contains_nonfinite(item) for item in value.values())
+    if isinstance(value, (list, tuple, set, np.ndarray)):
+        return any(_contains_nonfinite(item) for item in value)
+    return False
+
+
+def _clean_openbis_properties(properties):
+    """Omit properties whose scalar or multi-value payload is non-finite."""
+    cleaned = {}
+    for code, value in dict(properties).items():
+        if _contains_nonfinite(value):
+            logger.warning("Omitting non-finite openBIS property %s", code)
+            continue
+        cleaned[code] = value
+    return cleaned
+
+
+_ALLOW_DUPLICATE_SIMULATIONS = "__allow_duplicate_simulations__"
+_DUPLICATE_SIMULATION_MARKER = "_aiidalab_duplicate_simulation"
+
+
 def _apply_property_overrides(properties, property_overrides, workchain, result_role):
     """Apply reviewed user values without allowing provenance fields to change."""
-    if not property_overrides:
-        return properties
-    reviewed = property_overrides.get(f"{workchain.uuid}:{result_role}", {})
+    overrides = property_overrides or {}
+    reviewed = overrides.get(f"{workchain.uuid}:{result_role}", {})
     protected = {
         "aiida_node",
         "aiida_source_uuid",
@@ -3996,7 +4023,9 @@ def _apply_property_overrides(properties, property_overrides, workchain, result_
             properties.pop(code, None)
         else:
             properties[code] = value
-    return properties
+    if overrides.get(_ALLOW_DUPLICATE_SIMULATIONS):
+        properties[_DUPLICATE_SIMULATION_MARKER] = True
+    return _clean_openbis_properties(properties)
 
 
 def _mark_export_result(
@@ -4036,6 +4065,19 @@ def _collection_space_code(openbis_session, collection_id):
     raise ValueError(f"Could not determine the openBIS space for {collection_id}.")
 
 
+def find_accessible_simulation_results(openbis_session, object_type, source_uuid):
+    """Return matching simulation results from every space visible to the user."""
+    if not source_uuid:
+        return []
+    return list(
+        openbis_session.get_objects(
+            type=object_type,
+            where={"AIIDA_SOURCE_UUID": str(source_uuid)},
+        )
+        or []
+    )
+
+
 def find_existing_simulation_result(
     openbis_session,
     experiment_id,
@@ -4055,10 +4097,28 @@ def find_existing_simulation_result(
         or []
     )
     if len(existing) > 1:
-        raise recovery.ExportVerificationError(
-            f"Multiple {object_type} results reference {source_uuid} in {target_space}."
+        logger.warning(
+            "Multiple %s simulations reference %s in %s; using the newest "
+            "accessible object after explicit duplicate publication.",
+            object_type,
+            source_uuid,
+            target_space,
         )
-    return existing[0] if existing else None
+        existing = [
+            obj
+            for _, obj in sorted(
+                enumerate(existing),
+                key=lambda item: (
+                    str(
+                        getattr(item[1], "registrationDate", None)
+                        or getattr(item[1], "modificationDate", None)
+                        or ""
+                    ),
+                    item[0],
+                ),
+            )
+        ]
+    return existing[-1] if existing else None
 
 
 def _create_simulation_object(
@@ -4071,15 +4131,18 @@ def _create_simulation_object(
     preview_stem,
     preview_override=None,
 ):
-    properties = dict(properties)
+    properties = _clean_openbis_properties(properties)
     result_role = properties.pop("_aiidalab_result_role", None)
+    allow_duplicate = bool(properties.pop(_DUPLICATE_SIMULATION_MARKER, False))
     source_uuid = properties.get("aiida_source_uuid")
-    existing = find_existing_simulation_result(
-        openbis_session,
-        experiment_id,
-        object_type,
-        source_uuid,
-    )
+    existing = None
+    if not allow_duplicate:
+        existing = find_existing_simulation_result(
+            openbis_session,
+            experiment_id,
+            object_type,
+            source_uuid,
+        )
     if existing is not None:
         for parent in parents:
             _ensure_openbis_parent(existing, parent)
@@ -5437,6 +5500,24 @@ def render_workchain_preview_suggestions(
             property_definitions = _result_property_definitions(target)
             for role, title, stem, renderer in _preview_definitions(target):
                 definition = property_definitions[role]
+                accessible_existing = (
+                    find_accessible_simulation_results(
+                        openbis_session,
+                        definition["object_type"],
+                        target.uuid,
+                    )
+                    if check_existing
+                    else []
+                )
+                accessible_records = [
+                    {
+                        "permid": str(obj.permId),
+                        "name": str(_openbis_property(obj, "name") or obj.permId),
+                        "url": _openbis_eln_url(obj),
+                        "collection": _openbis_collection_id(obj),
+                    }
+                    for obj in accessible_existing
+                ]
                 existing_object = (
                     find_existing_simulation_result(
                         openbis_session,
@@ -5495,7 +5576,7 @@ def render_workchain_preview_suggestions(
                     "result_role": role,
                     "title": title,
                     "object_type": definition["object_type"],
-                    "properties": definition["properties"],
+                    "properties": _clean_openbis_properties(definition["properties"]),
                     "name": f"{stem}.png",
                     "content": content,
                     "error": error,
@@ -5504,6 +5585,7 @@ def render_workchain_preview_suggestions(
                     suggestion["existing"] = existing
                     suggestion["export_checks"] = checks
                     suggestion["needs_preview"] = needs_preview
+                    suggestion["accessible_existing"] = accessible_records
                 suggestions.append(suggestion)
     return suggestions
 
@@ -5542,7 +5624,10 @@ def export_workchain(
     provenance_overrides=None,
     preview_overrides=None,
     property_overrides=None,
+    allow_duplicate_simulations=False,
 ):
+    property_overrides = dict(property_overrides or {})
+    property_overrides[_ALLOW_DUPLICATE_SIMULATIONS] = bool(allow_duplicate_simulations)
     workchain = orm.load_node(workchain_uuid)
     workchains_to_export = get_all_preceding_main_workchains(workchain.uuid)
     simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)

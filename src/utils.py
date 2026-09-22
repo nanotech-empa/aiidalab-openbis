@@ -2,10 +2,12 @@ import contextlib
 import datetime
 import io
 import json
+import logging
 import os
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import ipywidgets as ipw
 import yaml
@@ -25,8 +27,6 @@ LOG_FILE_PATH = LOG_DIR / "aiidalab_openbis_interface.log"
 
 @lru_cache(maxsize=5)
 def get_interface_config_info():
-    openbis_session = connect_openbis_aiida()[0]
-
     info = {
         "object_types": {},
         "object_types_codes": {},
@@ -41,7 +41,17 @@ def get_interface_config_info():
         "instruments_types": {},
     }
 
-    obj_types = openbis_session.get_object_types()
+    openbis_session = connect_openbis_aiida()[0]
+    if openbis_session is None:
+        return info
+
+    try:
+        obj_types = openbis_session.get_object_types()
+    except Exception as error:  # noqa: BLE001 - remote client failures vary
+        logging.getLogger(__name__).info(
+            "openBIS schema unavailable (%s)", type(error).__name__
+        )
+        return info
 
     for obj in obj_types:
         desc = obj.description
@@ -205,6 +215,39 @@ def upload_datasets(
                 os.remove(filename)
 
 
+def normalize_openbis_eln_url(url):
+    """Return an ELN-LIMS URL with exactly one openBIS context segment."""
+    if not url:
+        return ""
+    parts = urlsplit(str(url))
+    marker = "/webapp/eln-lims"
+    path = parts.path or ""
+    if marker in path:
+        prefix, suffix = path.split(marker, 1)
+        prefix = prefix.rstrip("/")
+        while prefix.endswith("/openbis/openbis"):
+            prefix = prefix[: -len("/openbis")]
+        if not prefix.endswith("/openbis"):
+            prefix = f"{prefix}/openbis"
+        path = f"{prefix}{marker}{suffix}"
+    elif path in {"", "/"} or path.rstrip("/").endswith("/openbis"):
+        path = path.rstrip("/")
+        while path.endswith("/openbis/openbis"):
+            path = path[: -len("/openbis")]
+        if not path.endswith("/openbis"):
+            path = f"{path}/openbis"
+        path = f"{path}{marker}/"
+    else:
+        return str(url)
+    return urlunsplit(parts._replace(path=path))
+
+
+def openbis_connection_status_widget(config, openbis_session):
+    """Build the common connection status shown by every notebook interface."""
+    key = "enable_status" if openbis_session is not None else "disable_status"
+    return ipw.HTML(value=config["home_page"][key])
+
+
 def connect_openbis_aiida(eln_url=None):
     try:
         ELN_CONFIG.parent.mkdir(
@@ -229,8 +272,10 @@ def connect_openbis(eln_url, eln_token):
         session_data = {"url": eln_url, "token": eln_token}
         openbis_session = Openbis(eln_url, verify_certificates=False)
         openbis_session.set_token(eln_token)
-    except ValueError:
-        print("Session is no longer valid. Please check if the token is still valid.")
+    except Exception as error:  # noqa: BLE001 - connection failures vary by client stack
+        logging.getLogger(__name__).info(
+            "openBIS connection unavailable (%s)", type(error).__name__
+        )
         openbis_session = None
         session_data = {}
 
@@ -336,24 +381,21 @@ def find_instrument_components(openbis_session, instrument_permid):
 
 
 def generate_openbis_object_history_url(openbis_session, openbis_object):
-    base_url = openbis_session.url
-    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    base_url = normalize_openbis_eln_url(openbis_session.url)
     obj_id = openbis_object.permId
     url = f"{base_url}?viewName=showSampleHierarchyPage&viewData={obj_id}"
     return url
 
 
 def generate_openbis_object_url(openbis_session, openbis_object):
-    base_url = openbis_session.url
-    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    base_url = normalize_openbis_eln_url(openbis_session.url)
     obj_id = openbis_object.permId
     url = f"{base_url}?viewName=showViewSamplePageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{obj_id}%22%7D"
     return url
 
 
 def generate_openbis_dataset_url(openbis_session, openbis_dataset):
-    base_url = openbis_session.url
-    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    base_url = normalize_openbis_eln_url(openbis_session.url)
     obj_id = openbis_dataset.permId
     url = f"{base_url}?viewName=showViewDataSetPageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{obj_id}%22%7D"
     return url
