@@ -16,14 +16,12 @@ UPLOAD_INTERVAL_SECONDS = OPENBIS_AFS_CONFIG.get(
     "upload_interval_seconds", 300
 )  # Upload every 5 minutes
 
-LOG_FILE_PATH = "/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log"
+LOG_FILE_PATH = utils.LOG_FILE_PATH
 
-if not os.path.exists("logs"):
-    os.mkdir("logs")
-
+utils.LOG_DIR.mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename="logs/aiidalab_openbis_interface.log",
+    filename=LOG_FILE_PATH,
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
