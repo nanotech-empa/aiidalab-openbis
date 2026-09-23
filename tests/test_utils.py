@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pandas as pd
+
 from src import utils
 
 
@@ -28,6 +30,41 @@ def test_interface_config_is_empty_when_schema_request_fails(monkeypatch):
 
     assert info["object_types"] == {}
     assert info["actions_types"] == {}
+    utils.get_interface_config_info.cache_clear()
+
+
+def test_interface_config_uses_bulk_object_type_metadata(monkeypatch):
+    class BulkObjectTypes:
+        df = pd.DataFrame(
+            [
+                {
+                    "description": "Atomistic Model",
+                    "code": "ATOMISTIC_MODEL",
+                    "generatedCodePrefix": "ATMO",
+                    "metaData": {"type": "slab_concept"},
+                },
+                {
+                    "description": "Annealing",
+                    "code": "ANNEALING",
+                    "generatedCodePrefix": "ANN",
+                    "metaData": {"type": "action", "icon": "fire"},
+                },
+            ]
+        )
+
+        def __iter__(self):
+            raise AssertionError("bulk object types must not be iterated")
+
+    session = SimpleNamespace(get_object_types=lambda: BulkObjectTypes())
+    utils.get_interface_config_info.cache_clear()
+    monkeypatch.setattr(utils, "connect_openbis_aiida", lambda: (session, {}))
+
+    info = utils.get_interface_config_info()
+
+    assert info["object_types"]["Atomistic Model"] == "ATOMISTIC_MODEL"
+    assert info["slabs_concepts_types"]["Atomistic Model"] == "ATOMISTIC_MODEL"
+    assert info["actions_types"]["Annealing"] == "ANNEALING"
+    assert info["actions_types_icons"]["ANNEALING"] == "fire"
     utils.get_interface_config_info.cache_clear()
 
 
