@@ -1309,16 +1309,25 @@ class ExportSimulationsWidget(ipw.VBox):
         )
 
         self.simulation_details_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Simulation details</span>"
+            value="<span style='font-weight: bold; font-size: 20px;'>Select simulation</span>"
         )
 
         self.select_experiment_widget = widgets.SelectExperimentWidget(
             self.openbis_session
         )
 
-        self.used_aiida_checkbox = ipw.Checkbox(
-            value=False, description="Simulation developed using AiiDA", indent=False
+        self.simulation_source_selector = ipw.RadioButtons(
+            options=[
+                ("Simulation in this AiiDAlab instance", True),
+                ("External simulation or archive", False),
+            ],
+            value=True,
+            description="Simulation source",
+            style={"description_width": "initial"},
+            layout=ipw.Layout(width="600px"),
         )
+        # Compatibility alias used by the established export paths and tests.
+        self.used_aiida_checkbox = self.simulation_source_selector
 
         self.simulation_details_vbox = SimulationDetailsWidget(
             self.openbis_session, True
@@ -1332,9 +1341,11 @@ class ExportSimulationsWidget(ipw.VBox):
         )
 
         self.save_simulations_button = ipw.Button(
-            tooltip="Import simulations",
-            icon="save",
-            layout=ipw.Layout(width="100px", height="50px"),
+            description="Export to openBIS",
+            tooltip="Export the reviewed simulation to openBIS",
+            icon="upload",
+            button_style="primary",
+            layout=ipw.Layout(width="220px", height="50px"),
         )
 
         self.provenance_resolution_box = ipw.VBox()
@@ -1368,17 +1379,17 @@ class ExportSimulationsWidget(ipw.VBox):
         )
 
         # Add functionality to the widgets
-        self.used_aiida_checkbox.observe(
+        self.simulation_source_selector.observe(
             self.load_simulations_details_widgets, names="value"
         )
         self.save_simulations_button.on_click(self.export_simulation_to_openbis)
-        self.used_aiida_checkbox.value = True
+        self.simulation_details_vbox.load_widgets(True)
 
         self.children = [
             self.select_experiment_title,
             self.select_experiment_widget,
             self.simulation_details_title,
-            self.used_aiida_checkbox,
+            self.simulation_source_selector,
             self.simulation_details_vbox,
             increase_search_button,
             self.provenance_resolution_box,
@@ -2278,8 +2289,22 @@ class SimulationDetailsWidget(ipw.VBox):
         self.used_aiida = used_aiida
         self.target_experiment_id = "-1"
 
+        self.related_objects_title = ipw.HTML(
+            value=(
+                "<span style='font-weight: bold; font-size: 20px;'>"
+                "Select related openBIS objects (optional)</span>"
+            )
+        )
+        self.related_objects_help = ipw.HTML(
+            value=(
+                "<p>Link molecules, materials, crystals or slabs that provide "
+                "context for this simulation. Leave this section empty when no "
+                "related object applies.</p>"
+            )
+        )
+
         self.select_molecules_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 18px;'>Select molecules</span>"
+            value="<span style='font-weight: bold; font-size: 18px;'>Molecules</span>"
         )
 
         self.select_reacprod_concepts_title = ipw.HTML(
@@ -2304,27 +2329,30 @@ class SimulationDetailsWidget(ipw.VBox):
         )
 
         self.reacprod_concepts_accordion = ipw.Accordion()
-        reaction_products_available = (
+        self.reaction_products_available = (
             "Reaction Product Concept" in widgets.OPENBIS_OBJECT_TYPES
         )
         self.add_reacprod_concept_button = ipw.Button(
             description=(
                 "Add reaction product concept"
-                if reaction_products_available
+                if self.reaction_products_available
                 else "Reaction products unavailable"
             ),
-            disabled=not reaction_products_available,
+            disabled=not self.reaction_products_available,
             button_style="success",
             tooltip=(
                 "Add reaction product concept"
-                if reaction_products_available
+                if self.reaction_products_available
                 else "The connected openBIS schema has no REACTION_PRODUCT_CONCEPT type"
             ),
             layout=ipw.Layout(width="230px", height="25px"),
         )
 
         self.select_material_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select material</span>"
+            value=(
+                "<span style='font-weight: bold; font-size: 18px;'>"
+                "Material / crystal / slab</span>"
+            )
         )
 
         material_type_options = [
@@ -2365,8 +2393,8 @@ class SimulationDetailsWidget(ipw.VBox):
 
         self.preview_suggestions_title = ipw.HTML(
             value=(
-                "<span style='font-weight: bold; font-size: 18px;'>"
-                "Simulation results</span>"
+                "<span style='font-weight: bold; font-size: 20px;'>"
+                "Review simulation results</span>"
             )
         )
         self.preview_suggestions_status = ipw.HTML()
@@ -2879,25 +2907,36 @@ class SimulationDetailsWidget(ipw.VBox):
     def load_widgets(self, used_aiida):
         self.used_aiida = used_aiida
         if self.used_aiida:
-            self.children = [
+            children = [
+                self.simulations_dropdown_hbox,
+                self.simulation_check_status,
+                self.related_objects_title,
+                self.related_objects_help,
                 self.select_molecules_title,
                 self.molecules_accordion,
                 self.add_molecule_button,
-                self.select_reacprod_concepts_title,
-                self.reacprod_concepts_accordion,
-                self.add_reacprod_concept_button,
                 self.select_material_title,
                 self.material_type_dropdown,
                 self.material_details_vbox,
-                self.select_simulation_title,
-                self.simulations_dropdown_hbox,
-                self.simulation_check_status,
-                self.preview_suggestions_title,
-                self.preview_suggestions_status,
-                self.existing_exports_warning,
-                self.existing_exports_confirmation,
-                self.preview_suggestions_box,
             ]
+            if self.reaction_products_available:
+                children.extend(
+                    [
+                        self.select_reacprod_concepts_title,
+                        self.reacprod_concepts_accordion,
+                        self.add_reacprod_concept_button,
+                    ]
+                )
+            children.extend(
+                [
+                    self.preview_suggestions_title,
+                    self.preview_suggestions_status,
+                    self.existing_exports_warning,
+                    self.existing_exports_confirmation,
+                    self.preview_suggestions_box,
+                ]
+            )
+            self.children = children
 
         else:
             self.children = [

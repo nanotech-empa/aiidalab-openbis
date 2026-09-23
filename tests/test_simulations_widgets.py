@@ -28,6 +28,124 @@ def simulations_widgets(monkeypatch):
     return importlib.import_module("src.simulations_widgets")
 
 
+def test_export_workflow_starts_with_experiment_then_simulation(
+    monkeypatch, simulations_widgets
+):
+    ipw = simulations_widgets.ipw
+
+    class FakeSelectExperimentWidget(ipw.VBox):
+        def __init__(self, _session):
+            super().__init__()
+            self.experiment_dropdown = ipw.Dropdown(
+                options=[("Select experiment...", "-1")], value="-1"
+            )
+
+    class FakeSimulationDetailsWidget(ipw.VBox):
+        def __init__(self, _session, _used_aiida):
+            super().__init__()
+            self.simulation_pk_input = ipw.IntText()
+            self.check_simulation_button = ipw.Button()
+            self.target_experiments = []
+            self.loaded_sources = []
+
+        def set_target_experiment(self, experiment):
+            self.target_experiments.append(experiment)
+
+        def load_widgets(self, used_aiida):
+            self.loaded_sources.append(used_aiida)
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "SelectExperimentWidget",
+        FakeSelectExperimentWidget,
+    )
+    monkeypatch.setattr(
+        simulations_widgets,
+        "SimulationDetailsWidget",
+        FakeSimulationDetailsWidget,
+    )
+
+    widget = simulations_widgets.ExportSimulationsWidget(object())
+
+    assert list(widget.simulation_source_selector.options) == [
+        ("Simulation in this AiiDAlab instance", True),
+        ("External simulation or archive", False),
+    ]
+    assert widget.used_aiida_checkbox is widget.simulation_source_selector
+    assert widget.simulation_details_vbox.loaded_sources == [True]
+    assert list(widget.children[:5]) == [
+        widget.select_experiment_title,
+        widget.select_experiment_widget,
+        widget.simulation_details_title,
+        widget.simulation_source_selector,
+        widget.simulation_details_vbox,
+    ]
+    assert widget.save_simulations_button.description == "Export to openBIS"
+    assert widget.save_simulations_button.tooltip == (
+        "Export the reviewed simulation to openBIS"
+    )
+
+
+def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_products(
+    simulations_widgets,
+):
+    attribute_names = [
+        "simulations_dropdown_hbox",
+        "simulation_check_status",
+        "related_objects_title",
+        "related_objects_help",
+        "select_molecules_title",
+        "molecules_accordion",
+        "add_molecule_button",
+        "select_material_title",
+        "material_type_dropdown",
+        "material_details_vbox",
+        "select_reacprod_concepts_title",
+        "reacprod_concepts_accordion",
+        "add_reacprod_concept_button",
+        "preview_suggestions_title",
+        "preview_suggestions_status",
+        "existing_exports_warning",
+        "existing_exports_confirmation",
+        "preview_suggestions_box",
+    ]
+    widget = SimpleNamespace(
+        **{name: object() for name in attribute_names},
+        reaction_products_available=False,
+    )
+
+    simulations_widgets.SimulationDetailsWidget.load_widgets(widget, True)
+
+    assert widget.children == [
+        widget.simulations_dropdown_hbox,
+        widget.simulation_check_status,
+        widget.related_objects_title,
+        widget.related_objects_help,
+        widget.select_molecules_title,
+        widget.molecules_accordion,
+        widget.add_molecule_button,
+        widget.select_material_title,
+        widget.material_type_dropdown,
+        widget.material_details_vbox,
+        widget.preview_suggestions_title,
+        widget.preview_suggestions_status,
+        widget.existing_exports_warning,
+        widget.existing_exports_confirmation,
+        widget.preview_suggestions_box,
+    ]
+    assert widget.select_reacprod_concepts_title not in widget.children
+
+    widget.reaction_products_available = True
+    simulations_widgets.SimulationDetailsWidget.load_widgets(widget, True)
+
+    assert widget.children.index(widget.material_details_vbox) < widget.children.index(
+        widget.select_reacprod_concepts_title
+    )
+    assert widget.children.index(
+        widget.add_reacprod_concept_button
+    ) < widget.children.index(widget.preview_suggestions_title)
+
+
 def test_preview_image_widget_resamples_without_distortion(simulations_widgets):
     from PIL import Image
 
