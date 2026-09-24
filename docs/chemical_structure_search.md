@@ -28,6 +28,20 @@ with several bracketed units can contribute several read-only search
 representations, but it is not converted automatically into one CXSMILES
 property.
 
+After an AiiDA workflow has been checked in the simulation export form, each
+new precursor or product molecule selector receives a **Generate CDXML from
+AiiDA structure** option. The current generator accepts planar C/H structures
+with exactly one bonded periodic direction. It infers a conservative graph,
+uses explicit hydrogen counts to solve single/double bond orders, and exposes
+long-bond candidates, bond addition/removal, and carbon radicals for review.
+Export remains disabled until carbon valence has a valid solution.
+
+The generated CDXML and PNG stay in notebook memory. They are available as
+downloads, and the CDXML is passed directly to the collection-scoped search
+without emulating a browser upload or writing runtime files below the app. Its
+periodic graph is validated through the same CDXML-to-CXSMILES round trip used
+for stored molecular concepts.
+
 The molecule selector searches only its configured collection. Queries may be
 SMILES or CDXML. Existing records are indexed from `SMILES`, `CXSMILES`, and all
 CDXML files in attachment or raw-data datasets. Finite and periodic structures

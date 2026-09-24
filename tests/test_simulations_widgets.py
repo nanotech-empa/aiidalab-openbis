@@ -2043,3 +2043,37 @@ def test_spm_editor_uses_multi_mode_checkboxes_and_numeric_lists(
     values = widget.values()
     assert values["bias_voltages_v"] == [-1.0, 0.0, 1.0]
     assert values["heights_angstrom"] == [4.0, 6.0]
+
+
+def test_simulation_add_product_offers_checked_aiida_structure(
+    monkeypatch, simulations_widgets
+):
+    calls = []
+
+    class FakeMoleculeWidget(simulations_widgets.ipw.VBox):
+        def __init__(self, session, accordion, index, **kwargs):
+            super().__init__()
+            calls.append((session, accordion, index, kwargs))
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "MoleculeWidget",
+        FakeMoleculeWidget,
+    )
+    structure = object()
+    accordion = simulations_widgets.ipw.Accordion()
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        reacprod_concepts_accordion=accordion,
+        _checked_workchain=SimpleNamespace(
+            inputs=SimpleNamespace(structure=structure)
+        ),
+    )
+
+    simulations_widgets.SimulationDetailsWidget.add_reacprod_concept(widget, None)
+
+    assert calls[0][3] == {
+        "collection_key": "Product Molecule",
+        "role": "product molecule",
+        "structure": structure,
+    }

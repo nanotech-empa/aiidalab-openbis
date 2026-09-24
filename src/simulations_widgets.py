@@ -2291,6 +2291,7 @@ class SimulationDetailsWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.used_aiida = used_aiida
         self.target_experiment_id = "-1"
+        self._checked_workchain = None
 
         self.related_objects_title = ipw.HTML(
             value=(
@@ -2646,6 +2647,7 @@ class SimulationDetailsWidget(ipw.VBox):
     def check_aiida_simulation(self, _button=None):
         """Validate a PK and prepare previews only for supported WorkChains."""
         self._clear_inferred_molecules()
+        self._checked_workchain = None
         self.simulation_check_status.value = ""
         self._preview_entries = {}
         self.preview_suggestions_box.children = []
@@ -2681,6 +2683,7 @@ class SimulationDetailsWidget(ipw.VBox):
             )
             return
 
+        self._checked_workchain = workchain
         description = aiida_utils._workchain_description(workchain)
         suffix = f": {html.escape(description)}" if description else ""
         if workchain.pk != pk:
@@ -3136,11 +3139,23 @@ class SimulationDetailsWidget(ipw.VBox):
             registration_date_checkbox.observe(sort_material_dropdown, names="value")
             material_dropdown.observe(load_material_details, names="value")
 
+    def _checked_structure(self):
+        workchain = getattr(self, "_checked_workchain", None)
+        inputs = getattr(workchain, "inputs", None)
+        return getattr(inputs, "structure", None)
+
     def add_molecule(self, b):
         molecules_accordion_children = list(self.molecules_accordion.children)
         molecule_index = len(molecules_accordion_children)
+        kwargs = {}
+        structure = SimulationDetailsWidget._checked_structure(self)
+        if structure is not None:
+            kwargs["structure"] = structure
         molecule_widget = widgets.MoleculeWidget(
-            self.openbis_session, self.molecules_accordion, molecule_index
+            self.openbis_session,
+            self.molecules_accordion,
+            molecule_index,
+            **kwargs,
         )
         molecules_accordion_children.append(molecule_widget)
         self.molecules_accordion.children = molecules_accordion_children
@@ -3150,12 +3165,18 @@ class SimulationDetailsWidget(ipw.VBox):
             self.reacprod_concepts_accordion.children
         )
         reacprod_concept_index = len(reacprod_concepts_accordion_children)
+        kwargs = {
+            "collection_key": "Product Molecule",
+            "role": "product molecule",
+        }
+        structure = SimulationDetailsWidget._checked_structure(self)
+        if structure is not None:
+            kwargs["structure"] = structure
         reacprod_concept_widget = widgets.MoleculeWidget(
             self.openbis_session,
             self.reacprod_concepts_accordion,
             reacprod_concept_index,
-            collection_key="Product Molecule",
-            role="product molecule",
+            **kwargs,
         )
         reacprod_concepts_accordion_children.append(reacprod_concept_widget)
         self.reacprod_concepts_accordion.children = reacprod_concepts_accordion_children

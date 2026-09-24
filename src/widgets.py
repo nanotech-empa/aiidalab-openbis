@@ -1,12 +1,15 @@
-import ipywidgets as ipw
-from src import chemical_search, utils
-from IPython.display import display, Javascript
-import pandas as pd
-import os
-import rdkit
-from rdkit.Chem import AllChem, Draw, rdMolDescriptors
-import shutil
+import html
 import io
+import os
+import shutil
+
+import ipywidgets as ipw
+import pandas as pd
+import rdkit
+from IPython.display import Javascript, display
+from rdkit.Chem import AllChem, Draw, rdMolDescriptors
+
+from src import chemical_search, utils
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -543,6 +546,7 @@ class MoleculeWidget(ipw.VBox):
         object_index,
         collection_key="Precursor Molecule",
         role="molecule",
+        structure=None,
     ):
         super().__init__()
         self.openbis_session = openbis_session
@@ -551,6 +555,10 @@ class MoleculeWidget(ipw.VBox):
         self.collection_key = collection_key
         self.role = role
         self.title = ""
+        self.structure = structure
+        self.generated_cdxml = b""
+        self.generated_png = b""
+        self.generated_representation = None
 
         molecules_objects = utils.get_openbis_objects(
             self.openbis_session,
@@ -601,6 +609,29 @@ class MoleculeWidget(ipw.VBox):
         )
         self.structure_search_accordion.set_title(0, "Find by SMILES or CDXML")
 
+        self.cdxml_generator_accordion = None
+        if structure is not None:
+            self.open_cdxml_generator_button = ipw.Button(
+                description="Open CDXML generator",
+                button_style="info",
+                tooltip="Review inferred bonds and generate periodic CDXML",
+            )
+            self.cdxml_generator_status = ipw.HTML(
+                "For planar C/H structures with one bonded periodic direction. "
+                "Ambiguous long bonds and radicals remain under user control."
+            )
+            self.cdxml_generator_box = ipw.VBox(
+                [self.cdxml_generator_status, self.open_cdxml_generator_button]
+            )
+            self.cdxml_generator_accordion = ipw.Accordion(
+                children=[self.cdxml_generator_box],
+                selected_index=None,
+            )
+            self.cdxml_generator_accordion.set_title(
+                0, "Generate CDXML from AiiDA structure"
+            )
+            self.open_cdxml_generator_button.on_click(self._open_cdxml_generator)
+
         self.remove_molecule_button = ipw.Button(
             description="Remove",
             disabled=False,
@@ -615,13 +646,42 @@ class MoleculeWidget(ipw.VBox):
 
         self.dropdown.observe(self.load_details, names="value")
         self.remove_molecule_button.on_click(self.remove_molecule)
-        self.children = [
-            self.dropdown,
-            self.structure_search_accordion,
-            self.details_vbox,
-            self.molecule_sketch,
-            self.remove_molecule_button,
-        ]
+        children = [self.dropdown]
+        if self.cdxml_generator_accordion is not None:
+            children.append(self.cdxml_generator_accordion)
+        children.extend(
+            [
+                self.structure_search_accordion,
+                self.details_vbox,
+                self.molecule_sketch,
+                self.remove_molecule_button,
+            ]
+        )
+        self.children = children
+
+    def _open_cdxml_generator(self, _button=None):
+        self.open_cdxml_generator_button.disabled = True
+        try:
+            from src.cdxml_editor import PeriodicCdxmlEditor
+
+            self.cdxml_editor = PeriodicCdxmlEditor(
+                structure=self.structure,
+                on_export=self._use_generated_cdxml,
+            )
+            self.cdxml_generator_box.children = [self.cdxml_editor]
+        except Exception as exc:
+            self.open_cdxml_generator_button.disabled = False
+            self.cdxml_generator_status.value = (
+                "<span style='color:#b00020'><b>Could not open the CDXML "
+                f"generator:</b> {html.escape(str(exc))}</span>"
+            )
+
+    def _use_generated_cdxml(self, content, filename, png, representation):
+        self.generated_cdxml = bytes(content)
+        self.generated_png = bytes(png)
+        self.generated_representation = representation
+        self.structure_search.set_cdxml_query(content, filename)
+        self.structure_search_accordion.selected_index = 0
 
     def _select_search_result(self, permid):
         values = {

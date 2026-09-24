@@ -2,10 +2,11 @@
 
 from copy import deepcopy
 from pathlib import Path
-from xml.etree import ElementTree as ET
 from types import SimpleNamespace
+from xml.etree import ElementTree as ET
 
 from src.chemical_search import (
+    MoleculeStructureSearchWidget,
     OpenbisChemicalIndex,
     match_quality_to_tanimoto,
     search_representation_from_cdxml,
@@ -14,7 +15,6 @@ from src.chemical_search import (
     tanimoto_to_match_quality,
 )
 from src.chemical_structures import generate_periodic_cxsmiles
-
 
 GNR_CDXML = Path(__file__).parent / "data" / "periodic_gnr.cdxml"
 
@@ -199,3 +199,20 @@ def test_cache_rejects_another_collection(tmp_path):
         assert "another collection" in str(exc)
     else:
         raise AssertionError("A chemical index must not cross collection boundaries")
+
+
+def test_generated_cdxml_can_be_used_without_file_upload(tmp_path):
+    collection = "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION"
+    widget = MoleculeStructureSearchWidget(
+        FakeSession([]),
+        collection,
+        cache_path=tmp_path / "index.json",
+    )
+
+    widget.set_cdxml_query(GNR_CDXML.read_bytes(), "generated-gnr.cdxml")
+    query = widget._query()
+
+    assert widget.input_kind.value == "cdxml"
+    assert query.periodic
+    assert query.formula == "C36H4"
+    assert "generated-gnr.cdxml" in widget.status.value

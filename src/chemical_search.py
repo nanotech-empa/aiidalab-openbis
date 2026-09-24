@@ -7,8 +7,8 @@ import html
 import json
 import tempfile
 from collections import Counter
-from dataclasses import asdict, dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,7 +25,6 @@ from src.chemical_structures import (
     periodic_graphs_from_cdxml,
     representation_from_cdxml,
 )
-
 
 MOLECULE_TYPE = "MOLECULE"
 DATASET_TYPES = {"ATTACHMENT", "RAW_DATA"}
@@ -674,8 +673,10 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         )
         self.details = ipw.HTML()
         self._hits_by_permid: dict[str, SearchHit] = {}
+        self._generated_cdxml: tuple[str, bytes] | None = None
 
         self.input_kind.observe(self._switch_input, names="value")
+        self.cdxml.observe(self._uploaded_cdxml_changed, names="value")
         self.update_button.on_click(self._update)
         self.search_button.on_click(self._search)
         self.results.observe(self._select, names="value")
@@ -716,6 +717,19 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.smiles.layout.display = "" if use_smiles else "none"
         self.cdxml.layout.display = "none" if use_smiles else ""
 
+    def _uploaded_cdxml_changed(self, change):
+        if change.get("new"):
+            self._generated_cdxml = None
+
+    def set_cdxml_query(self, content: bytes, filename="generated.cdxml"):
+        """Load generated CDXML without emulating a browser file upload."""
+        self._generated_cdxml = (str(filename), bytes(content))
+        self.input_kind.value = "cdxml"
+        self._set_status(
+            f"Generated CDXML ready for search: {filename}.",
+            "ok",
+        )
+
     def _update(self, _=None):
         self.update_button.disabled = True
         self.search_button.disabled = True
@@ -742,9 +756,12 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 source="SMILES query",
                 source_id="query:SMILES",
             )
-        filename, content = _upload_content(self.cdxml)
+        if self._generated_cdxml is not None:
+            filename, content = self._generated_cdxml
+        else:
+            filename, content = _upload_content(self.cdxml)
         if content is None:
-            raise ValueError("Upload a CDXML query")
+            raise ValueError("Upload or generate a CDXML query")
         return search_representation_from_cdxml(content, filename or "query.cdxml")
 
     def _search(self, _=None):
