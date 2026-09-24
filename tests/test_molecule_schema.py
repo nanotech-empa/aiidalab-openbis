@@ -72,7 +72,15 @@ def test_target_schema_documentation_covers_molecular_and_simulation_decisions()
     assert "This is the normative target schema" in documentation
     assert "`cxsmiles` | CXSMILES" in documentation
     assert "| MOLECULE | 0 | - |" in documentation
-    assert "MINIMUM_ENERGY_POTENTIAL" not in documentation
+    for obsolete_code in (
+        "GEOMETRY_OPTIMIZATION",
+        "MINIMUM_ENERGY_POTENTIAL",
+        "PDOS",
+        "POTENTIAL_ENERGY_CALCULATION",
+        "SPM",
+        "STM_SIMULATION",
+    ):
+        assert f"* **Code:** `{obsolete_code}`" not in documentation
     assert "MOLECULE_CONCEPT" not in simulation_spec
 
     for code, definition in OBJECT_TYPES.items():
