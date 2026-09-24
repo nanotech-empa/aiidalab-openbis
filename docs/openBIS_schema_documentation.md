@@ -1,5 +1,7 @@
 # OpenBIS Data Model Documentation
 
+**Status:** This is the normative target schema for the AiiDAlab-openBIS app. A deployed instance may still contain obsolete types or may not yet contain newly approved fields; those differences are migration work and do not redefine this model.
+
 This document provides a comprehensive overview of the openBIS Data Model schema configured for tracking experimental, operational, and computational workflows in advanced materials science, surface physics, and nanotechnology infrastructure. openBIS is an open-source Research Data Management (RDM) platform designed to support data provenance, reproducibility, and compliance with FAIR (Findable, Accessible, Interoperable, and Reusable) data principles.
 
 The schema documented herein is structured into three primary architectural pillars to ensure seamless data tracking from initial sample fabrication to final computational analysis:
@@ -29,12 +31,14 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Author](#author)
     * [🔥 Bakeout](#-bakeout)
     * [Band Structure](#band-structure)
+    * [Band Unfolding](#band-unfolding)
     * [Balance](#balance)
     * [Balance Settings](#balance-settings)
     * [By Hand](#by-hand)
     * [By Hand Settings](#by-hand-settings)
     * [⚙️ Calibration & Optimization](#%EF%B8%8F-calibration--optimization)
     * [Chamber](#chamber)
+    * [Charge Analysis](#charge-analysis)
     * [🧼 Cleaning](#-cleaning)
     * [Coating](#coating)
     * [Code](#code)
@@ -54,6 +58,7 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Device Substrate](#device-substrate)
     * [Dewar](#dewar)
     * [Dosing](#dosing)
+    * [DOS](#dos)
     * [Draft](#draft)
     * [Dropcast-Coating](#dropcast-coating)
     * [E-beam Heater](#e-beam-heater)
@@ -61,6 +66,7 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Electrochemical Cell](#electrochemical-cell)
     * [Electrochemical Cell Settings](#electrochemical-cell-settings)
     * [Electronics](#electronics)
+    * [Energy Calculation](#energy-calculation)
     * [⚠️ Errors & Problems](#%EF%B8%8F-errors--problems)
     * [Executable](#executable)
     * [Field Emission](#field-emission)
@@ -84,8 +90,9 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Mean Field Hubbard](#mean-field-hubbard)
     * [Measurement Session](#measurement-session)
     * [Mechanical Pressing](#mechanical-pressing)
-    * [Minimum Energy Potential](#minimum-energy-potential)
+    * [Minimum Energy Path](#minimum-energy-path)
     * [Molecule](#molecule)
+    * [Molecular Dynamics](#molecular-dynamics)
     * [Organisation](#organisation)
     * [📝 Other](#-other)
     * [PBN Stage](#pbn-stage)
@@ -111,6 +118,7 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Spin Coater](#spin-coater)
     * [Spin Coater Settings](#spin-coater-settings)
     * [SPM Controller](#spm-controller)
+    * [SPM Simulation](#spm-simulation)
     * [Sputter Gun](#sputter-gun)
     * [Sputter Gun Settings](#sputter-gun-settings)
     * [Sputtering](#sputtering)
@@ -414,6 +422,22 @@ By mapping the detailed relationships between physical materials, hardware state
 | CRYSTAL_CONCEPT | 0 | - |
 | GEOMETRY_OPTIMISATION | 0 | - |
 
+#### Children:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ENERGY_CALCULATION | 0 | - |
+| GEOMETRY_OPTIMISATION | 0 | - |
+| BAND_STRUCTURE | 0 | - |
+| BAND_UNFOLDING | 0 | - |
+| CHARGE_ANALYSIS | 0 | - |
+| DOS | 0 | - |
+| MINIMUM_ENERGY_PATH | 0 | - |
+| SPM_SIMULATION | 0 | - |
+| VIBRATIONAL_SPECTROSCOPY | 0 | - |
+| MOLECULAR_DYNAMICS | 0 | - |
+| UNCLASSIFIED_SIMULATION | 0 | - |
+
 #### Section:
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
@@ -496,22 +520,121 @@ By mapping the detailed relationships between physical materials, hardware state
 * **Generated code prefix:** `BAND`
 * **Semantic Annotation:**
 * **Metadata:**
+* **Description:** Electronic band-structure calculation.
 
-#### Section:
+#### Parents:
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 0 | - |
+| CRYSTAL_CONCEPT | 0 | - |
+
+At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `band_gap` | Band gap | Description | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `band_gap_ev` | Band gap (eV) | Band gap (eV) | REAL | True | False | False |  |  |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+| `k_path` | k-path | k-path | VARCHAR | False | False | False |  |  |
+| `electronic_gap_type` | Electronic gap type | Electronic gap type | CONTROLLEDVOCABULARY (ELECTRONIC_GAP_TYPE_ENUM) | False | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
+
+### Band Unfolding
+* **Code:** `BAND_UNFOLDING`
+* **Generated code prefix:** `UNFD`
+* **Semantic Annotation:**
+* **Metadata:**
+* **Description:** Electronic band unfolding from a supercell to a primitive-cell path.
+
+#### Parents:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 1 | 1 |
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+| `unfolding_implementation` | Unfolding implementation | Unfolding implementation | CONTROLLEDVOCABULARY (UNFOLDING_IMPLEMENTATION_ENUM) | True | False | False |  |  |
+
+#### Section: Unfolding settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `supercell_matrix` | Supercell matrix | Supercell matrix | MULTILINE_VARCHAR | True | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `k_path` | k-path | k-path | VARCHAR | True | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+| `energy_min_ev` | Minimum energy (eV) | Minimum energy (eV) | REAL | False | False | False |  |  |
+| `energy_max_ev` | Maximum energy (eV) | Maximum energy (eV) | REAL | False | False | False |  |  |
+| `projection_description` | Projection description | Projection description | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
 
 ### By Hand
 * **Code:** `BY_HAND`
@@ -575,6 +698,62 @@ By mapping the detailed relationships between physical materials, hardware state
 | `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}`
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### Charge Analysis
+* **Code:** `CHARGE_ANALYSIS`
+* **Generated code prefix:** `CHARGE`
+* **Semantic Annotation:**
+* **Metadata:**
+* **Description:** Atomic, orbital, fragment, or spatial charge analysis.
+
+#### Parents:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 1 | 1 |
+| ENERGY_CALCULATION | 0 | 1 |
+| GEOMETRY_OPTIMISATION | 0 | 1 |
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+| `charge_analysis_method` | Charge analysis method | Charge analysis method | VARCHAR | True | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
 
 ### 🧼 Cleaning
 * **Code:** `CLEANING_LOGENTRY`
@@ -956,6 +1135,68 @@ By mapping the detailed relationships between physical materials, hardware state
 | `current_weight_kg` | Current weight [kg] | Current weight [kg] | REAL | False | False | False |
 | `tara_weight_kg` | Tara weight [kg] | Tara weight [kg] | REAL | False | False | False |
 
+### DOS
+* **Code:** `DOS`
+* **Generated code prefix:** `DOS`
+* **Semantic Annotation:**
+* **Metadata:**
+* **Description:** Electronic density-of-states calculation.
+
+#### Parents:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 0 | - |
+| MOLECULE | 0 | - |
+| CRYSTAL_CONCEPT | 0 | - |
+| ENERGY_CALCULATION | 0 | 1 |
+
+At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is required.
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `pdos` | Projected density of states | Projected density of states | BOOLEAN | True | False | False |  |  |
+| `projection_description` | Projection description | Projection description | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+| `energy_min_ev` | Minimum energy (eV) | Minimum energy (eV) | REAL | False | False | False |  |  |
+| `energy_max_ev` | Maximum energy (eV) | Maximum energy (eV) | REAL | False | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
+
 ### Dosing
 * **Code:** `DOSING`
 * **Generated code prefix:** `GASD`
@@ -1097,6 +1338,64 @@ By mapping the detailed relationships between physical materials, hardware state
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
+### Energy Calculation
+* **Code:** `ENERGY_CALCULATION`
+* **Generated code prefix:** `ENERGY`
+* **Semantic Annotation:**
+* **Metadata:**
+* **Description:** Fixed-geometry energy calculation.
+
+#### Parents:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 0 | - |
+| MOLECULE | 0 | - |
+| CRYSTAL_CONCEPT | 0 | - |
+
+At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is required.
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `total_energy_hartree` | Total energy (Hartree) | Total energy (Hartree) | REAL | True | False | False |  |  |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
+
 ### ⚠️ Errors & Problems
 * **Code:** `ERRORS_AND_PROBLEMS_LOGENTRY`
 * **Generated code prefix:** `ERRORSANDPROBLEMSLOG`
@@ -1203,26 +1502,72 @@ By mapping the detailed relationships between physical materials, hardware state
 * **Generated code prefix:** `GEOP`
 * **Semantic Annotation:**
 * **Metadata:**
+* **Description:** Geometry and optional cell optimization.
 
-#### Section:
+#### Parents:
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 1 | 1 |
+
+#### Children:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 1 | 1 |
+| CHARGE_ANALYSIS | 0 | - |
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `cell_opt_constraints` | Cell optimisation constraints | Cell optimisation constraints | VARCHAR | False | False | False |
-| `cell_optimised` | Cell optimised | Cell optimised | BOOLEAN | False | False | False |
-| `driver_code` | Driver code | Driver code | VARCHAR | False | False | False |
-| `constrained` | Constrained | Constrained | BOOLEAN | False | False | False |
-| `force_convergence_threshold` | Force convergence threshold | Force convergence threshold | JSON | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+
+#### Section: Optimization
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `constrained` | Constrained | Constrained | BOOLEAN | True | False | False |  |  |
+| `cell_optimization` | Cell optimization | Cell optimization | BOOLEAN | True | False | False |  |  |
+| `constraints_description` | Constraints description | Constraints description | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `cell_constraints` | Cell constraints | Cell constraints | VARCHAR | False | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `final_energy_hartree` | Final energy (Hartree) | Final energy (Hartree) | REAL | True | False | False |  |  |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+| `final_max_force_hartree_per_bohr` | Final maximum force (Hartree/bohr) | Final maximum force (Hartree/bohr) | REAL | False | False | False |  |  |
+| `number_of_steps` | Number of steps | Number of steps | INTEGER | False | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
 
 ### Glassware
 * **Code:** `GLASSWARE`
@@ -1341,7 +1686,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |
-
 
 ### Instrument STM
 * **Code:** `INSTRUMENT.STM`
@@ -1548,7 +1892,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `measurement_folder_path` | Measurement Folder Path | Measurement Folder Path | VARCHAR | False | False | False |
 
-
 ### Mechanical Pressing
 * **Code:** `MECHANICAL_PRESSING`
 * **Generated code prefix:** `MEPR`
@@ -1567,34 +1910,150 @@ By mapping the detailed relationships between physical materials, hardware state
 | `by_hand` | By hand | By hand | OBJECT (BY_HAND) | False | False | False |
 | `by_hand_settings` | By hand settings | By hand settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
 
-### Minimum Energy Potential
-
-> **Legacy empty type.** `MINIMUM_ENERGY_POTENTIAL` used “potential” where
-> “path” was intended and is superseded by `MINIMUM_ENERGY_PATH`. The current
-> simulation schema and its AiiDA mapping are specified in
-> [simulation_object_types.md](simulation_object_types.md#minimum_energy_path).
-> `REACTION_BARRIER` remains separate; its scope, including possible
-> MD/free-energy methods, will be defined independently.
-
-* **Code:** `MINIMUM_ENERGY_POTENTIAL`
-* **Generated code prefix:** `MEPO`
+### Minimum Energy Path
+* **Code:** `MINIMUM_ENERGY_PATH`
+* **Generated code prefix:** `MEP`
 * **Semantic Annotation:**
 * **Metadata:**
+* **Description:** Minimum-energy path from NEB, a replica chain, or another specified method.
 
-#### Section:
+#### Parents:
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 2 | 2 |
+| MINIMUM_ENERGY_PATH | 0 | 1 |
+
+#### Children:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| MINIMUM_ENERGY_PATH | 0 | - |
+
+The two required `ATOMISTIC_MODEL` parents are the initial and final structures.
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `energies` | Energies | Energies | JSON | False | False | False |
-| `energy_barrier` | Energy Barrier | Energy Barrier | JSON | False | False | False |
-| `geometry_constraints` | Geometry Constraints | Geometry Constraints | REAL | False | True | False |
-| `geometry_constraints_increments` | Geometry Constraints Increments | Geometry Constraints Increments | REAL | False | True | False |
-| `method_type` | Method Type | Method Type | CONTROLLEDVOCABULARY (PATHFINDINGMETHODENUM) | False | False | False |
-| `number_geometries` | Number of geometries | Number of geometries | INTEGER | False | False | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `reaction_coordinate_description` | Reaction coordinate description | Reaction coordinate description | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+| `mep_method` | MEP method | MEP method | CONTROLLEDVOCABULARY (MEP_METHOD_ENUM) | True | False | False |  |  |
+| `neb_variant` | NEB variant | NEB variant | CONTROLLEDVOCABULARY (NEB_VARIANT_ENUM) | False | False | False |  |  |
+| `other_method_description` | Other MEP method description | Other MEP method description | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `relative_energies_ev` | Relative energies (eV) | Relative energies (eV) | REAL | True | True | False |  |  |
+| `forward_barrier_ev` | Forward barrier (eV) | Forward barrier (eV) | REAL | True | False | False |  |  |
+| `backward_barrier_ev` | Backward barrier (eV) | Backward barrier (eV) | REAL | True | False | False |  |  |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+| `number_of_images` | Number of images | Number of images | INTEGER | True | False | False |  |  |
+
+#### Section: Path definition
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `collective_variables` | Collective variables | Collective variables | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `constraints_description` | Constraints description | Constraints description | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
+
+### Molecular Dynamics
+* **Code:** `MOLECULAR_DYNAMICS`
+* **Generated code prefix:** `MD`
+* **Semantic Annotation:**
+* **Metadata:**
+* **Description:** Molecular-dynamics simulation.
+
+#### Parents:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 1 | 1 |
+| GEOMETRY_OPTIMISATION | 0 | 1 |
+
+#### Children:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 0 | 1 |
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+
+#### Section: Simulation settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `time_step_fs` | Time step (fs) | Time step (fs) | REAL | True | False | False |  |  |
+| `total_time_fs` | Total time (fs) | Total time (fs) | REAL | True | False | False |  |  |
+| `ensemble` | Ensemble | Ensemble | CONTROLLEDVOCABULARY (MD_ENSEMBLE_ENUM) | False | False | False |  |  |
+| `temperature_k` | Temperature (K) | Temperature (K) | REAL | False | False | False |  |  |
+| `pressure_bar` | Pressure (bar) | Pressure (bar) | REAL | False | False | False |  |  |
+| `thermostat` | Thermostat | Thermostat | VARCHAR | False | False | False |  |  |
+| `barostat` | Barostat | Barostat | VARCHAR | False | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `completed` | Completed | Completed | BOOLEAN | True | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
 
 ### Molecule
 * **Code:** `MOLECULE`
@@ -1602,13 +2061,29 @@ By mapping the detailed relationships between physical materials, hardware state
 * **Semantic Annotation:**
 * **Metadata:** `{'type': 'material_concept'}`
 
+#### Parents:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| MOLECULE | 0 | - |
+
+#### Children:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| MOLECULE | 0 | - |
+| ATOMISTIC_MODEL | 0 | - |
+| ENERGY_CALCULATION | 0 | - |
+| DOS | 0 | - |
+| UNCLASSIFIED_SIMULATION | 0 | - |
+
 #### Section:
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}` |
 | `chemdraw_name` | ChemDraw Name | ChemDraw Name | VARCHAR | False | False | False |
 | `empa_number` | Empa Number | Empa Number | INTEGER | False | False | False |
 | `smiles` | SMILES | SMILES | VARCHAR | False | False | False |
@@ -1843,7 +2318,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `actions` | Actions | Actions | OBJECT (All) | False | True | False | | `{'object_subtypes': 'ACTION, ANNEALING, COOLDOWN, DELAMINATION, DEPOSITION, DILUTION, DOSING, DROPCAST_COATING, ETCHING, FISHING, MECHANICAL_PRESSING, PLASMA, RINSE, SOAKING, SPIN_COATING, SPUTTERING'}` |
 
-
 ### Publication
 * **Code:** `PUBLICATION`
 * **Generated code prefix:** `PUB`
@@ -1958,7 +2432,6 @@ By mapping the detailed relationships between physical materials, hardware state
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `object_status` | Object Status | Object Status | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-
 
 ### Scroll Pump
 * **Code:** `SCROLL_PUMP`
@@ -2113,6 +2586,88 @@ By mapping the detailed relationships between physical materials, hardware state
 | `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+### SPM Simulation
+* **Code:** `SPM_SIMULATION`
+* **Generated code prefix:** `SPMS`
+* **Semantic Annotation:**
+* **Metadata:**
+* **Description:** Scanning-probe-microscopy simulation.
+
+#### Parents:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 1 | 1 |
+| ENERGY_CALCULATION | 0 | 1 |
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+| `spm_mode` | SPM modes | SPM modes | CONTROLLEDVOCABULARY (SPM_MODE_ENUM) | True | True | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+
+#### Section: Simulation settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `bias_voltages_v` | Bias voltages (V) | Bias voltages (V) | REAL | False | True | False |  |  |
+| `heights_angstrom` | Heights (angstrom) | Heights (angstrom) | REAL | False | True | False |  |  |
+| `isovalues_au` | Isovalues (a.u.) | Isovalues (a.u.) | REAL | False | True | False |  |  |
+| `p_tip_ratios` | p-tip ratios | p-tip ratios | REAL | False | True | False |  |  |
+| `tip_model` | Tip model | Tip model | VARCHAR | False | False | False |  |  |
+| `scan_area_angstrom2` | Scan area (angstrom^2) | Scan area (angstrom^2) | REAL | False | False | False |  |  |
+| `image_modes` | Image modes | Image modes | CONTROLLEDVOCABULARY (SPM_IMAGE_MODE_ENUM) | False | True | False |  |  |
+
+#### Section: Orbital settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `orbital_energies_ev` | Orbital energies (eV) | Orbital energies (eV) | REAL | False | True | False |  |  |
+
+#### Section: AFM settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `afm_amplitude_angstrom` | AFM amplitude (angstrom) | AFM amplitude (angstrom) | REAL | False | False | False |  |  |
+| `afm_probe_type` | AFM probe type | AFM probe type | VARCHAR | False | False | False |  |  |
+| `afm_tip_charge_e` | AFM tip charge (e) | AFM tip charge (e) | REAL | False | False | False |  |  |
+| `afm_scan_z_min_angstrom` | AFM scan z minimum (angstrom) | AFM scan z minimum (angstrom) | REAL | False | False | False |  |  |
+| `afm_scan_z_max_angstrom` | AFM scan z maximum (angstrom) | AFM scan z maximum (angstrom) | REAL | False | False | False |  |  |
+| `afm_scan_z_step_angstrom` | AFM scan z step (angstrom) | AFM scan z step (angstrom) | REAL | False | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
 
 ### Sputter Gun
 * **Code:** `SPUTTER_GUN`
@@ -2358,21 +2913,68 @@ By mapping the detailed relationships between physical materials, hardware state
 * **Generated code prefix:** `UNSM`
 * **Semantic Annotation:**
 * **Metadata:**
+* **Description:** Fallback for computational results without a dedicated type.
 
-#### Section:
+#### Parents:
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 0 | - |
+| MOLECULE | 0 | - |
+| CRYSTAL_CONCEPT | 0 | - |
+| ENERGY_CALCULATION | 0 | - |
+| GEOMETRY_OPTIMISATION | 0 | - |
+| BAND_STRUCTURE | 0 | - |
+| BAND_UNFOLDING | 0 | - |
+| CHARGE_ANALYSIS | 0 | - |
+| DOS | 0 | - |
+| MINIMUM_ENERGY_PATH | 0 | - |
+| SPM_SIMULATION | 0 | - |
+| VIBRATIONAL_SPECTROSCOPY | 0 | - |
+| MOLECULAR_DYNAMICS | 0 | - |
+| UNCLASSIFIED_SIMULATION | 0 | - |
+
+#### Children:
+
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 0 | - |
+
+A structural or concept parent is required when applicable; simulation parents are optional provenance links.
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `simulation_description` | Simulation description | Simulation description | MULTILINE_VARCHAR | True | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+| `main_result_description` | Main result description | Main result description | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `main_result_value_numeric` | Main result value | Main result value | REAL | False | False | False |  |  |
+| `main_result_unit` | Main result unit | Main result unit | VARCHAR | False | False | False |  |  |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | False | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+| `charge` | Charge | Charge | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
 
 ### Vacuum Oven
 * **Code:** `VACUUM_OVEN`
@@ -2462,21 +3064,52 @@ By mapping the detailed relationships between physical materials, hardware state
 * **Generated code prefix:** `VBSP`
 * **Semantic Annotation:**
 * **Metadata:**
+* **Description:** Vibrational, phonon, IR, or Raman calculation.
 
-#### Section:
+#### Parents:
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Object Type | Minimum | Maximum |
+| :--- | :---: | :---: |
+| ATOMISTIC_MODEL | 1 | 1 |
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | True | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+#### Section: Method
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |  |  |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |  |  |
+| `charge` | Charge | Charge | REAL | True | False | False |  |  |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |  |  |
+| `vibrational_mode` | Vibrational mode | Vibrational mode | CONTROLLEDVOCABULARY (VIBRATIONAL_MODE_ENUM) | True | False | False |  |  |
+
+#### Section: Results
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |
+
+#### Section: Electronic properties
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
+| `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+| `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
+
+#### Section: Provenance
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `executables` | Executables | Executables | OBJECT (EXECUTABLE) | False | True | False |  |  |
+| `aiida_node` | AiiDA node | AiiDA node | OBJECT (AIIDA_NODE) | False | False | False |  |  |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |  |  |
 
 ### Wafer
 * **Code:** `WAFER`
@@ -2575,7 +3208,9 @@ By mapping the detailed relationships between physical materials, hardware state
 
 * Currently in openBIS, there are the following dataset types:
     * [DAT dataset](#dat-dataset)
+    * [ELN preview](#eln-preview)
     * [Observable](#observable)
+    * [Raw data](#raw-data)
     * [SXM dataset](#sxm-dataset)
 
 ### DAT dataset
@@ -2590,6 +3225,13 @@ By mapping the detailed relationships between physical materials, hardware state
 | `description` | Description | VARCHAR | False | False | False | Description |  |
 | `comments` | Comments | VARCHAR | False | False | False | Comments |  |
 
+### ELN preview
+* **Code:** `ELN_PREVIEW`
+* **Description:** Preview images rendered in the electronic lab notebook.
+* **Metadata:**
+
+*No assigned property types.*
+
 ### Observable
 
 * **Code:** `OBSERVABLE`
@@ -2601,6 +3243,13 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | VARCHAR | False | False | False | Name |  |
 | `description` | Description | VARCHAR | False | False | False | Description |  |
 | `comments` | Comments | VARCHAR | False | False | False | Comments |  |
+
+### Raw data
+* **Code:** `RAW_DATA`
+* **Description:** Raw or compact scientific result files.
+* **Metadata:**
+
+*No assigned property types.*
 
 ### SXM dataset
 
@@ -2626,6 +3275,16 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Default dataset views](#default-dataset-views)
     * [Default object views](#default-object-views)
     * [Draft type](#draft-type)
+    * [Electronic gap type](#electronic-gap-type)
+    * [Minimum-energy-path method](#minimum-energy-path-method)
+    * [Molecular dynamics ensemble](#molecular-dynamics-ensemble)
+    * [NEB variant](#neb-variant)
+    * [Simulation method family](#simulation-method-family)
+    * [Simulation method modifier](#simulation-method-modifier)
+    * [SPM image mode](#spm-image-mode)
+    * [SPM mode](#spm-mode)
+    * [Unfolding implementation](#unfolding-implementation)
+    * [Vibrational mode](#vibrational-mode)
     * [ILog base types](#ilog-base-types)
     * [Vocabulary for tagging imaging previews](#vocabulary-for-tagging-imaging-previews)
     * [nanotech@surfaces subgroups](#nanotechsurfaces-subgroups)
@@ -2703,6 +3362,15 @@ By mapping the detailed relationships between physical materials, hardware state
 | POSTPRINT | Postprint |
 | PREPRINT | Preprint |
 
+### Electronic gap type
+* **Code:** `ELECTRONIC_GAP_TYPE_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| DIRECT | direct | direct |
+| INDIRECT | indirect | indirect |
+| UNKNOWN | unknown | unknown |
+
 ### ILog base types
 * **Code:** `ILOG_BASE_TYPES`
 
@@ -2710,6 +3378,101 @@ By mapping the detailed relationships between physical materials, hardware state
 | :--- | :--- | :--- |
 | COMPONENT | Component |
 | INSTRUMENT | Instrument |
+
+### Minimum-energy-path method
+* **Code:** `MEP_METHOD_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| NEB | NEB | NEB |
+| REPLICA_CHAIN | Replica chain | Replica chain |
+| OTHER | Other | Other |
+
+### Molecular dynamics ensemble
+* **Code:** `MD_ENSEMBLE_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| NVE | NVE | NVE |
+| NVT | NVT | NVT |
+| NPT | NPT | NPT |
+| OTHER | other | other |
+
+### NEB variant
+* **Code:** `NEB_VARIANT_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| NEB | NEB | NEB |
+| CI_NEB | CI-NEB | CI-NEB |
+
+### Simulation method family
+* **Code:** `SIMULATION_METHOD_FAMILY_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| DFT | DFT | DFT |
+| DFTB | DFTB | DFTB |
+| TB | TB | TB |
+| MFH_TB | MFH-TB | MFH-TB |
+| DMRG | DMRG | DMRG |
+| CAS | CAS | CAS |
+| CASSCF | CASSCF | CASSCF |
+| FORCEFIELD | ForceField | ForceField |
+| MLPOTENTIAL | MLPotential | MLPotential |
+| OTHER | other | other |
+
+### Simulation method modifier
+* **Code:** `SIMULATION_METHOD_MODIFIER_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| HYBRID | hybrid | hybrid |
+| VDW | vdW | vdW |
+| DFT_U | DFT+U | DFT+U |
+| SPIN_COLLINEAR | spin_collinear | spin_collinear |
+| SPIN_ORBIT | spin_orbit | spin_orbit |
+| SPIN_NON_COLLINEAR | spin_non_collinear | spin_non_collinear |
+
+### SPM image mode
+* **Code:** `SPM_IMAGE_MODE_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| CONSTANT_HEIGHT | Constant height | Constant height |
+| CONSTANT_ISOVALUE | Constant isovalue | Constant isovalue |
+| THREE_DIMENSIONAL_GRID | Three-dimensional grid | Three-dimensional grid |
+| OTHER | other | other |
+
+### SPM mode
+* **Code:** `SPM_MODE_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| STM | STM | STM |
+| STS | STS | STS |
+| AFM | AFM | AFM |
+| ORBITALS | Orbitals | Orbitals |
+| OTHER | other | other |
+
+### Unfolding implementation
+* **Code:** `UNFOLDING_IMPLEMENTATION_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| BANDUPPY | BandUPpy | BandUPpy |
+| CP2K_SPARSE_AO | CP2K sparse-AO | CP2K sparse-AO |
+| OTHER | Other | Other |
+
+### Vibrational mode
+* **Code:** `VIBRATIONAL_MODE_ENUM`
+
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| PHONONS | Phonons | Phonons |
+| PHONONS_IR | Phonons + IR | Phonons + IR |
+| PHONONS_RAMAN | Phonons + Raman | Phonons + Raman |
+| PHONONS_IR_RAMAN | Phonons + IR + Raman | Phonons + IR + Raman |
 
 ### Vocabulary for tagging imaging previews
 * **Code:** `IMAGING_TAGS`

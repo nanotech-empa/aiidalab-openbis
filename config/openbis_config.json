@@ -94,7 +94,7 @@
         "Computer": "COMPUTER",
         "Executable": "EXECUTABLE",
         "Molecule": "MOLECULE",
-        "Reaction Product Concept": "REACTION_PRODUCT_CONCEPT",
+        "Reaction Product Concept": "MOLECULE",
         "Reaction Product": "REACTION_PRODUCT",
         "Analysis": "ANALYSIS",
         "Sample": "SAMPLE",
