@@ -1,5 +1,5 @@
 import ipywidgets as ipw
-from src import utils
+from src import chemical_search, utils
 from IPython.display import display, Javascript
 import pandas as pd
 import os
@@ -147,7 +147,7 @@ class AtomModelWidget(ipw.VBox):
         )
 
         select_reacprod_concepts_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 18px;'>Select reaction product concepts</span>"
+            value="<span style='font-weight: bold; font-size: 18px;'>Select product molecules</span>"
         )
 
         select_slab_title = ipw.HTML(
@@ -168,7 +168,7 @@ class AtomModelWidget(ipw.VBox):
             description="Add",
             disabled=False,
             button_style="success",
-            tooltip="Add reaction product concept",
+            tooltip="Add product molecule",
             layout=ipw.Layout(width="150px", height="25px"),
         )
 
@@ -536,36 +536,76 @@ class AtomModelWidget(ipw.VBox):
 
 
 class MoleculeWidget(ipw.VBox):
-    def __init__(self, openbis_session, parent_accordion, object_index):
+    def __init__(
+        self,
+        openbis_session,
+        parent_accordion,
+        object_index,
+        collection_key="Precursor Molecule",
+        role="molecule",
+    ):
         super().__init__()
         self.openbis_session = openbis_session
         self.parent_accordion = parent_accordion
         self.object_index = object_index
+        self.collection_key = collection_key
+        self.role = role
         self.title = ""
 
         molecules_objects = utils.get_openbis_objects(
             self.openbis_session,
-            collection=OPENBIS_COLLECTIONS_PATHS["Precursor Molecule"],
+            collection=OPENBIS_COLLECTIONS_PATHS[collection_key],
             type=OPENBIS_OBJECT_TYPES["Molecule"],
         )
         dropdown_list = []
+        self._labels_by_permid = {}
         for obj in molecules_objects:
-            mol_name = obj.props["name"]
-            mol_empa_number = obj.props["empa_number"]
-            dropdown_list.append((f"{mol_empa_number} ({mol_name})", obj.permId))
+            name = obj.props.get("name") or str(obj.permId)
+            empa_number = obj.props.get("empa_number")
+            label = (
+                f"{empa_number} ({name})"
+                if collection_key == "Precursor Molecule" and empa_number
+                else str(name)
+            )
+            self._labels_by_permid[str(obj.permId)] = label
+            dropdown_list.append((label, obj.permId))
 
-        # Sort by EMPA number (assuming it’s numeric)
-        dropdown_list.sort(key=lambda x: int(x[0].split()[0]), reverse=True)
+        if collection_key == "Precursor Molecule":
+            # Keep the established newest/highest EMPA-number-first ordering.
+            def precursor_sort_key(item):
+                first_word = str(item[0]).split(maxsplit=1)[0]
+                try:
+                    return int(first_word)
+                except ValueError:
+                    return -1
 
-        dropdown_list.insert(0, ("Select a molecule...", "-1"))
+            dropdown_list.sort(key=precursor_sort_key, reverse=True)
+        else:
+            dropdown_list.sort(key=lambda item: item[0].casefold())
+        placeholder = (
+            "Select a product molecule..."
+            if collection_key == "Product Molecule"
+            else "Select a molecule..."
+        )
+        dropdown_list.insert(0, (placeholder, "-1"))
         self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
         self.details_vbox = ipw.VBox()
+        self.structure_search = chemical_search.MoleculeStructureSearchWidget(
+            self.openbis_session,
+            OPENBIS_COLLECTIONS_PATHS[collection_key],
+            on_select=self._select_search_result,
+        )
+        self.structure_search_accordion = ipw.Accordion(
+            children=[self.structure_search],
+            selected_index=None,
+        )
+        self.structure_search_accordion.set_title(0, "Find by SMILES or CDXML")
 
         self.remove_molecule_button = ipw.Button(
             description="Remove",
             disabled=False,
             button_style="danger",
-            tooltip="Remove molecule",
+            tooltip=f"Remove {role}",
             layout=ipw.Layout(width="150px", height="25px"),
         )
 
@@ -577,10 +617,28 @@ class MoleculeWidget(ipw.VBox):
         self.remove_molecule_button.on_click(self.remove_molecule)
         self.children = [
             self.dropdown,
+            self.structure_search_accordion,
             self.details_vbox,
             self.molecule_sketch,
             self.remove_molecule_button,
         ]
+
+    def _select_search_result(self, permid):
+        values = {
+            str(value): value
+            for _label, value in self.dropdown.options
+        }
+        value = values.get(str(permid))
+        if value is None:
+            hit = self.structure_search._hits_by_permid.get(str(permid))
+            label = (
+                hit.record.name
+                if hit is not None and hit.record.name
+                else str(permid)
+            )
+            self.dropdown.options = list(self.dropdown.options) + [(label, permid)]
+            value = permid
+        self.dropdown.value = value
 
     def load_details(self, change):
         obj_permid = self.dropdown.value
@@ -593,11 +651,12 @@ class MoleculeWidget(ipw.VBox):
             obj_datasets = obj.get_datasets(type="ELN_PREVIEW")
             obj_props = obj.props.all()
             obj_name = obj_props.get("name", "")
-            obj_empa_number = obj_props.get("empa_number", "")
-            obj_empa_number_name = f"{obj_empa_number} ({obj_name})"
+            selected_label = self._labels_by_permid.get(
+                str(obj_permid), obj_name or str(obj_permid)
+            )
             if self.object_index < len(self.parent_accordion.children):
-                self.parent_accordion.set_title(self.object_index, obj_empa_number_name)
-            self.title = obj_empa_number_name
+                self.parent_accordion.set_title(self.object_index, selected_label)
+            self.title = selected_label
 
             obj_details_html = ipw.HTML()
             obj_details_string = (
@@ -642,81 +701,16 @@ class MoleculeWidget(ipw.VBox):
         )
 
 
-class ReacProdConceptWidget(ipw.VBox):
+class ReacProdConceptWidget(MoleculeWidget):
+    """Compatibility alias for a product molecule selector."""
+
     def __init__(self, openbis_session, parent_accordion, object_index):
-        super().__init__()
-        self.openbis_session = openbis_session
-        self.parent_accordion = parent_accordion
-        self.object_index = object_index
-        self.title = ""
-
-        molecules_objects = utils.get_openbis_objects(
-            self.openbis_session,
-            collection=OPENBIS_COLLECTIONS_PATHS["Reaction Product"],
-            type=OPENBIS_OBJECT_TYPES["Reaction Product Concept"],
-        )
-        dropdown_list = [(obj.props["name"], obj.permId) for obj in molecules_objects]
-        dropdown_list.insert(0, ("Select a reaction product concept...", "-1"))
-        self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
-        self.details_vbox = ipw.VBox()
-
-        self.remove_reacprod_concept_button = ipw.Button(
-            description="Remove",
-            disabled=False,
-            button_style="danger",
-            tooltip="Remove reaction product concept",
-            layout=ipw.Layout(width="150px", height="25px"),
-        )
-
-        self.dropdown.observe(self.load_details, names="value")
-        self.remove_reacprod_concept_button.on_click(self.remove_reacprod_concept)
-        self.children = [
-            self.dropdown,
-            self.details_vbox,
-            self.remove_reacprod_concept_button,
-        ]
-
-    def load_details(self, change):
-        obj_permid = self.dropdown.value
-        if obj_permid == "-1":
-            return
-        else:
-            obj = utils.get_openbis_object(
-                self.openbis_session, sample_ident=obj_permid
-            )
-            obj_props = obj.props.all()
-            obj_name = obj_props.get("name", "")
-            if self.object_index < len(self.parent_accordion.children):
-                self.parent_accordion.set_title(self.object_index, obj_name)
-            self.title = obj_name
-
-            obj_details_html = ipw.HTML()
-            obj_details_string = (
-                "<div style='border: 1px solid grey; padding: 10px; margin: 10px;'>"
-            )
-            for key, value in obj_props.items():
-                if value:
-                    prop_type = utils.get_openbis_property_type(
-                        self.openbis_session, code=key
-                    )
-                    prop_label = prop_type.label
-                    obj_details_string += f"<p><b>{prop_label}:</b> {value}</p>"
-
-            obj_details_string += "</div>"
-            obj_details_html.value = obj_details_string
-            self.details_vbox.children = [obj_details_html]
-
-    def remove_reacprod_concept(self, b):
-        reacprod_concepts_accordion_children = list(self.parent_accordion.children)
-        reacprod_concepts_accordion_children.pop(self.object_index)
-
-        for index, reacprod_concept in enumerate(reacprod_concepts_accordion_children):
-            reacprod_concept.object_index = index
-
-        self.parent_accordion.children = reacprod_concepts_accordion_children
-        self.parent_accordion.titles = tuple(
-            reacprod_concept.title
-            for reacprod_concept in reacprod_concepts_accordion_children
+        super().__init__(
+            openbis_session,
+            parent_accordion,
+            object_index,
+            collection_key="Product Molecule",
+            role="product molecule",
         )
 
 

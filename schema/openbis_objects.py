@@ -609,6 +609,15 @@ class Molecule(OpenBISObject):
         description="SMILES string for the substance, e.g. CCO",
         metadata={"type": "VARCHAR"},
     )
+    cxsmiles: str = Field(
+        default="",
+        title="CXSMILES",
+        description=(
+            "Round-trip validated CXSMILES representation of a periodic "
+            "repeat unit"
+        ),
+        metadata={"type": "VARCHAR"},
+    )
     sum_formula: str = Field(
         default="",
         title="Sum formula",

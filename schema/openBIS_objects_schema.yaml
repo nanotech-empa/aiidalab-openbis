@@ -784,6 +784,7 @@ classes:
             openbis_label: Molecule
         slots:
             - smiles
+            - cxsmiles
             - sum_formula
             - cas_number
             - iupac_name
@@ -4228,6 +4229,16 @@ slots:
         annotations:
             openbis_type: VARCHAR
             openbis_label: Smiles
+
+    cxsmiles:
+        title: CXSMILES
+        range: string
+        description: Round-trip validated CXSMILES representation of a periodic repeat unit
+        slot_uri: schema:cxsmiles
+        multivalued: false
+        annotations:
+            openbis_type: VARCHAR
+            openbis_label: CXSMILES
 
     special_storage_conditions:
         title: Special storage conditions

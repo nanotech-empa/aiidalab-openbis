@@ -112,7 +112,7 @@ def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_prod
     ]
     widget = SimpleNamespace(
         **{name: object() for name in attribute_names},
-        reaction_products_available=False,
+        product_molecules_available=False,
     )
 
     simulations_widgets.SimulationDetailsWidget.load_widgets(widget, True)
@@ -136,7 +136,7 @@ def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_prod
     ]
     assert widget.select_reacprod_concepts_title not in widget.children
 
-    widget.reaction_products_available = True
+    widget.product_molecules_available = True
     simulations_widgets.SimulationDetailsWidget.load_widgets(widget, True)
 
     assert widget.children.index(widget.material_details_vbox) < widget.children.index(
@@ -186,6 +186,111 @@ def test_experiment_selector_uses_bulk_properties(monkeypatch, simulations_widge
             "is_mine": True,
         }
     ]
+
+
+def test_product_selector_reads_molecules_from_product_collection(
+    monkeypatch, simulations_widgets
+):
+    calls = []
+    products = [
+        SimpleNamespace(
+            permId="product-z",
+            props={"name": "Zigzag GNR", "empa_number": None},
+        ),
+        SimpleNamespace(
+            permId="product-a",
+            props={"name": "Armchair GNR", "empa_number": None},
+        ),
+    ]
+
+    def get_objects(_session, **kwargs):
+        calls.append(kwargs)
+        return products
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        get_objects,
+    )
+
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+        role="product molecule",
+    )
+
+    assert calls == [
+        {
+            "collection": "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+            "type": "MOLECULE",
+        }
+    ]
+    assert list(selector.dropdown.options) == [
+        ("Select a product molecule...", "-1"),
+        ("Armchair GNR", "product-a"),
+        ("Zigzag GNR", "product-z"),
+    ]
+    assert selector.structure_search.results.value == ""
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_object",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            get_datasets=lambda **_kwargs: [],
+            props=SimpleNamespace(all=lambda: {}),
+        ),
+    )
+    selector._select_search_result("product-a")
+    assert selector.dropdown.value == "product-a"
+
+
+def test_simulation_add_product_uses_product_molecule_selector(
+    monkeypatch, simulations_widgets
+):
+    calls = []
+
+    class FakeMoleculeWidget(simulations_widgets.ipw.VBox):
+        def __init__(self, session, accordion, index, **kwargs):
+            super().__init__()
+            calls.append((session, accordion, index, kwargs))
+            self.dropdown = simulations_widgets.ipw.Dropdown()
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "MoleculeWidget",
+        FakeMoleculeWidget,
+    )
+    accordion = simulations_widgets.ipw.Accordion()
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        reacprod_concepts_accordion=accordion,
+    )
+
+    simulations_widgets.SimulationDetailsWidget.add_reacprod_concept(widget, None)
+
+    assert calls == [
+        (
+            widget.openbis_session,
+            accordion,
+            0,
+            {
+                "collection_key": "Product Molecule",
+                "role": "product molecule",
+            },
+        )
+    ]
+    assert len(accordion.children) == 1
 
 
 def test_atom_model_selector_uses_bulk_names(monkeypatch, simulations_widgets):

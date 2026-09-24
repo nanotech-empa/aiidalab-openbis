@@ -1612,6 +1612,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | `chemdraw_name` | ChemDraw Name | ChemDraw Name | VARCHAR | False | False | False |
 | `empa_number` | Empa Number | Empa Number | INTEGER | False | False | False |
 | `smiles` | SMILES | SMILES | VARCHAR | False | False | False |
+| `cxsmiles` | CXSMILES | Round-trip validated CXSMILES representation of a periodic repeat unit | VARCHAR | False | False | False |
 | `sum_formula` | Sum Formula | Sum Formula | VARCHAR | False | False | False |
 | `cas_number` | CAS Number | CAS Number | VARCHAR | False | False | False |
 | `iupac_name` | IUPAC Name | IUPAC Name | VARCHAR | False | False | False |
