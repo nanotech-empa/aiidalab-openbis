@@ -9,7 +9,7 @@ import rdkit
 from IPython.display import Javascript, display
 from rdkit.Chem import AllChem, Draw, rdMolDescriptors
 
-from src import chemical_search, utils
+from src import chemical_search, molecule_creation, utils
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -598,16 +598,20 @@ class MoleculeWidget(ipw.VBox):
         dropdown_list.insert(0, (placeholder, "-1"))
         self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
         self.details_vbox = ipw.VBox()
+        self.collection = OPENBIS_COLLECTIONS_PATHS[collection_key]
         self.structure_search = chemical_search.MoleculeStructureSearchWidget(
             self.openbis_session,
-            OPENBIS_COLLECTIONS_PATHS[collection_key],
+            self.collection,
             on_select=self._select_search_result,
+            on_search_complete=self._search_completed,
+            on_query_change=self._search_query_changed,
         )
         self.structure_search_accordion = ipw.Accordion(
             children=[self.structure_search],
             selected_index=None,
         )
         self.structure_search_accordion.set_title(0, "Find by SMILES or CDXML")
+        self.create_generated_box = ipw.VBox()
 
         self.cdxml_generator_accordion = None
         if structure is not None:
@@ -652,6 +656,7 @@ class MoleculeWidget(ipw.VBox):
         children.extend(
             [
                 self.structure_search_accordion,
+                self.create_generated_box,
                 self.details_vbox,
                 self.molecule_sketch,
                 self.remove_molecule_button,
@@ -681,7 +686,227 @@ class MoleculeWidget(ipw.VBox):
         self.generated_png = bytes(png)
         self.generated_representation = representation
         self.structure_search.set_cdxml_query(content, filename)
+        self.create_generated_box.children = [
+            ipw.HTML("Search this generated CDXML before creating a MOLECULE record.")
+        ]
         self.structure_search_accordion.selected_index = 0
+
+    def _search_query_changed(self):
+        self.create_generated_box.children = []
+
+    def _set_creation_status(self, message, kind="info"):
+        colors = {"info": "#1f5a94", "ok": "#187b35", "error": "#b00020"}
+        self.creation_status.value = (
+            f"<span style='color:{colors[kind]}'>{html.escape(str(message))}</span>"
+        )
+
+    def _search_completed(self, query, hits):
+        if self.structure_search._generated_cdxml is None or not self.generated_cdxml:
+            self.create_generated_box.children = []
+            return
+        identity_hits = [
+            hit for hit in hits if hit.match_type in {"exact", "equivalent"}
+        ]
+        if identity_hits:
+            matches = ", ".join(
+                hit.record.name or hit.record.permid for hit in identity_hits
+            )
+            self.create_generated_box.children = [
+                ipw.HTML(
+                    "<span style='color:#187b35'><b>An identical or equivalent "
+                    "MOLECULE already exists.</b> Select it from the search results: "
+                    f"{html.escape(matches)}</span>"
+                )
+            ]
+            return
+
+        representation = self.generated_representation
+        if representation is None:
+            self.create_generated_box.children = []
+            return
+        representation_name = "CXSMILES" if representation.periodic else "SMILES"
+        representation_value = (
+            representation.cxsmiles
+            if representation.periodic
+            else representation.smiles
+        )
+        destination = (
+            "product molecule collection"
+            if self.collection_key == "Product Molecule"
+            else "precursor molecule collection"
+        )
+        self.new_molecule_name = ipw.Text(
+            description="Name",
+            placeholder="Required molecular concept name",
+            style={"description_width": "90px"},
+            layout=ipw.Layout(width="100%"),
+        )
+        self.new_molecule_description = ipw.Textarea(
+            description="Description",
+            style={"description_width": "90px"},
+            layout=ipw.Layout(width="100%", height="55px"),
+        )
+        self.new_molecule_comments = ipw.Textarea(
+            description="Comments",
+            style={"description_width": "90px"},
+            layout=ipw.Layout(width="100%", height="55px"),
+        )
+        self.reviewed_matches = ipw.Checkbox(
+            value=not bool(hits),
+            description="I reviewed the non-identity matches shown above",
+            indent=False,
+            layout=ipw.Layout(display="" if hits else "none", width="100%"),
+        )
+        self.create_generated_button = ipw.Button(
+            description="Create MOLECULE",
+            button_style="success",
+            icon="save",
+            tooltip=f"Create in the {destination}",
+        )
+        self.creation_status = ipw.HTML()
+        self.create_generated_button.on_click(self._create_generated_molecule)
+        self.create_generated_box.children = [
+            ipw.HTML(
+                "<hr><b>No identical molecular concept was found.</b> Create the "
+                f"reviewed structure in the {html.escape(destination)}.<br>"
+                f"Formula: <code>{html.escape(representation.formula)}</code><br>"
+                f"{representation_name}: "
+                f"<code>{html.escape(representation_value)}</code>"
+            ),
+            self.new_molecule_name,
+            self.new_molecule_description,
+            self.new_molecule_comments,
+            self.reviewed_matches,
+            self.create_generated_button,
+            self.creation_status,
+        ]
+
+    def _create_generated_molecule(self, _button=None):
+        if not self.new_molecule_name.value.strip():
+            self._set_creation_status(
+                "Enter a name before creating the MOLECULE.", "error"
+            )
+            return
+        if not self.reviewed_matches.value:
+            self._set_creation_status(
+                "Review the listed matches before creating a new record.", "error"
+            )
+            return
+        if (
+            self.structure_search.input_kind.value != "cdxml"
+            or self.structure_search._generated_cdxml is None
+        ):
+            self._set_creation_status(
+                "The active search is no longer the generated CDXML.", "error"
+            )
+            return
+
+        self.create_generated_button.disabled = True
+        created = None
+        try:
+            self._set_creation_status(
+                "Refreshing the collection and checking identity…"
+            )
+            self.structure_search.index.refresh(progress=self._set_creation_status)
+            query = self.structure_search._query()
+            current_hits = self.structure_search.index.search(
+                query,
+                min_similarity=0.75,
+                limit=max(1, len(self.structure_search.index.records)),
+            )
+            identity_hits = [
+                hit for hit in current_hits if hit.match_type in {"exact", "equivalent"}
+            ]
+            if identity_hits:
+                self._search_completed(query, tuple(current_hits))
+                return
+
+            filename, _content = self.structure_search._generated_cdxml
+            created = molecule_creation.create_molecule_from_cdxml(
+                self.openbis_session,
+                collection=self.collection,
+                name=self.new_molecule_name.value,
+                description=self.new_molecule_description.value,
+                comments=self.new_molecule_comments.value,
+                cdxml=self.generated_cdxml,
+                png=self.generated_png,
+                filename=filename,
+                expected_representation=self.generated_representation,
+            )
+        except molecule_creation.PartialMoleculeCreationError as exc:
+            self._set_creation_status(str(exc), "error")
+            return
+        except Exception as exc:
+            self._set_creation_status(
+                f"Creation failed before completion: {type(exc).__name__}: {exc}",
+                "error",
+            )
+            return
+        finally:
+            self.create_generated_button.disabled = False
+
+        permid = str(created.permId)
+        label = self.new_molecule_name.value.strip()
+        try:
+            self._labels_by_permid[permid] = label
+            current_values = {str(value) for _label, value in self.dropdown.options}
+            if permid not in current_values:
+                self.dropdown.options = list(self.dropdown.options) + [
+                    (label, created.permId)
+                ]
+            self.dropdown.value = created.permId
+            self.structure_search.index.refresh(progress=self._set_creation_status)
+            refreshed_hits = self.structure_search.index.search(
+                self.structure_search._query(),
+                min_similarity=0.75,
+                limit=max(1, len(self.structure_search.index.records)),
+            )
+            confirmed = any(
+                hit.record.permid == permid and hit.match_type == "exact"
+                for hit in refreshed_hits
+            )
+            if not confirmed:
+                raise RuntimeError("the new object was not found as an exact match")
+            self.structure_search.last_query = self.structure_search._query()
+            self.structure_search.last_hits = tuple(refreshed_hits)
+            self.structure_search._hits_by_permid = {
+                hit.record.permid: hit for hit in refreshed_hits
+            }
+            self.structure_search.results.options = [("Select a match...", "")] + [
+                (
+                    f"{hit.match_type} · Q{chemical_search.tanimoto_to_match_quality(hit.similarity)} "
+                    f"(T={100 * hit.similarity:.1f}%) · "
+                    f"{hit.record.empa_number or hit.record.name or hit.record.permid}",
+                    hit.record.permid,
+                )
+                for hit in refreshed_hits
+            ]
+            self.structure_search._set_status(
+                f"Created and indexed {label} as an exact match.", "ok"
+            )
+            try:
+                url = utils.generate_openbis_object_url(self.openbis_session, created)
+                link = (
+                    f" <a href='{html.escape(url, quote=True)}' target='_blank'>"
+                    "Open in openBIS</a>"
+                )
+            except Exception:
+                link = ""
+            self.create_generated_box.children = [
+                ipw.HTML(
+                    "<span style='color:#187b35'><b>MOLECULE created, indexed, "
+                    f"and selected:</b> {html.escape(permid)}.{link}</span>"
+                )
+            ]
+        except Exception as exc:
+            self.create_generated_box.children = [
+                ipw.HTML(
+                    "<span style='color:#b36b00'><b>The MOLECULE was created and "
+                    "selected, but index verification failed.</b> Do not create it "
+                    f"again. PermID: {html.escape(permid)}. "
+                    f"{html.escape(type(exc).__name__ + ': ' + str(exc))}</span>"
+                )
+            ]
 
     def _select_search_result(self, permid):
         values = {

@@ -92,3 +92,81 @@ def test_target_schema_documentation_covers_molecular_and_simulation_decisions()
         assert f"* **Code:** `{code}`" in documentation
         for term_code, label in terms:
             assert f"| {term_code} | {label} |" in documentation
+
+
+def test_cxsmiles_migration_is_additive_and_idempotent():
+    import pandas as pd
+
+    from schema import add_molecule_cxsmiles
+
+    class PropertyType:
+        code = "CXSMILES"
+        dataType = "VARCHAR"
+        multiValue = False
+
+        def __init__(self, session):
+            self.session = session
+
+        def save(self):
+            self.session.property_type = self
+
+    class ObjectType:
+        def __init__(self):
+            self.rows = [
+                {
+                    "code": "NAME",
+                    "section": None,
+                    "ordinal": 16,
+                    "mandatory": False,
+                }
+            ]
+
+        def get_property_assignments(self):
+            return type("Assignments", (), {"df": pd.DataFrame(self.rows)})()
+
+        def assign_property(self, property_type, **kwargs):
+            self.rows.append({"code": property_type.code, **kwargs})
+
+    class Session:
+        def __init__(self):
+            self.property_type = None
+            self.object_type = ObjectType()
+            self.created = 0
+
+        def get_property_type(self, code, use_cache=False):
+            assert code == "CXSMILES"
+            if self.property_type is None:
+                raise ValueError("missing")
+            return self.property_type
+
+        def new_property_type(self, **kwargs):
+            assert kwargs == {
+                "code": "CXSMILES",
+                "label": "CXSMILES",
+                "description": (
+                    "Round-trip validated CXSMILES representation of a "
+                    "periodic repeat unit"
+                ),
+                "dataType": "VARCHAR",
+                "multiValue": False,
+            }
+            self.created += 1
+            return PropertyType(self)
+
+        def get_object_type(self, code, use_cache=False):
+            assert code == "MOLECULE"
+            return self.object_type
+
+    session = Session()
+
+    first = add_molecule_cxsmiles.apply(session)
+    second = add_molecule_cxsmiles.apply(session)
+
+    assert first["property_exists"] is True
+    assert first["assignment_exists"] is True
+    assert second["assignment_exists"] is True
+    assert session.created == 1
+    assert [row["code"] for row in session.object_type.rows] == ["NAME", "CXSMILES"]
+    assert session.object_type.rows[0]["ordinal"] == 16
+    assert session.object_type.rows[1]["ordinal"] == 17
+    assert session.object_type.rows[1]["mandatory"] is False

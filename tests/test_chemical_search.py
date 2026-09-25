@@ -215,4 +215,24 @@ def test_generated_cdxml_can_be_used_without_file_upload(tmp_path):
     assert widget.input_kind.value == "cdxml"
     assert query.periodic
     assert query.formula == "C36H4"
-    assert "generated-gnr.cdxml" in widget.status.value
+    assert "generated and reviewed" in widget.active_source.value
+
+
+def test_successful_search_reports_query_and_hits_to_parent(tmp_path):
+    completed = []
+    widget = MoleculeStructureSearchWidget(
+        FakeSession([]),
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+        on_search_complete=lambda query, hits: completed.append((query, hits)),
+        cache_path=tmp_path / "index.json",
+    )
+    widget.set_cdxml_query(GNR_CDXML.read_bytes(), "generated-gnr.cdxml")
+
+    widget._search()
+
+    assert len(completed) == 1
+    query, hits = completed[0]
+    assert query.periodic is True
+    assert hits == ()
+    assert widget.last_query == query
+    assert widget.last_hits == ()

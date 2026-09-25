@@ -255,6 +255,162 @@ def test_product_selector_reads_molecules_from_product_collection(
     assert selector.dropdown.value == "product-a"
 
 
+def test_generated_cdxml_can_create_only_after_identity_search(
+    monkeypatch, simulations_widgets
+):
+    from src.chemical_search import search_representation_from_cdxml
+    from src.chemical_structures import representation_from_cdxml
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        lambda *_args, **_kwargs: [],
+    )
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+        role="product molecule",
+    )
+    cdxml = (Path(__file__).parent / "data" / "periodic_gnr.cdxml").read_bytes()
+    representation = representation_from_cdxml(cdxml)
+    query = search_representation_from_cdxml(cdxml)
+    selector._use_generated_cdxml(
+        cdxml,
+        "generated-gnr.cdxml",
+        b"\x89PNG\r\n\x1a\nreviewed",
+        representation,
+    )
+
+    selector._search_completed(query, ())
+
+    assert selector.create_generated_button in selector.create_generated_box.children
+    assert (
+        "product molecule collection" in selector.create_generated_box.children[0].value
+    )
+
+    existing = SimpleNamespace(
+        match_type="exact",
+        record=SimpleNamespace(name="Existing GNR", permid="existing"),
+    )
+    selector.new_molecule_name.value = "Duplicate GNR"
+    monkeypatch.setattr(
+        selector.structure_search.index, "refresh", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        selector.structure_search.index,
+        "search",
+        lambda *_args, **_kwargs: [existing],
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.molecule_creation,
+        "create_molecule_from_cdxml",
+        lambda *_args, **_kwargs: pytest.fail("duplicate creation must be blocked"),
+    )
+
+    selector._create_generated_molecule()
+
+    assert "already exists" in selector.create_generated_box.children[0].value
+
+
+def test_generated_cdxml_creation_selects_and_verifies_new_product(
+    monkeypatch, simulations_widgets
+):
+    from src.chemical_search import search_representation_from_cdxml
+    from src.chemical_structures import representation_from_cdxml
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_object",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            get_datasets=lambda **_kwargs: [],
+            props=SimpleNamespace(all=dict),
+        ),
+    )
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+        role="product molecule",
+    )
+    cdxml = (Path(__file__).parent / "data" / "periodic_gnr.cdxml").read_bytes()
+    representation = representation_from_cdxml(cdxml)
+    query = search_representation_from_cdxml(cdxml)
+    selector._use_generated_cdxml(
+        cdxml,
+        "generated-gnr.cdxml",
+        b"\x89PNG\r\n\x1a\nreviewed",
+        representation,
+    )
+    selector._search_completed(query, ())
+    selector.new_molecule_name.value = "First product GNR"
+    created = SimpleNamespace(permId="new-product")
+    exact_hit = SimpleNamespace(
+        match_type="exact",
+        similarity=1.0,
+        record=SimpleNamespace(
+            permid="new-product",
+            name="First product GNR",
+            empa_number="",
+        ),
+    )
+    searches = iter([[], [exact_hit]])
+    monkeypatch.setattr(
+        selector.structure_search.index, "refresh", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        selector.structure_search.index,
+        "search",
+        lambda *_args, **_kwargs: next(searches),
+    )
+    calls = []
+
+    def create(_session, **kwargs):
+        calls.append(kwargs)
+        return created
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets.molecule_creation,
+        "create_molecule_from_cdxml",
+        create,
+    )
+
+    selector._create_generated_molecule()
+
+    assert calls[0]["collection"].endswith("/PRODUCT_COLLECTION")
+    assert calls[0]["expected_representation"] == representation
+    assert selector.dropdown.value == "new-product"
+    assert "created, indexed" in selector.create_generated_box.children[0].value
+    assert selector.structure_search.last_hits == (exact_hit,)
+
+
 def test_simulation_add_product_uses_product_molecule_selector(
     monkeypatch, simulations_widgets
 ):

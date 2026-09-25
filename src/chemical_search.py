@@ -617,9 +617,13 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         collection: str,
         on_select=None,
         cache_path: str | Path | None = None,
+        on_search_complete=None,
+        on_query_change=None,
     ):
         self.index = OpenbisChemicalIndex(session, collection, cache_path)
         self.on_select = on_select
+        self.on_search_complete = on_search_complete
+        self.on_query_change = on_query_change
         self.input_kind = ipw.ToggleButtons(
             options=[("SMILES", "smiles"), ("CDXML", "cdxml")],
             value="smiles",
@@ -635,6 +639,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             description="Upload CDXML",
         )
         self.cdxml.layout.display = "none"
+        self.active_source = ipw.HTML()
         self.quality = ipw.IntSlider(
             value=0,
             min=0,
@@ -674,8 +679,11 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.details = ipw.HTML()
         self._hits_by_permid: dict[str, SearchHit] = {}
         self._generated_cdxml: tuple[str, bytes] | None = None
+        self.last_query: SearchRepresentation | None = None
+        self.last_hits: tuple[SearchHit, ...] = ()
 
         self.input_kind.observe(self._switch_input, names="value")
+        self.smiles.observe(self._smiles_changed, names="value")
         self.cdxml.observe(self._uploaded_cdxml_changed, names="value")
         self.update_button.on_click(self._update)
         self.search_button.on_click(self._search)
@@ -690,6 +698,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 self.input_kind,
                 self.smiles,
                 self.cdxml,
+                self.active_source,
                 ipw.HBox([self.quality, self.limit]),
                 ipw.HBox([self.update_button, self.search_button]),
                 self.status,
@@ -716,15 +725,48 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         use_smiles = change["new"] == "smiles"
         self.smiles.layout.display = "" if use_smiles else "none"
         self.cdxml.layout.display = "none" if use_smiles else ""
+        if use_smiles:
+            self.active_source.value = ""
+        elif self._generated_cdxml is not None:
+            filename, _content = self._generated_cdxml
+            self.active_source.value = (
+                "<b>Active CDXML:</b> generated and reviewed in this form · "
+                f"{html.escape(filename)}"
+            )
+        self._clear_search_state()
+
+    def _smiles_changed(self, change):
+        if change.get("new") != change.get("old"):
+            self._clear_search_state()
 
     def _uploaded_cdxml_changed(self, change):
         if change.get("new"):
             self._generated_cdxml = None
+            filename, _content = _upload_content(self.cdxml)
+            self.active_source.value = (
+                "<b>Active CDXML:</b> browser upload "
+                f"{html.escape(filename or 'query.cdxml')}"
+            )
+            self._clear_search_state()
+
+    def _clear_search_state(self):
+        self.last_query = None
+        self.last_hits = ()
+        self._hits_by_permid = {}
+        self.results.options = [("Select a match...", "")]
+        self.details.value = ""
+        if self.on_query_change is not None:
+            self.on_query_change()
 
     def set_cdxml_query(self, content: bytes, filename="generated.cdxml"):
         """Load generated CDXML without emulating a browser file upload."""
         self._generated_cdxml = (str(filename), bytes(content))
         self.input_kind.value = "cdxml"
+        self.active_source.value = (
+            "<b>Active CDXML:</b> generated and reviewed in this form · "
+            f"{html.escape(str(filename))}"
+        )
+        self._clear_search_state()
         self._set_status(
             f"Generated CDXML ready for search: {filename}.",
             "ok",
@@ -784,6 +826,8 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 )
             finally:
                 del blocker
+            self.last_query = query
+            self.last_hits = tuple(hits)
             self._hits_by_permid = {hit.record.permid: hit for hit in hits}
             self.results.options = [("Select a match...", "")] + [
                 (
@@ -799,7 +843,11 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 f"Found {len(hits)} {periodic} matches in this collection.",
                 "ok" if hits else "info",
             )
+            if self.on_search_complete is not None:
+                self.on_search_complete(query, tuple(hits))
         except Exception as exc:
+            self.last_query = None
+            self.last_hits = ()
             self._set_status(
                 f"Search failed: {type(exc).__name__}: {exc}", "error"
             )
