@@ -645,10 +645,7 @@ class MoleculeWidget(ipw.VBox):
             layout=ipw.Layout(width="150px", height="25px"),
         )
 
-        self.molecule_sketch = ipw.Image(
-            format="png",
-            layout=ipw.Layout(width="300px", height="auto"),
-        )
+        self.molecule_sketch = ipw.Image(format="png")
 
         self.dropdown.observe(self.load_details, names="value")
         self.remove_molecule_button.on_click(self.remove_molecule)
@@ -928,17 +925,24 @@ class MoleculeWidget(ipw.VBox):
         self.dropdown.value = value
 
     def _set_molecule_sketch(self, content):
-        """Display a PNG with its longest side at 300 px and no distortion."""
+        """Display a PNG at its aspect ratio with neither side above 300 px."""
         data = bytes(content)
         self.molecule_sketch.value = data
         width = height = 0
         if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
             width, height = struct.unpack(">II", data[16:24])
-        if height > width:
-            self.molecule_sketch.layout.width = "auto"
-            self.molecule_sketch.layout.height = "300px"
+        if width and height:
+            scale = min(1.0, 300.0 / max(width, height))
+            display_width = max(1, round(width * scale))
+            display_height = max(1, round(height * scale))
+            self.molecule_sketch.width = str(display_width)
+            self.molecule_sketch.height = str(display_height)
+            self.molecule_sketch.layout.width = f"{display_width}px"
+            self.molecule_sketch.layout.height = f"{display_height}px"
         else:
-            self.molecule_sketch.layout.width = "300px"
+            self.molecule_sketch.width = ""
+            self.molecule_sketch.height = ""
+            self.molecule_sketch.layout.width = "auto"
             self.molecule_sketch.layout.height = "auto"
 
     def load_details(self, change):

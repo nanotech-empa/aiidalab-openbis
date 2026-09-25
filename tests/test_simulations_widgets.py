@@ -287,13 +287,23 @@ def test_molecule_preview_constrains_only_the_longest_side(
             ">II", width, height
         )
 
-    selector._set_molecule_sketch(png_header(667, 1434))
-    assert selector.molecule_sketch.layout.width == "auto"
+    selector._set_molecule_sketch(png_header(600, 400))
+    assert selector.molecule_sketch.width == "300"
+    assert selector.molecule_sketch.height == "200"
+    assert selector.molecule_sketch.layout.width == "300px"
+    assert selector.molecule_sketch.layout.height == "200px"
+
+    selector._set_molecule_sketch(png_header(300, 900))
+    assert selector.molecule_sketch.width == "100"
+    assert selector.molecule_sketch.height == "300"
+    assert selector.molecule_sketch.layout.width == "100px"
     assert selector.molecule_sketch.layout.height == "300px"
 
-    selector._set_molecule_sketch(png_header(1434, 667))
-    assert selector.molecule_sketch.layout.width == "300px"
-    assert selector.molecule_sketch.layout.height == "auto"
+    selector._set_molecule_sketch(png_header(150, 100))
+    assert selector.molecule_sketch.width == "150"
+    assert selector.molecule_sketch.height == "100"
+    assert selector.molecule_sketch.layout.width == "150px"
+    assert selector.molecule_sketch.layout.height == "100px"
 
 
 def test_generated_cdxml_can_create_only_after_identity_search(
