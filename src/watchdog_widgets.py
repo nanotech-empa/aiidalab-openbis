@@ -320,11 +320,14 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         sample_object = utils.get_openbis_object(
             self.openbis_session, sample_ident=sample_id
         )
-
+        
+        sample_name = sample_object.props["name"]
+        self.measurement_session_name_text.value = f"MEAS_{sample_name}"
         most_recent_parent = self._get_most_recent_process_step(sample_object)
 
         # 1. Early exit if no parent is found
         if not most_recent_parent:
+            self.select_experiment_widget.experiment_dropdown.value = "-1"
             return
 
         # 2. Check if the experiment actually needs changing
@@ -336,9 +339,6 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
         # 3. Apply the updates
         self.select_experiment_widget.experiment_dropdown.value = new_exp_id
-
-        sample_name = sample_object.props["name"]
-        self.measurement_session_name_text.value = f"MEAS_{sample_name}"
 
         display(
             Javascript(
