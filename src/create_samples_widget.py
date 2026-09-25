@@ -169,7 +169,7 @@ class CreateSampleWidget(ipw.VBox):
                 self.openbis_session, type=material_type
             )
             materials_objects_names_permids = [
-                (obj.props["name"], obj.permId) for obj in material_objects
+                (obj.props["name"] or f"No name ({obj.permId})", obj.permId) for obj in material_objects
             ]
             materials_objects_names_permids.sort()
             material_options += materials_objects_names_permids
