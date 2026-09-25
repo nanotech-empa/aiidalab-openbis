@@ -255,6 +255,47 @@ def test_product_selector_reads_molecules_from_product_collection(
     assert selector.dropdown.value == "product-a"
 
 
+def test_molecule_preview_constrains_only_the_longest_side(
+    monkeypatch, simulations_widgets
+):
+    import struct
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        lambda *_args, **_kwargs: [],
+    )
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+    )
+
+    def png_header(width, height):
+        return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(
+            ">II", width, height
+        )
+
+    selector._set_molecule_sketch(png_header(667, 1434))
+    assert selector.molecule_sketch.layout.width == "auto"
+    assert selector.molecule_sketch.layout.height == "300px"
+
+    selector._set_molecule_sketch(png_header(1434, 667))
+    assert selector.molecule_sketch.layout.width == "300px"
+    assert selector.molecule_sketch.layout.height == "auto"
+
+
 def test_generated_cdxml_can_create_only_after_identity_search(
     monkeypatch, simulations_widgets
 ):

@@ -66,8 +66,10 @@ before any write. It then validates the current `MOLECULE` property assignments,
 creates one object with `SMILES` or `CXSMILES` as appropriate, and attaches the
 exact reviewed CDXML as `ATTACHMENT` and PNG as `ELN_PREVIEW`. Upload files are
 written only to an operating-system temporary directory and removed
-immediately. The new object is re-indexed, verified as an exact match, added to
-the selector, and selected for the simulation.
+immediately. Stored PNG dimensions are preserved; the selector constrains only
+the longest displayed side to 300 pixels and scales the other side
+proportionally. The new object is re-indexed, verified as an exact match, added
+to the selector, and selected for the simulation.
 
 Object creation and dataset upload are separate openBIS operations. If an
 attachment fails after the object has been saved, the interface reports the

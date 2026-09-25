@@ -2,6 +2,7 @@ import html
 import io
 import os
 import shutil
+import struct
 
 import ipywidgets as ipw
 import pandas as pd
@@ -645,7 +646,8 @@ class MoleculeWidget(ipw.VBox):
         )
 
         self.molecule_sketch = ipw.Image(
-            layout=ipw.Layout(width="300px", height="300px")
+            format="png",
+            layout=ipw.Layout(width="300px", height="auto"),
         )
 
         self.dropdown.observe(self.load_details, names="value")
@@ -925,6 +927,20 @@ class MoleculeWidget(ipw.VBox):
             value = permid
         self.dropdown.value = value
 
+    def _set_molecule_sketch(self, content):
+        """Display a PNG with its longest side at 300 px and no distortion."""
+        data = bytes(content)
+        self.molecule_sketch.value = data
+        width = height = 0
+        if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+            width, height = struct.unpack(">II", data[16:24])
+        if height > width:
+            self.molecule_sketch.layout.width = "auto"
+            self.molecule_sketch.layout.height = "300px"
+        else:
+            self.molecule_sketch.layout.width = "300px"
+            self.molecule_sketch.layout.height = "auto"
+
     def load_details(self, change):
         obj_permid = self.dropdown.value
         if obj_permid == "-1":
@@ -960,16 +976,15 @@ class MoleculeWidget(ipw.VBox):
 
             if obj_datasets:
                 object_dataset = obj_datasets[0]
-                object_dataset.download(destination="images")
-                object_image_filepath = object_dataset.file_list[0]
-                self.molecule_sketch.value = utils.read_file(
-                    f"images/{object_dataset.permId}/{object_image_filepath}"
+                object_image_filepath = str(object_dataset.file_list[0])
+                self._set_molecule_sketch(
+                    chemical_search.download_dataset_file(
+                        object_dataset,
+                        object_image_filepath,
+                    )
                 )
-
-                # Erase file after downloading it
-                shutil.rmtree(f"images/{object_dataset.permId}")
             else:
-                self.molecule_sketch.value = b""
+                self._set_molecule_sketch(b"")
 
             self.details_vbox.children = [obj_details_html]
 

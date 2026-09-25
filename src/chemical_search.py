@@ -286,7 +286,7 @@ def _dataset_cdxml_files(dataset) -> tuple[str, ...]:
     )
 
 
-def _download_dataset_file(dataset, filename: str) -> bytes:
+def download_dataset_file(dataset, filename: str) -> bytes:
     with tempfile.TemporaryDirectory() as directory:
         dataset.download(files=[filename], destination=directory)
         expected = Path(filename).name
@@ -441,7 +441,7 @@ class OpenbisChemicalIndex:
 
             def download_and_parse(source):
                 dataset, filename = source
-                content = _download_dataset_file(dataset, filename)
+                content = download_dataset_file(dataset, filename)
                 representations = search_representations_from_cdxml(
                     content,
                     source_id=f"{_reference(dataset)}::{filename}",
