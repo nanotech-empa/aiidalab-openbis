@@ -28,7 +28,7 @@ from src.chemical_structures import (
 
 MOLECULE_TYPE = "MOLECULE"
 DATASET_TYPES = {"ATTACHMENT", "RAW_DATA"}
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 _MORGAN = GetMorganGenerator(radius=2, fpSize=2048)
 
 
@@ -316,6 +316,7 @@ class OpenbisChemicalIndex:
         self.records: list[MoleculeRecord] = []
         self.generated_at = ""
         self.summary: dict = {}
+        self.manifest: dict = {}
         self._mol_cache: dict[str, Chem.Mol] = {}
         self._fp_cache = {}
 
@@ -330,6 +331,7 @@ class OpenbisChemicalIndex:
             raise ValueError("The cached chemical index belongs to another collection")
         self.generated_at = str(payload.get("generated_at", ""))
         self.summary = dict(payload.get("summary", {}))
+        self.manifest = dict(payload.get("manifest", {}))
         self.records = []
         for raw in payload.get("records", []):
             values = dict(raw)
@@ -353,26 +355,79 @@ class OpenbisChemicalIndex:
             "collection": self.collection,
             "generated_at": self.generated_at,
             "summary": self.summary,
+            "manifest": self.manifest,
             "records": [asdict(record) for record in self.records],
         }
         self.cache_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
-    def refresh(
-        self,
-        include_cdxml: bool = True,
-        progress=None,
-        max_workers: int = 8,
-    ):
-        """Rebuild the index from openBIS without modifying openBIS."""
-        blocker = rdBase.BlockLogs()
-        try:
-            return self._refresh_impl(include_cdxml, progress, max_workers)
-        finally:
-            del blocker
+    @staticmethod
+    def _summarize_records(records) -> dict:
+        sources = Counter(
+            representation.source
+            for record in records
+            for representation in record.representations
+        )
+        parsed_cdxml = {
+            representation.source_id.split("#repeat-", maxsplit=1)[0]
+            for record in records
+            for representation in record.representations
+            if "CDXML" in representation.source.upper()
+        }
+        return {
+            "molecules": len(records),
+            "with_smiles": sum(bool(record.smiles) for record in records),
+            "with_cxsmiles": sum(bool(record.cxsmiles) for record in records),
+            "with_any_representation": sum(
+                bool(record.representations) for record in records
+            ),
+            "representations": dict(sorted(sources.items())),
+            "cdxml_parsed": len(parsed_cdxml),
+            "cdxml_failures": sum(
+                error.startswith("CDXML ")
+                for record in records
+                for error in record.errors
+            ),
+            "objects_with_errors": sum(bool(record.errors) for record in records),
+        }
 
-    def _refresh_impl(self, include_cdxml: bool, progress, max_workers: int):
-        progress = progress or (lambda _message: None)
-        progress("Reading MOLECULE objects from openBIS …")
+    @staticmethod
+    def _build_manifest(objects, datasets) -> dict:
+        object_rows = []
+        for openbis_object in objects:
+            props = _properties(openbis_object)
+            object_rows.append(
+                {
+                    "permid": str(openbis_object.permId),
+                    "identifier": str(getattr(openbis_object, "identifier", "")),
+                    "modification_date": str(
+                        getattr(openbis_object, "modificationDate", "")
+                    ),
+                    "name": str(props.get("name") or ""),
+                    "chemdraw_name": str(props.get("chemdraw_name") or ""),
+                    "empa_number": str(props.get("empa_number") or ""),
+                    "formula": str(props.get("sum_formula") or ""),
+                    "smiles": str(props.get("smiles") or ""),
+                    "cxsmiles": str(props.get("cxsmiles") or ""),
+                }
+            )
+        dataset_rows = [
+            {
+                "permid": _reference(dataset),
+                "sample": _reference(getattr(dataset, "sample", "")),
+                "type": _type_code(dataset.type),
+                "modification_date": str(
+                    getattr(dataset, "modificationDate", "")
+                ),
+                "files": sorted(_dataset_cdxml_files(dataset)),
+            }
+            for dataset in datasets
+        ]
+        return {
+            "objects": sorted(object_rows, key=lambda item: item["permid"]),
+            "datasets": sorted(dataset_rows, key=lambda item: item["permid"]),
+        }
+
+    def _live_snapshot(self):
         objects = list(
             self.session.get_objects(
                 type=MOLECULE_TYPE,
@@ -380,6 +435,117 @@ class OpenbisChemicalIndex:
             )
             or []
         )
+        permids = [str(openbis_object.permId) for openbis_object in objects]
+        datasets = (
+            list(self.session.get_datasets(sample=permids) or []) if permids else []
+        )
+        datasets = [
+            dataset
+            for dataset in datasets
+            if _type_code(dataset.type) in DATASET_TYPES
+            and _dataset_cdxml_files(dataset)
+        ]
+        return objects, datasets
+
+    def synchronize(self, progress=None) -> str:
+        """Compare a cheap live manifest and rebuild only when it changed."""
+        progress = progress or (lambda _message: None)
+        progress("Checking the openBIS molecule manifest …")
+        objects, datasets = self._live_snapshot()
+        remote_manifest = self._build_manifest(objects, datasets)
+        if remote_manifest == self.manifest:
+            return "current"
+
+        previous_objects = {
+            item["permid"]: item for item in self.manifest.get("objects", [])
+        }
+        remote_objects = {
+            item["permid"]: item for item in remote_manifest["objects"]
+        }
+        remote_references = set(remote_objects) | {
+            item["identifier"]
+            for item in remote_objects.values()
+            if item.get("identifier")
+        }
+        previous_datasets = [
+            item
+            for item in self.manifest.get("datasets", [])
+            if item.get("sample") in remote_references
+        ]
+        only_deleted_objects = (
+            bool(set(previous_objects) - set(remote_objects))
+            and set(remote_objects).issubset(previous_objects)
+            and all(
+                item == previous_objects[permid]
+                for permid, item in remote_objects.items()
+            )
+            and remote_manifest["datasets"] == previous_datasets
+        )
+        if only_deleted_objects:
+            active_permids = set(remote_objects)
+            removed = len(self.records)
+            self.records = [
+                record for record in self.records if record.permid in active_permids
+            ]
+            removed -= len(self.records)
+            self.manifest = remote_manifest
+            self.summary = self._summarize_records(self.records)
+            self.generated_at = datetime.now(timezone.utc).isoformat()
+            self._mol_cache.clear()
+            self._fp_cache.clear()
+            self.save()
+            progress(f"Removed {removed} inactive cached molecule(s).")
+            return f"pruned:{removed}"
+
+        progress("openBIS changed; rebuilding the structural index …")
+        self.refresh(
+            progress=progress,
+            _objects=objects,
+            _datasets=datasets,
+        )
+        return "rebuilt"
+
+    def refresh(
+        self,
+        include_cdxml: bool = True,
+        progress=None,
+        max_workers: int = 8,
+        _objects=None,
+        _datasets=None,
+    ):
+        """Rebuild the index from openBIS without modifying openBIS."""
+        blocker = rdBase.BlockLogs()
+        try:
+            return self._refresh_impl(
+                include_cdxml,
+                progress,
+                max_workers,
+                objects=_objects,
+                datasets=_datasets,
+            )
+        finally:
+            del blocker
+
+    def _refresh_impl(
+        self,
+        include_cdxml: bool,
+        progress,
+        max_workers: int,
+        objects=None,
+        datasets=None,
+    ):
+        progress = progress or (lambda _message: None)
+        progress("Reading MOLECULE objects from openBIS …")
+        if objects is None:
+            objects = list(
+                self.session.get_objects(
+                    type=MOLECULE_TYPE,
+                    collection=self.collection,
+                )
+                or []
+            )
+        else:
+            objects = list(objects)
         records_by_reference: dict[str, MoleculeRecord] = {}
         for openbis_object in objects:
             props = _properties(openbis_object)
@@ -420,21 +586,23 @@ class OpenbisChemicalIndex:
         unique_records = {
             record.permid: record for record in records_by_reference.values()
         }
-        parsed_cdxml = 0
-        failed_cdxml = 0
+        relevant_datasets = []
         if include_cdxml and unique_records:
             permids = list(unique_records)
             progress(
                 f"Inspecting attachments for all {len(permids)} molecules …"
             )
-            datasets = [
+            if datasets is None:
+                datasets = list(self.session.get_datasets(sample=permids) or [])
+            relevant_datasets = [
                 dataset
-                for dataset in list(self.session.get_datasets(sample=permids) or [])
+                for dataset in datasets
                 if _type_code(dataset.type) in DATASET_TYPES
+                and _dataset_cdxml_files(dataset)
             ]
             sources = [
                 (dataset, filename)
-                for dataset in datasets
+                for dataset in relevant_datasets
                 for filename in _dataset_cdxml_files(dataset)
             ]
             progress(f"Parsing {len(sources)} CDXML attachments …")
@@ -465,9 +633,7 @@ class OpenbisChemicalIndex:
                                 "in the selected collection"
                             )
                         record.representations.extend(representations)
-                        parsed_cdxml += 1
                     except Exception as exc:
-                        failed_cdxml += 1
                         if record is not None:
                             record.errors.append(
                                 f"CDXML {filename}: {type(exc).__name__}: {exc}"
@@ -478,65 +644,14 @@ class OpenbisChemicalIndex:
                         )
 
         self.records = sorted(unique_records.values(), key=lambda item: item.permid)
+        self.manifest = self._build_manifest(objects, relevant_datasets)
         self.generated_at = datetime.now(timezone.utc).isoformat()
-        sources = Counter(
-            representation.source
-            for record in self.records
-            for representation in record.representations
-        )
-        self.summary = {
-            "molecules": len(self.records),
-            "with_smiles": sum(bool(record.smiles) for record in self.records),
-            "with_cxsmiles": sum(bool(record.cxsmiles) for record in self.records),
-            "with_any_representation": sum(
-                bool(record.representations) for record in self.records
-            ),
-            "representations": dict(sorted(sources.items())),
-            "cdxml_parsed": parsed_cdxml,
-            "cdxml_failures": failed_cdxml,
-            "objects_with_errors": sum(bool(record.errors) for record in self.records),
-        }
+        self.summary = self._summarize_records(self.records)
         self.save()
         self._mol_cache.clear()
         self._fp_cache.clear()
         progress(f"Indexed {len(self.records)} molecules.")
         return self
-
-    def prune_inactive_records(self) -> int:
-        """Remove cached records no longer active in the selected collection."""
-        active_permids = {
-            str(openbis_object.permId)
-            for openbis_object in list(
-                self.session.get_objects(
-                    type=MOLECULE_TYPE,
-                    collection=self.collection,
-                )
-                or []
-            )
-        }
-        original_count = len(self.records)
-        self.records = [
-            record for record in self.records if record.permid in active_permids
-        ]
-        removed = original_count - len(self.records)
-        if removed:
-            self.summary["molecules"] = len(self.records)
-            self.summary["with_smiles"] = sum(
-                bool(record.smiles) for record in self.records
-            )
-            self.summary["with_cxsmiles"] = sum(
-                bool(record.cxsmiles) for record in self.records
-            )
-            self.summary["with_any_representation"] = sum(
-                bool(record.representations) for record in self.records
-            )
-            self.summary["objects_with_errors"] = sum(
-                bool(record.errors) for record in self.records
-            )
-            self._mol_cache.clear()
-            self._fp_cache.clear()
-            self.save()
-        return removed
 
     def _mol(self, smiles: str) -> Chem.Mol:
         if smiles not in self._mol_cache:
@@ -847,12 +962,15 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.results.options = [("Select a match...", "")]
         self.details.value = ""
         try:
+            synchronization = ""
             if not self.index.records:
                 try:
                     self.index.load()
                 except Exception:
                     self.index.refresh(progress=self._set_status)
-            removed = self.index.prune_inactive_records()
+                    synchronization = "rebuilt"
+            if not synchronization:
+                synchronization = self.index.synchronize(progress=self._set_status)
             blocker = rdBase.BlockLogs()
             try:
                 query = self._query()
@@ -876,12 +994,13 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 for hit in hits
             ]
             periodic = "periodic" if query.periodic else "finite"
-            stale_message = (
-                f" Removed {removed} inactive cached record(s)." if removed else ""
-            )
+            sync_message = {
+                "current": " Local index already current.",
+                "rebuilt": " Local index refreshed from openBIS.",
+            }.get(synchronization, " Inactive cached records removed.")
             self._set_status(
                 f"Found {len(hits)} {periodic} matches in this collection."
-                f"{stale_message}",
+                f"{sync_message}",
                 "ok" if hits else "info",
             )
             if self.on_search_complete is not None:

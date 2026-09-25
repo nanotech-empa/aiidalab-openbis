@@ -212,9 +212,9 @@ def test_deleted_molecule_is_pruned_from_memory_and_cache(tmp_path):
     assert [record.permid for record in index.records] == ["deleted"]
 
     session.objects = []
-    removed = index.prune_inactive_records()
+    synchronization = index.synchronize()
 
-    assert removed == 1
+    assert synchronization == "pruned:1"
     assert index.records == []
     reloaded = OpenbisChemicalIndex(
         session,
@@ -222,6 +222,88 @@ def test_deleted_molecule_is_pruned_from_memory_and_cache(tmp_path):
         cache_path=cache,
     ).load()
     assert reloaded.records == []
+
+
+def test_new_live_molecule_triggers_automatic_rebuild(tmp_path):
+    cache = tmp_path / "index.json"
+    session = FakeSession([molecule("ethanol", name="Ethanol", smiles="CCO")])
+    index = OpenbisChemicalIndex(
+        session,
+        "/LAB205_MATERIALS/MOLECULES/PRECURSOR_COLLECTION",
+        cache_path=cache,
+    ).refresh()
+    initial_object_calls = len(session.object_calls)
+    initial_dataset_calls = len(session.dataset_calls)
+    session.objects.append(molecule("propane", name="Propane", smiles="CCC"))
+
+    synchronization = index.synchronize()
+
+    assert synchronization == "rebuilt"
+    assert {record.permid for record in index.records} == {"ethanol", "propane"}
+    assert len(session.object_calls) == initial_object_calls + 1
+    assert len(session.dataset_calls) == initial_dataset_calls + 1
+    hit = index.search(search_representation_from_smiles("CCC"))[0]
+    assert hit.record.permid == "propane"
+    assert hit.match_type == "exact"
+
+
+def test_changed_live_structure_property_triggers_automatic_rebuild(tmp_path):
+    session = FakeSession([molecule("record", name="Record", smiles="CC")])
+    index = OpenbisChemicalIndex(
+        session,
+        "/LAB205_MATERIALS/MOLECULES/PRECURSOR_COLLECTION",
+        cache_path=tmp_path / "index.json",
+    ).refresh()
+    session.objects = [molecule("record", name="Record", smiles="CCC")]
+
+    synchronization = index.synchronize()
+
+    assert synchronization == "rebuilt"
+    hit = index.search(search_representation_from_smiles("CCC"))[0]
+    assert hit.record.permid == "record"
+    assert hit.match_type == "exact"
+
+
+def test_changed_cdxml_dataset_triggers_automatic_rebuild(tmp_path):
+    record = molecule("attachment-only", name="Attachment only")
+    session = FakeSession(
+        [record],
+        [
+            FakeDataset(
+                "dataset-1",
+                record.permId,
+                "structure.cdxml",
+                b"""<CDXML><page><fragment>
+                  <n id="1" p="0 0"/><n id="2" p="1 0"/>
+                  <b id="3" B="1" E="2" Order="1"/>
+                </fragment></page></CDXML>""",
+            )
+        ],
+    )
+    index = OpenbisChemicalIndex(
+        session,
+        "/LAB205_MATERIALS/MOLECULES/PRECURSOR_COLLECTION",
+        cache_path=tmp_path / "index.json",
+    ).refresh()
+    session.datasets = [
+        FakeDataset(
+            "dataset-2",
+            record.permId,
+            "replacement.cdxml",
+            b"""<CDXML><page><fragment>
+              <n id="1" p="0 0"/><n id="2" p="1 0"/><n id="3" p="2 0"/>
+              <b id="4" B="1" E="2" Order="1"/>
+              <b id="5" B="2" E="3" Order="1"/>
+            </fragment></page></CDXML>""",
+        )
+    ]
+
+    synchronization = index.synchronize()
+
+    assert synchronization == "rebuilt"
+    hit = index.search(search_representation_from_smiles("CCC"))[0]
+    assert hit.record.permid == record.permId
+    assert hit.match_type == "exact"
 
 
 def test_generated_cdxml_can_be_used_without_file_upload(tmp_path):

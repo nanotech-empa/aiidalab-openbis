@@ -54,10 +54,12 @@ Morgan-fingerprint similarity.
 The displayed match-quality scale maps 0 to Tanimoto 0.75 and 100 to Tanimoto
 1.00. A result must be selected explicitly before it becomes the linked
 molecule. Index construction is read-only, suppresses RDKit diagnostic output,
-and stores a collection-specific local cache. Every search performs a quick
-live PermID check and removes cached records that are no longer active in the
-selected collection. The **Update index** button performs the slower full
-rebuild needed to discover externally added records or changed attachments.
+and stores a collection-specific local cache. Before every search, the app
+compares that cache with a lightweight live manifest of object PermIDs,
+structural properties, modification dates, and CDXML datasets. An unchanged
+manifest uses the cache immediately; deletions are pruned; additions or changes
+trigger an automatic rebuild before matching. The **Update index** button
+remains available to force a full rebuild explicitly.
 
 After searching a generated CDXML, an exact or standardized-equivalent match
 blocks creation and the existing result must be selected. If no identity match
