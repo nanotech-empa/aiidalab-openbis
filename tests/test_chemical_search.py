@@ -201,6 +201,29 @@ def test_cache_rejects_another_collection(tmp_path):
         raise AssertionError("A chemical index must not cross collection boundaries")
 
 
+def test_deleted_molecule_is_pruned_from_memory_and_cache(tmp_path):
+    cache = tmp_path / "index.json"
+    session = FakeSession([molecule("deleted", name="Deleted", smiles="CC")])
+    index = OpenbisChemicalIndex(
+        session,
+        "/LAB205_MATERIALS/MOLECULES/PRECURSOR_COLLECTION",
+        cache_path=cache,
+    ).refresh()
+    assert [record.permid for record in index.records] == ["deleted"]
+
+    session.objects = []
+    removed = index.prune_inactive_records()
+
+    assert removed == 1
+    assert index.records == []
+    reloaded = OpenbisChemicalIndex(
+        session,
+        "/LAB205_MATERIALS/MOLECULES/PRECURSOR_COLLECTION",
+        cache_path=cache,
+    ).load()
+    assert reloaded.records == []
+
+
 def test_generated_cdxml_can_be_used_without_file_upload(tmp_path):
     collection = "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION"
     widget = MoleculeStructureSearchWidget(

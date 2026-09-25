@@ -502,6 +502,42 @@ class OpenbisChemicalIndex:
         progress(f"Indexed {len(self.records)} molecules.")
         return self
 
+    def prune_inactive_records(self) -> int:
+        """Remove cached records no longer active in the selected collection."""
+        active_permids = {
+            str(openbis_object.permId)
+            for openbis_object in list(
+                self.session.get_objects(
+                    type=MOLECULE_TYPE,
+                    collection=self.collection,
+                )
+                or []
+            )
+        }
+        original_count = len(self.records)
+        self.records = [
+            record for record in self.records if record.permid in active_permids
+        ]
+        removed = original_count - len(self.records)
+        if removed:
+            self.summary["molecules"] = len(self.records)
+            self.summary["with_smiles"] = sum(
+                bool(record.smiles) for record in self.records
+            )
+            self.summary["with_cxsmiles"] = sum(
+                bool(record.cxsmiles) for record in self.records
+            )
+            self.summary["with_any_representation"] = sum(
+                bool(record.representations) for record in self.records
+            )
+            self.summary["objects_with_errors"] = sum(
+                bool(record.errors) for record in self.records
+            )
+            self._mol_cache.clear()
+            self._fp_cache.clear()
+            self.save()
+        return removed
+
     def _mol(self, smiles: str) -> Chem.Mol:
         if smiles not in self._mol_cache:
             molecule = Chem.MolFromSmiles(smiles)
@@ -816,6 +852,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                     self.index.load()
                 except Exception:
                     self.index.refresh(progress=self._set_status)
+            removed = self.index.prune_inactive_records()
             blocker = rdBase.BlockLogs()
             try:
                 query = self._query()
@@ -839,8 +876,12 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 for hit in hits
             ]
             periodic = "periodic" if query.periodic else "finite"
+            stale_message = (
+                f" Removed {removed} inactive cached record(s)." if removed else ""
+            )
             self._set_status(
-                f"Found {len(hits)} {periodic} matches in this collection.",
+                f"Found {len(hits)} {periodic} matches in this collection."
+                f"{stale_message}",
                 "ok" if hits else "info",
             )
             if self.on_search_complete is not None:

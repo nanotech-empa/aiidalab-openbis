@@ -54,8 +54,10 @@ Morgan-fingerprint similarity.
 The displayed match-quality scale maps 0 to Tanimoto 0.75 and 100 to Tanimoto
 1.00. A result must be selected explicitly before it becomes the linked
 molecule. Index construction is read-only, suppresses RDKit diagnostic output,
-and stores a collection-specific local cache. The **Update index** button is
-used when openBIS records change.
+and stores a collection-specific local cache. Every search performs a quick
+live PermID check and removes cached records that are no longer active in the
+selected collection. The **Update index** button performs the slower full
+rebuild needed to discover externally added records or changed attachments.
 
 After searching a generated CDXML, an exact or standardized-equivalent match
 blocks creation and the existing result must be selected. If no identity match
