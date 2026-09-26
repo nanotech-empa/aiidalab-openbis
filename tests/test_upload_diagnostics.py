@@ -261,7 +261,7 @@ def test_unknown_pybis_implementation_falls_back_without_changing_behavior():
     )
 
 
-def test_dataset_wrapper_discards_authenticated_stdout(tmp_path):
+def test_dataset_wrapper_discards_authenticated_stdout(tmp_path, capsys):
     path = tmp_path / "archive.aiida"
     path.write_bytes(b"data")
 
@@ -272,11 +272,26 @@ def test_dataset_wrapper_discards_authenticated_stdout(tmp_path):
     client = SimpleNamespace(new_dataset=lambda **kwargs: SimpleNamespace(save=save))
     with diag.attempt() as trace, pytest.raises(BrokenPipeError):
         utils.create_openbis_dataset(client, files=[path], type="RAW_DATA")
-    assert SECRET not in utils.string_io.getvalue()
+    assert SECRET not in capsys.readouterr().out
+    assert not hasattr(utils._discarded_stdout, "getvalue")
     assert any(
         event.get("phase") == "dataset_save" and event["event"] == "phase_failed"
         for event in trace.events
     )
+
+
+def test_repeated_object_saves_discard_stdout_without_retaining_it(capsys):
+    import sys
+
+    original = sys.stdout
+    state = vars(utils._discarded_stdout).copy()
+    obj = SimpleNamespace(save=lambda: print("x" * 1024))
+    for _ in range(100):
+        utils.update_openbis_object(obj)
+    assert sys.stdout is original
+    assert capsys.readouterr().out == ""
+    assert vars(utils._discarded_stdout) == state
+    assert not hasattr(utils._discarded_stdout, "getvalue")
 
 
 def test_lost_response_recovery_remains_single_upload_and_records_inventory():

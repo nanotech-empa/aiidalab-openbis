@@ -479,8 +479,11 @@ def test_legacy_qe_mapping_and_namespace_compatibility(aiida_utils):
     )
     modern_scalar = SimpleNamespace(value=3)
     plain_value = "already-unwrapped"
-    old_relax = SimpleNamespace(
-        inputs=SimpleNamespace(base_relax=SimpleNamespace(pw="legacy-pw"))
+    aqe4_relax = SimpleNamespace(
+        inputs=SimpleNamespace(base=SimpleNamespace(pw="aqe4-pw"))
+    )
+    aqe5_relax = SimpleNamespace(
+        inputs=SimpleNamespace(base_relax=SimpleNamespace(pw="aqe5-pw"))
     )
 
     assert aiida_utils._node_mapping(FakeDict({"value": 3})) == {"value": 3}
@@ -488,7 +491,41 @@ def test_legacy_qe_mapping_and_namespace_compatibility(aiida_utils):
     assert aiida_utils._node_value(modern_scalar) == 3
     assert aiida_utils._node_value(legacy) == 7
     assert aiida_utils._node_value(plain_value) == plain_value
-    assert aiida_utils._pw_relax_base(old_relax).pw == "legacy-pw"
+    assert aiida_utils._pw_relax_base(aqe4_relax).pw == "aqe4-pw"
+    assert aiida_utils._pw_relax_base(aqe5_relax).pw == "aqe5-pw"
+
+
+def test_structure_optimization_supports_aqe5_relax_namespace(monkeypatch, aiida_utils):
+    relax = SimpleNamespace(
+        process_label="PwRelaxWorkChain",
+        inputs=SimpleNamespace(
+            base_relax=SimpleNamespace(
+                pw=SimpleNamespace(
+                    parameters=FakeDict({"CELL": {"cell_dofree": "2Dshape"}})
+                )
+            )
+        ),
+    )
+    app = SimpleNamespace(
+        process_label="QeAppWorkChain",
+        called_descendants=[relax],
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "creator_of_structure",
+        lambda _structure_uuid: "creator-uuid",
+    )
+    monkeypatch.setattr(
+        aiida_utils.orm,
+        "load_node",
+        lambda _identifier: app,
+    )
+
+    assert aiida_utils.is_structure_optimized("structure-uuid") == (
+        True,
+        True,
+        "2Dshape",
+    )
 
 
 def test_bands_only_output_does_not_invent_pdos(aiida_utils):

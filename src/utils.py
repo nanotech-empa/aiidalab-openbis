@@ -16,7 +16,18 @@ from pybis import Openbis
 
 from . import upload_diagnostics
 
-string_io = io.StringIO()
+
+class _DiscardedStdout(io.TextIOBase):
+    """A stdout sink that never retains pyBIS output, including credentials."""
+
+    def writable(self):
+        return True
+
+    def write(self, text):
+        return len(text)
+
+
+_discarded_stdout = _DiscardedStdout()
 ELN_CONFIG = Path.home() / ".aiidalab" / "aiidalab-eln-config.json"
 APP_ROOT = Path(__file__).resolve().parent.parent
 LOG_DIR = APP_ROOT / "logs"
@@ -211,7 +222,7 @@ def upload_datasets(
     dataset_type,
     filename_filter=None,
 ):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         for uploaded_file in uploaded_files(files_widget):
             filename = uploaded_file["name"]
             if filename_filter is not None and not filename_filter(filename):
@@ -308,7 +319,7 @@ def get_next_collection_code(openbis_session, collection_type):
 
 def create_openbis_dataset(openbis_session, **kwargs):
     # pyBIS may print an authenticated request on error; discard library stdout.
-    with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
+    with contextlib.redirect_stdout(_discarded_stdout):
         upload_diagnostics.record_files(kwargs.get("files") or [])
         sample_id = upload_diagnostics.public_id(
             getattr(kwargs.get("sample"), "permId", None)
@@ -323,24 +334,24 @@ def create_openbis_dataset(openbis_session, **kwargs):
 
 
 def delete_openbis_object(openbis_object):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         openbis_object.delete("Deleted by AiiDA Lab interface")
 
 
 def update_openbis_object(openbis_object):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         openbis_object.save()
 
 
 def create_openbis_object(openbis_session, **kwargs):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         openbis_object = openbis_session.new_object(**kwargs)
         openbis_object.save()
         return openbis_object
 
 
 def create_openbis_collection(openbis_session, **kwargs):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         collection_type = kwargs.get("type", "")
         collection_code = kwargs.get("code", "")
         if collection_code == "":
