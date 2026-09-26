@@ -28,6 +28,7 @@ from . import (
     utils,
     widgets,
 )
+from .widget_lifecycle import close_owned_widgets
 
 logger = logging.getLogger(__name__)
 
@@ -2285,6 +2286,7 @@ class ExportSimulationsWidget(ipw.VBox):
 class SimulationDetailsWidget(ipw.VBox):
     def __init__(self, openbis_session, used_aiida):
         super().__init__()
+        self._closed = False
         self.openbis_session = openbis_session
         self.used_aiida = used_aiida
         self.target_experiment_id = "-1"
@@ -2488,6 +2490,39 @@ class SimulationDetailsWidget(ipw.VBox):
         self.add_molecule_button.on_click(self.add_molecule)
         self.add_reacprod_concept_button.on_click(self.add_reacprod_concept)
 
+        # All widget-valued attributes above are created here, including forms
+        # hidden in one of the two modes. Neither constructor argument is owned.
+        self._owned_widgets = tuple(
+            value for value in vars(self).values() if isinstance(value, ipw.Widget)
+        )
+
+    def _clear_preview_suggestions(self):
+        for entry in self._preview_entries.values():
+            uploader = entry.get("uploader")
+            callback = entry.get("upload_callback")
+            if uploader is not None and callback is not None:
+                uploader.unobserve(callback, names="value")
+        cards = self.preview_suggestions_box.children
+        self.preview_suggestions_box.children = []
+        self._preview_entries = {}
+        close_owned_widgets(*cards)
+
+    def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        if hasattr(self, "_preview_entries"):
+            self._clear_preview_suggestions()
+        close_owned_widgets(
+            *getattr(self, "_owned_widgets", ()),
+            # The modern startup PR creates this form lazily.
+            getattr(self, "atom_model_widget", None),
+            self.layout,
+        )
+        self._owned_widgets = ()
+        self.children = ()
+        super().close()
+
     @staticmethod
     def _exportable_ancestor(node):
         """Return the nearest directly or indirectly exportable WorkChain."""
@@ -2520,12 +2555,18 @@ class SimulationDetailsWidget(ipw.VBox):
 
     def _clear_inferred_molecules(self):
         """Remove only molecule selectors inferred for the previously checked PK."""
+        removed = [
+            child
+            for child in self.molecules_accordion.children
+            if getattr(child, _INFERRED_MOLECULE_ATTR, False)
+        ]
         retained = [
             child
             for child in self.molecules_accordion.children
             if not getattr(child, _INFERRED_MOLECULE_ATTR, False)
         ]
         self.molecules_accordion.children = retained
+        close_owned_widgets(*removed)
         for index, molecule_widget in enumerate(retained):
             molecule_widget.object_index = index
             if molecule_widget.title:
@@ -2573,8 +2614,7 @@ class SimulationDetailsWidget(ipw.VBox):
         """Validate a PK and prepare previews only for supported WorkChains."""
         self._clear_inferred_molecules()
         self.simulation_check_status.value = ""
-        self._preview_entries = {}
-        self.preview_suggestions_box.children = []
+        self._clear_preview_suggestions()
         self.preview_suggestions_status.value = ""
         self.simulations_dropdown.options = [("No checked simulation", "-1")]
         self.simulations_dropdown.value = "-1"
@@ -2642,8 +2682,7 @@ class SimulationDetailsWidget(ipw.VBox):
             self.load_aiida_preview_suggestions()
 
     def load_aiida_preview_suggestions(self, change=None):
-        self._preview_entries = {}
-        self.preview_suggestions_box.children = []
+        self._clear_preview_suggestions()
         self.existing_exports_warning.value = ""
         self.existing_exports_confirmation.value = False
         self.existing_exports_confirmation.layout.display = "none"
@@ -2780,9 +2819,11 @@ class SimulationDetailsWidget(ipw.VBox):
                 uploaded = _first_uploaded_file(uploader)
                 if uploaded is None:
                     return
+                previous = preview_box.children
                 preview_box.children = [
                     _preview_image_widget(uploaded["content"], uploaded["name"])
                 ]
+                close_owned_widgets(*previous)
                 status.value = (
                     "<p style='color:#237804'>Replacement image selected.</p>"
                 )
@@ -2791,6 +2832,7 @@ class SimulationDetailsWidget(ipw.VBox):
             self._preview_entries[suggestion["key"]] = {
                 "suggestion": suggestion,
                 "uploader": uploader,
+                "upload_callback": show_replacement,
                 "property_widget": property_widget,
                 "existing": False,
             }
@@ -3140,6 +3182,7 @@ class SimulationPropertiesWidget(ipw.VBox):
 
     def __init__(self, openbis_session):
         super().__init__()
+        self._closed = False
         self.openbis_session = openbis_session
         self.simulation_type = ""
         self.fields = {}
@@ -3162,7 +3205,7 @@ class SimulationPropertiesWidget(ipw.VBox):
         data_type = property_definition["dataType"]
         label = property_definition["label"] + (" *" if mandatory else "")
         style = {"description_width": "220px"}
-        layout = ipw.Layout(width="850px")
+        layout = {"width": "850px"}
         if data_type == "BOOLEAN":
             return ipw.Checkbox(description=label, indent=False)
         if data_type == "MULTILINE_VARCHAR":
@@ -3191,6 +3234,8 @@ class SimulationPropertiesWidget(ipw.VBox):
 
     def load_widgets(self, simulation_type):
         self.simulation_type = simulation_type
+        close_owned_widgets(*self.children, shared=(self.title,))
+        self.children = ()
         self.fields = {}
         self.assignments = []
         if simulation_type not in simulation_schema.OBJECT_TYPES:
@@ -3215,6 +3260,15 @@ class SimulationPropertiesWidget(ipw.VBox):
             children.append(ipw.HTML(f"<h4>{html.escape(section)}</h4>"))
             children.extend(section_fields)
         self.children = children
+
+    def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        close_owned_widgets(*self.children, getattr(self, "title", None), self.layout)
+        self.children = ()
+        self.fields = {}
+        super().close()
 
     def set_values(self, properties):
         """Populate assigned fields from lower-case pyBIS property values."""
