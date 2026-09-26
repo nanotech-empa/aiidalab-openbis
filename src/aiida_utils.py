@@ -536,8 +536,9 @@ def is_structure_optimized(structure_uuid):
         for wc in creator.called_descendants:
             if wc.process_label == "PwRelaxWorkChain":
                 geo_opt = True
+                base = _pw_relax_base(wc)
                 cell_free = (
-                    _node_mapping(wc.inputs.base.pw.parameters)
+                    _node_mapping(base.pw.parameters)
                     .get("CELL", {})
                     .get("cell_dofree", "")
                 )

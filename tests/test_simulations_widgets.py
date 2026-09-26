@@ -1,8 +1,10 @@
+import gc
 import importlib
 import io
 import sys
+import weakref
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -313,6 +315,152 @@ def test_preview_image_widget_resamples_without_distortion(simulations_widgets):
     assert widget.height == "281"
     with Image.open(io.BytesIO(widget.value)) as image:
         assert image.size == (500, 281)
+
+
+@pytest.fixture
+def preview_details(monkeypatch, simulations_widgets):
+    """Real details widget with only server-backed selectors replaced."""
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "AtomModelWidget",
+        lambda _session: simulations_widgets.ipw.VBox(),
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils, "get_openbis_objects", lambda *_args, **_kwargs: []
+    )
+    widget = simulations_widgets.SimulationDetailsWidget(object(), True)
+    widget.simulations_dropdown.options = [("test workflow", 1)]
+    widget.target_experiment_id = "test-collection"
+    yield widget
+    widget.close()
+
+
+def _preview_suggestion(simulations_widgets, *, existing):
+    from PIL import Image
+
+    content = io.BytesIO()
+    Image.new("RGB", (32, 16), color="white").save(content, format="PNG")
+    return {
+        "key": "test:bands",
+        "title": "Test bands",
+        "result_role": "bands",
+        "object_type": "BAND_STRUCTURE",
+        "properties": {"name": "Test bands", "method_family": "DFT"},
+        "name": "bands.png",
+        "content": content.getvalue(),
+        "needs_preview": True,
+        "export_checks": [
+            simulations_widgets.export_recovery.ExportCheck(
+                "test/object", "Bands", "complete"
+            )
+        ],
+        "existing": {"permid": "saved-bands"} if existing else None,
+    }
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_preview_refresh_releases_previous_cards(
+    monkeypatch, simulations_widgets, preview_details, existing
+):
+    from ipywidgets.widgets.widget import _instances
+
+    suggestion = _preview_suggestion(simulations_widgets, existing=existing)
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "render_workchain_preview_suggestions",
+        lambda *_args, **_kwargs: [suggestion],
+    )
+    baseline = set(_instances)
+    removed = []
+    for _ in range(20):
+        preview_details.load_aiida_preview_suggestions()
+        uploader = preview_details._preview_entries["test:bands"]["uploader"]
+        removed.append(weakref.ref(uploader))
+        preview_details._clear_preview_suggestions()
+        assert uploader.value == ()
+        assert not uploader._trait_notifiers.get("value", {}).get("change", [])
+        del uploader
+    gc.collect()
+    assert all(ref() is None for ref in removed)
+    assert set(_instances) == baseline
+
+
+def test_replacement_preview_releases_old_image(
+    monkeypatch, simulations_widgets, preview_details
+):
+    from datetime import datetime, timezone
+    from ipywidgets.widgets.widget import _instances
+
+    suggestion = _preview_suggestion(simulations_widgets, existing=False)
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "render_workchain_preview_suggestions",
+        lambda *_args, **_kwargs: [suggestion],
+    )
+    preview_details.load_aiida_preview_suggestions()
+    baseline = set(_instances)
+    entry = preview_details._preview_entries["test:bands"]
+    card = preview_details.preview_suggestions_box.children[0]
+    image_box = card.children[4]
+    previous = image_box.children[0]
+    uploaded = {
+        "name": "replacement.png",
+        "type": "image/png",
+        "size": len(suggestion["content"]),
+        "content": memoryview(suggestion["content"]),
+        "last_modified": datetime.now(timezone.utc),
+    }
+    entry["uploader"].value = (uploaded,)
+    assert previous.comm is None
+    assert not previous.value
+    assert image_box.children[0].value
+    assert len(_instances) == len(baseline)
+    assert (
+        preview_details.preview_overrides()["test:bands"]["content"]
+        == suggestion["content"]
+    )
+
+
+def test_property_form_replacement_does_not_accumulate_widgets(simulations_widgets):
+    from ipywidgets.widgets.widget import _instances
+
+    widget = simulations_widgets.SimulationPropertiesWidget(object())
+    baseline = set(_instances)
+    for _ in range(20):
+        widget.load_widgets("BAND_STRUCTURE")
+        widget.load_widgets("-1")
+        assert set(_instances) == baseline
+        assert widget.title.comm is not None
+    widget.close()
+    widget.close()
+
+
+@pytest.mark.parametrize("switch_modes", [False, True])
+def test_details_close_releases_hidden_owned_forms(
+    monkeypatch, simulations_widgets, switch_modes
+):
+    from ipywidgets.widgets.widget import _instances
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "AtomModelWidget",
+        lambda _session: simulations_widgets.ipw.VBox(),
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils, "get_openbis_objects", lambda *_args, **_kwargs: []
+    )
+    baseline = set(_instances)
+    widget = simulations_widgets.SimulationDetailsWidget(object(), True)
+    if switch_modes:
+        widget.load_widgets(False)
+        widget.load_widgets(True)
+    reference = weakref.ref(widget)
+    widget.close()
+    widget.close()
+    del widget
+    gc.collect()
+    assert reference() is None
+    assert set(_instances) == baseline
 
 
 @pytest.mark.parametrize("selection", [None, "", "-1"])
@@ -1476,6 +1624,9 @@ def test_existing_result_is_shown_as_status_without_editor(
         openbis_session=object(),
     )
 
+    widget._clear_preview_suggestions = MethodType(
+        simulations_widgets.SimulationDetailsWidget._clear_preview_suggestions, widget
+    )
     simulations_widgets.SimulationDetailsWidget.load_aiida_preview_suggestions(widget)
 
     assert widget._preview_entries == {
@@ -1641,6 +1792,9 @@ def test_inferred_molecules_are_prepopulated_and_replaced(
     simulations_widgets.SimulationDetailsWidget._clear_inferred_molecules(widget)
 
     assert accordion.children == (manual,)
+    assert inferred.comm is None
+    assert manual.comm is not None
+    assert accordion.comm is not None
     assert manual.object_index == 0
     assert manual.dropdown.value == "manual-permid"
 
@@ -1653,8 +1807,10 @@ def test_unsupported_pk_clears_previous_preview_state(
     monkeypatch.setattr(simulations_widgets.orm, "load_node", lambda _pk: unsupported)
     widget = SimpleNamespace(
         simulation_check_status=SimpleNamespace(value="old status"),
-        _preview_entries={"old": object()},
-        preview_suggestions_box=SimpleNamespace(children=[object()]),
+        _preview_entries={"old": {}},
+        preview_suggestions_box=SimpleNamespace(
+            children=[simulations_widgets.ipw.HTML()]
+        ),
         preview_suggestions_status=SimpleNamespace(value="old preview status"),
         simulations_dropdown=SimpleNamespace(
             options=[("Old workflow", 1)],
@@ -1665,6 +1821,9 @@ def test_unsupported_pk_clears_previous_preview_state(
         _exportable_ancestor=lambda _node: None,
     )
 
+    widget._clear_preview_suggestions = MethodType(
+        simulations_widgets.SimulationDetailsWidget._clear_preview_suggestions, widget
+    )
     simulations_widgets.SimulationDetailsWidget.check_aiida_simulation(widget)
 
     assert widget._preview_entries == {}
