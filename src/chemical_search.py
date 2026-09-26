@@ -673,8 +673,11 @@ class OpenbisChemicalIndex:
         limit: int = 20,
     ) -> list[SearchHit]:
         """Search within this index, keeping finite and periodic classes separate."""
-        query_mol = self._mol(query.search_smiles)
-        query_fp = self._fingerprint(query.search_smiles)
+        # Queries are one-use inputs, not part of the collection's working set.
+        query_mol = Chem.MolFromSmiles(query.search_smiles)
+        if query_mol is None:
+            raise ValueError("Query SMILES is invalid")
+        query_fp = _MORGAN.GetFingerprint(query_mol)
         query_heavy = max(1, query_mol.GetNumHeavyAtoms())
         hits = []
 

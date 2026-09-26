@@ -104,6 +104,33 @@ def test_index_is_scoped_to_one_molecule_collection(tmp_path):
     assert hit.similarity == 1.0
 
 
+def test_distinct_queries_do_not_grow_collection_caches(tmp_path):
+    index = OpenbisChemicalIndex(
+        FakeSession([molecule("ethanol", name="Ethanol", smiles="CCO")]),
+        "/COLLECTION/A",
+        cache_path=tmp_path / "index.json",
+    ).refresh()
+    query = search_representation_from_smiles("CCO")
+    expected = index.search(query)
+    molecules = dict(index._mol_cache)
+    fingerprints = dict(index._fp_cache)
+    for length in range(1, 51):
+        index.search(search_representation_from_smiles("C" * length))
+    assert index._mol_cache == molecules
+    assert index._fp_cache == fingerprints
+    assert index.search(query) == expected
+
+
+def test_empty_index_does_not_retain_queries(tmp_path):
+    index = OpenbisChemicalIndex(
+        FakeSession([]), "/COLLECTION/A", cache_path=tmp_path / "index.json"
+    ).refresh()
+    for length in range(1, 51):
+        assert index.search(search_representation_from_smiles("C" * length)) == []
+    assert not index._mol_cache
+    assert not index._fp_cache
+
+
 def test_periodic_cxsmiles_property_matches_periodic_cdxml(tmp_path):
     generated = generate_periodic_cxsmiles(GNR_CDXML.read_bytes())
     collection = "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION"
