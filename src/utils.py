@@ -1,26 +1,43 @@
-from collections import defaultdict
-import json
-from pathlib import Path
-from pybis import Openbis
-import yaml
-import datetime
-import os
-import ipywidgets as ipw
-import io
 import contextlib
-from IPython.display import display, Javascript
+import datetime
+import io
+import json
+import logging
+import os
+from collections import defaultdict
 from functools import lru_cache
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
-string_io = io.StringIO()
+import ipywidgets as ipw
+import yaml
+from IPython.display import Javascript, display
+from pybis import Openbis
+
+from . import upload_diagnostics
+
+
+class _DiscardedStdout(io.TextIOBase):
+    """A stdout sink that never retains pyBIS output, including credentials."""
+
+    def writable(self):
+        return True
+
+    def write(self, text):
+        return len(text)
+
+
+_discarded_stdout = _DiscardedStdout()
 ELN_CONFIG = Path.home() / ".aiidalab" / "aiidalab-eln-config.json"
+APP_ROOT = Path(__file__).resolve().parent.parent
+LOG_DIR = APP_ROOT / "logs"
+LOG_FILE_PATH = LOG_DIR / "aiidalab_openbis_interface.log"
 
 # OpenBIS-AiiDAlab functions
 
 
 @lru_cache(maxsize=5)
 def get_interface_config_info():
-    openbis_session = connect_openbis_aiida()[0]
-
     info = {
         "object_types": {},
         "object_types_codes": {},
@@ -36,7 +53,17 @@ def get_interface_config_info():
         "components_types": {},
     }
 
-    obj_types = openbis_session.get_object_types()
+    openbis_session = connect_openbis_aiida()[0]
+    if openbis_session is None:
+        return info
+
+    try:
+        obj_types = openbis_session.get_object_types()
+    except Exception as error:  # noqa: BLE001 - remote client failures vary
+        logging.getLogger(__name__).info(
+            "openBIS schema unavailable (%s)", type(error).__name__
+        )
+        return info
 
     for obj in obj_types:
         desc = obj.description
@@ -133,26 +160,64 @@ def find_first_atomistic_model(openbis_session, openbis_object, openbis_type):
 
 def find_openbis_simulations(ob_session, root_obj, simulation_types):
     simulation_objects = set()
-    stack = [root_obj]  # start with the root object
+    visited = set()
+    stack = [root_obj]
 
     while stack:
-        current_obj = stack.pop()  # get the next object to process
-        children = current_obj.children
-        if children is not None:
-            for child_ident in children:
-                child_object = get_openbis_object(ob_session, sample_ident=child_ident)
-                if child_object.type in simulation_types.values():
-                    simulation_objects.add(child_object)
-                stack.append(child_object)
+        current_obj = stack.pop()
+        current_id = str(
+            getattr(current_obj, "permId", None)
+            or getattr(current_obj, "identifier", id(current_obj))
+        )
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+
+        for child_ident in current_obj.children or []:
+            child_object = get_openbis_object(
+                ob_session,
+                sample_ident=child_ident,
+            )
+            child_type = str(getattr(child_object.type, "code", child_object.type))
+            if child_type in simulation_types.values():
+                simulation_objects.add(child_object)
+            stack.append(child_object)
 
     return simulation_objects
 
 
-def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
-    with contextlib.redirect_stdout(string_io):
-        for filename in files_widget.value:
-            file_info = files_widget.value[filename]
-            write_file(file_info["content"], filename)
+def uploaded_files(files_widget):
+    """Return uploaded files in one immutable ipywidgets-version-neutral form."""
+    value = files_widget.value
+    # ipywidgets 7 exposes a filename-keyed mapping, whereas ipywidgets 8
+    # exposes a tuple of uploaded-file mappings. Supporting both shapes keeps
+    # uploads working across widget versions without changing the upload contract.
+    if isinstance(value, dict):
+        items = value.items()
+    else:
+        items = (
+            (file_info.get("name", "uploaded-file"), file_info) for file_info in value
+        )
+    return tuple(
+        {"name": str(filename), "content": bytes(file_info["content"])}
+        for filename, file_info in items
+    )
+
+
+def upload_datasets(
+    ob_session,
+    ob_object,
+    files_widget,
+    props,
+    dataset_type,
+    filename_filter=None,
+):
+    with contextlib.redirect_stdout(_discarded_stdout):
+        for uploaded_file in uploaded_files(files_widget):
+            filename = uploaded_file["name"]
+            if filename_filter is not None and not filename_filter(filename):
+                continue
+            write_file(uploaded_file["content"], filename)
             try:
                 create_openbis_dataset(
                     ob_session,
@@ -163,6 +228,39 @@ def upload_datasets(ob_session, ob_object, files_widget, props, dataset_type):
                 )
             finally:
                 os.remove(filename)
+
+
+def normalize_openbis_eln_url(url):
+    """Return an ELN-LIMS URL with exactly one openBIS context segment."""
+    if not url:
+        return ""
+    parts = urlsplit(str(url))
+    marker = "/webapp/eln-lims"
+    path = parts.path or ""
+    if marker in path:
+        prefix, suffix = path.split(marker, 1)
+        prefix = prefix.rstrip("/")
+        while prefix.endswith("/openbis/openbis"):
+            prefix = prefix[: -len("/openbis")]
+        if not prefix.endswith("/openbis"):
+            prefix = f"{prefix}/openbis"
+        path = f"{prefix}{marker}{suffix}"
+    elif path in {"", "/"} or path.rstrip("/").endswith("/openbis"):
+        path = path.rstrip("/")
+        while path.endswith("/openbis/openbis"):
+            path = path[: -len("/openbis")]
+        if not path.endswith("/openbis"):
+            path = f"{path}/openbis"
+        path = f"{path}{marker}/"
+    else:
+        return str(url)
+    return urlunsplit(parts._replace(path=path))
+
+
+def openbis_connection_status_widget(config, openbis_session):
+    """Build the common connection status shown by every notebook interface."""
+    key = "enable_status" if openbis_session is not None else "disable_status"
+    return ipw.HTML(value=config["home_page"][key])
 
 
 def connect_openbis_aiida(eln_url=None):
@@ -189,8 +287,10 @@ def connect_openbis(eln_url, eln_token):
         session_data = {"url": eln_url, "token": eln_token}
         openbis_session = Openbis(eln_url, verify_certificates=False)
         openbis_session.set_token(eln_token)
-    except ValueError:
-        print("Session is no longer valid. Please check if the token is still valid.")
+    except Exception as error:  # noqa: BLE001 - connection failures vary by client stack
+        logging.getLogger(__name__).info(
+            "openBIS connection unavailable (%s)", type(error).__name__
+        )
         openbis_session = None
         session_data = {}
 
@@ -208,30 +308,40 @@ def get_next_collection_code(openbis_session, collection_type):
 
 
 def create_openbis_dataset(openbis_session, **kwargs):
-    with contextlib.redirect_stdout(string_io):
-        openbis_ds = openbis_session.new_dataset(**kwargs)
-        openbis_ds.save()
+    # pyBIS may print an authenticated request on error; discard library stdout.
+    with contextlib.redirect_stdout(_discarded_stdout):
+        upload_diagnostics.record_files(kwargs.get("files") or [])
+        sample_id = upload_diagnostics.public_id(
+            getattr(kwargs.get("sample"), "permId", None)
+        )
+        with upload_diagnostics.phase("dataset_preparation", sample_permid=sample_id):
+            openbis_ds = openbis_session.new_dataset(**kwargs)
+        with (
+            upload_diagnostics.observe_dataset(openbis_ds),
+            upload_diagnostics.phase("dataset_save", sample_permid=sample_id),
+        ):
+            openbis_ds.save()
 
 
 def delete_openbis_object(openbis_object):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         openbis_object.delete("Deleted by AiiDA Lab interface")
 
 
 def update_openbis_object(openbis_object):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         openbis_object.save()
 
 
 def create_openbis_object(openbis_session, **kwargs):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         openbis_object = openbis_session.new_object(**kwargs)
         openbis_object.save()
         return openbis_object
 
 
 def create_openbis_collection(openbis_session, **kwargs):
-    with contextlib.redirect_stdout(string_io):
+    with contextlib.redirect_stdout(_discarded_stdout):
         collection_type = kwargs.get("type", "")
         collection_code = kwargs.get("code", "")
         if collection_code == "":
@@ -281,24 +391,21 @@ def find_instrument_components(openbis_session, instrument_permid, components_ty
 
 
 def generate_openbis_object_history_url(openbis_session, openbis_object):
-    base_url = openbis_session.url
-    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    base_url = normalize_openbis_eln_url(openbis_session.url)
     obj_id = openbis_object.permId
     url = f"{base_url}?viewName=showSampleHierarchyPage&viewData={obj_id}"
     return url
 
 
 def generate_openbis_object_url(openbis_session, openbis_object):
-    base_url = openbis_session.url
-    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    base_url = normalize_openbis_eln_url(openbis_session.url)
     obj_id = openbis_object.permId
     url = f"{base_url}?viewName=showViewSamplePageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{obj_id}%22%7D"
     return url
 
 
 def generate_openbis_dataset_url(openbis_session, openbis_dataset):
-    base_url = openbis_session.url
-    base_url = f"{base_url}/openbis/webapp/eln-lims/"
+    base_url = normalize_openbis_eln_url(openbis_session.url)
     obj_id = openbis_dataset.permId
     url = f"{base_url}?viewName=showViewDataSetPageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{obj_id}%22%7D"
     return url

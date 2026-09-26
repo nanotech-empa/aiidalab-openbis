@@ -16,14 +16,10 @@ OPENBIS_OBJECT_TYPES, _ = (
 MATERIALS_CONCEPTS_TYPES = INTERFACE_CONFIG_INFO["slabs_concepts_types"]
 INSTRUMENTS_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
 
-SIMULATION_TYPES = utils.read_json("config/openbis_config.json")["Simulations"]["Types"]
-OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
-    "Collections"
-]["Paths"]
-
-OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects"][
-    "Paths"
-]
+OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
+OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
+OPENBIS_PROJECTS_PATHS = OPENBIS_CONFIG["Projects"]["Paths"]
 institutions_project = OPENBIS_PROJECTS_PATHS.get("Institution")
 people_project = OPENBIS_PROJECTS_PATHS.get("Person")
 locations_project = OPENBIS_PROJECTS_PATHS.get("Location")
@@ -184,6 +180,10 @@ class AtomModelWidget(ipw.VBox):
         name_textbox = ipw.Text()
         name_hbox = ipw.HBox([name_label, name_textbox])
 
+        description_label = ipw.Label(value="Description")
+        description_textbox = ipw.Textarea()
+        description_hbox = ipw.HBox([description_label, description_textbox])
+
         wfms_uuid_label = ipw.Label(value="WFMS UUID")
         wfms_uuid_textbox = ipw.Text()
         wfms_uuid_hbox = ipw.HBox([wfms_uuid_label, wfms_uuid_textbox])
@@ -226,6 +226,7 @@ class AtomModelWidget(ipw.VBox):
             children=[
                 atom_model_props_title,
                 name_hbox,
+                description_hbox,
                 wfms_uuid_hbox,
                 cell_hbox,
                 dimensionality_hbox,
@@ -399,12 +400,20 @@ class AtomModelWidget(ipw.VBox):
 
         def save_new_atom_model(b):
             atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
-            atom_models_objs = utils.get_openbis_objects(
-                self.openbis_session, type=atom_model_type
+            wfms_uuid = wfms_uuid_textbox.value.strip()
+            existing = (
+                list(
+                    utils.get_openbis_objects(
+                        self.openbis_session,
+                        type=atom_model_type,
+                        where={"WFMS_UUID": wfms_uuid},
+                    )
+                    or []
+                )
+                if wfms_uuid
+                else []
             )
-            wfms_uuid = wfms_uuid_textbox.value
-            atom_models_uuids = [obj.props["wfms_uuid"] for obj in atom_models_objs]
-            if wfms_uuid in atom_models_uuids:
+            if existing:
                 display(Javascript(data="alert('Atomistic model already in openBIS!')"))
             else:
                 pbc = [pbc_x_checkbox.value, pbc_y_checkbox.value, pbc_z_checkbox.value]
@@ -415,6 +424,7 @@ class AtomModelWidget(ipw.VBox):
 
                 atom_model_props = {
                     "name": name_textbox.value,
+                    "description": description_textbox.value,
                     "wfms_uuid": wfms_uuid,
                     "cell": cell_json,
                     "dimensionality": dimensionality_intbox.value,
@@ -468,29 +478,20 @@ class AtomModelWidget(ipw.VBox):
                     parents=atom_model_parents,
                 )
 
-                # Atomistic model preview
-                for filename in atom_model_preview_uploader.value:
-                    file_info = atom_model_preview_uploader.value[filename]
-                    utils.write_file(file_info["content"], filename)
-                    utils.create_openbis_dataset(
-                        self.openbis_session,
-                        type="ELN_PREVIEW",
-                        sample=atom_model_obj,
-                        files=[filename],
-                    )
-                    os.remove(filename)
-
-                # Atomistic model datasets
-                for filename in atom_model_datasets_uploader.value:
-                    file_info = atom_model_datasets_uploader.value[filename]
-                    utils.write_file(file_info["content"], filename)
-                    utils.create_openbis_dataset(
-                        self.openbis_session,
-                        type="ATTACHMENT",
-                        sample=atom_model_obj,
-                        files=[filename],
-                    )
-                    os.remove(filename)
+                utils.upload_datasets(
+                    self.openbis_session,
+                    atom_model_obj,
+                    atom_model_preview_uploader,
+                    props={},
+                    dataset_type="ELN_PREVIEW",
+                )
+                utils.upload_datasets(
+                    self.openbis_session,
+                    atom_model_obj,
+                    atom_model_datasets_uploader,
+                    props={},
+                    dataset_type="ATTACHMENT",
+                )
 
                 self.create_new_atom_model_widgets.children = []
                 self.atom_model_dropdown.options = self.load_atom_models()
@@ -583,8 +584,9 @@ class MoleculeWidget(ipw.VBox):
             obj_name = obj_props.get("name", "")
             obj_empa_number = obj_props.get("empa_number", "")
             obj_empa_number_name = f"{obj_empa_number} ({obj_name})"
-            self.parent_accordion.set_title(self.object_index, obj_empa_number_name)
-            self.title = obj_name
+            if self.object_index < len(self.parent_accordion.children):
+                self.parent_accordion.set_title(self.object_index, obj_empa_number_name)
+            self.title = obj_empa_number_name
 
             obj_details_html = ipw.HTML()
             obj_details_string = (
@@ -618,16 +620,15 @@ class MoleculeWidget(ipw.VBox):
 
     def remove_molecule(self, b):
         molecules_accordion_children = list(self.parent_accordion.children)
-        num_molecules = len(molecules_accordion_children)
         molecules_accordion_children.pop(self.object_index)
 
         for index, molecule in enumerate(molecules_accordion_children):
-            if index >= self.object_index:
-                molecule.object_index -= 1
-                self.parent_accordion.set_title(molecule.object_index, molecule.title)
+            molecule.object_index = index
 
-        self.parent_accordion.set_title(num_molecules - 1, "")
         self.parent_accordion.children = molecules_accordion_children
+        self.parent_accordion.titles = tuple(
+            molecule.title for molecule in molecules_accordion_children
+        )
 
 
 class ReacProdConceptWidget(ipw.VBox):
@@ -674,7 +675,8 @@ class ReacProdConceptWidget(ipw.VBox):
             )
             obj_props = obj.props.all()
             obj_name = obj_props.get("name", "")
-            self.parent_accordion.set_title(self.object_index, obj_name)
+            if self.object_index < len(self.parent_accordion.children):
+                self.parent_accordion.set_title(self.object_index, obj_name)
             self.title = obj_name
 
             obj_details_html = ipw.HTML()
@@ -695,18 +697,16 @@ class ReacProdConceptWidget(ipw.VBox):
 
     def remove_reacprod_concept(self, b):
         reacprod_concepts_accordion_children = list(self.parent_accordion.children)
-        num_reacprod_concepts = len(reacprod_concepts_accordion_children)
         reacprod_concepts_accordion_children.pop(self.object_index)
 
         for index, reacprod_concept in enumerate(reacprod_concepts_accordion_children):
-            if index >= self.object_index:
-                reacprod_concept.object_index -= 1
-                self.parent_accordion.set_title(
-                    reacprod_concept.object_index, reacprod_concept.title
-                )
+            reacprod_concept.object_index = index
 
-        self.parent_accordion.set_title(num_reacprod_concepts - 1, "")
         self.parent_accordion.children = reacprod_concepts_accordion_children
+        self.parent_accordion.titles = tuple(
+            reacprod_concept.title
+            for reacprod_concept in reacprod_concepts_accordion_children
+        )
 
 
 class SelectInstrumentWidget(ipw.VBox):
@@ -833,7 +833,11 @@ class SelectExperimentWidget(ipw.VBox):
         self.experiment_label = ipw.HTML(
             value="<b>Experiment:</b>", layout=ipw.Layout(width="80px")
         )
-        self.experiment_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+        self.experiment_dropdown = ipw.Dropdown(
+            options=[("Select experiment...", "-1")],
+            value="-1",
+            layout=ipw.Layout(width="500px"),
+        )
         self.create_experiment_button = ipw.Button(
             tooltip="Add new experiment",
             icon="plus",
@@ -908,7 +912,11 @@ class SelectExperimentWidget(ipw.VBox):
         self.project_label = ipw.HTML(
             value="<b>Project:</b>", layout=ipw.Layout(width="80px")
         )
-        self.project_dropdown = ipw.Dropdown(layout=ipw.Layout(width="500px"))
+        self.project_dropdown = ipw.Dropdown(
+            options=[("Select project...", "-1")],
+            value="-1",
+            layout=ipw.Layout(width="500px"),
+        )
         self.project_hbox = ipw.HBox([self.project_label, self.project_dropdown])
 
         # Sort Row
@@ -1081,7 +1089,10 @@ class SelectExperimentWidget(ipw.VBox):
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
         options.insert(0, ("Select experiment...", "-1"))
+        selected = self.experiment_dropdown.value
         self.experiment_dropdown.options = options
+        if selected not in {value for _label, value in options}:
+            self.experiment_dropdown.value = "-1"
 
     def update_project_dropdown(self, change):
         if self.raw_projects_df is None or self.raw_projects_df.empty:
@@ -1107,7 +1118,10 @@ class SelectExperimentWidget(ipw.VBox):
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
         options.insert(0, ("Select project...", "-1"))
+        selected = self.project_dropdown.value
         self.project_dropdown.options = options
+        if selected not in {value for _label, value in options}:
+            self.project_dropdown.value = "-1"
 
     # ==========================================
     # 4. ACTION HANDLERS
@@ -2369,10 +2383,8 @@ class CreateSubstanceWidget(ipw.VBox):
         self.supplier_dropdown.value = "-1"
         self.receive_date.value = None
 
-        for index, _ in enumerate(self.molecules_accordion.children):
-            self.molecules_accordion.set_title(index, "")
-
         self.molecules_accordion.children = []
+        self.molecules_accordion.titles = ()
 
         self.evaporation_temperatures_table.reset_table()
 

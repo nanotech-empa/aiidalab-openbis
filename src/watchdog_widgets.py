@@ -7,7 +7,6 @@ import ipyfilechooser
 import subprocess
 import logging
 import json
-import pathlib
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -15,13 +14,11 @@ OPENBIS_OBJECT_TYPES, _ = (
     INTERFACE_CONFIG_INFO["object_types_codes"],
 )
 
-if not os.path.exists("logs"):
-    os.mkdir("logs")
-
+utils.LOG_DIR.mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
-APP_FOLDER = pathlib.Path().resolve()
+APP_FOLDER = utils.APP_ROOT
 logging.basicConfig(
-    filename=APP_FOLDER / "logs" / "aiidalab_openbis_interface.log",
+    filename=utils.LOG_FILE_PATH,
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",

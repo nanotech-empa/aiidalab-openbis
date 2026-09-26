@@ -1616,6 +1616,14 @@ By mapping the detailed relationships between physical materials, hardware state
 | `name` | Name | Name | VARCHAR | False | False | False |
 
 ### Minimum Energy Potential
+
+> **Legacy empty type.** `MINIMUM_ENERGY_POTENTIAL` used “potential” where
+> “path” was intended and is superseded by `MINIMUM_ENERGY_PATH`. The current
+> simulation schema and its AiiDA mapping are specified in
+> [simulation_object_types.md](simulation_object_types.md#minimum_energy_path).
+> `REACTION_BARRIER` remains separate; its scope, including possible
+> MD/free-energy methods, will be defined independently.
+
 * **Code:** `MINIMUM_ENERGY_POTENTIAL`
 * **Generated code prefix:** `MEPO`
 * **Semantic Annotation:**
