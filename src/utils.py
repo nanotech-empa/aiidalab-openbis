@@ -65,20 +65,34 @@ def get_interface_config_info():
         )
         return info
 
-    for obj in obj_types:
-        desc = obj.description
+    object_type_frame = getattr(obj_types, "df", None)
+    if object_type_frame is not None:
+        object_type_records = object_type_frame.to_dict(orient="records")
+    else:
+        object_type_records = [
+            {
+                "description": obj.description,
+                "code": obj.code,
+                "generatedCodePrefix": obj.generatedCodePrefix,
+                "metaData": obj.metaData,
+            }
+            for obj in obj_types
+        ]
+
+    for record in object_type_records:
+        desc = record.get("description")
         if not desc:
             continue
 
         desc_str = str(desc)
-        code_str = str(obj.code)
-        prefix_str = str(obj.generatedCodePrefix)
+        code_str = str(record.get("code"))
+        prefix_str = str(record.get("generatedCodePrefix"))
 
         info["object_types"][desc_str] = code_str
         info["object_types_codes"][desc_str] = prefix_str
 
-        meta = obj.metaData
-        if meta:
+        meta = record.get("metaData")
+        if isinstance(meta, dict):
             meta_collection_type = meta.get("collectionType", "unknown")
             meta_type = meta.get("type")
             meta_icon = meta.get("icon", "")

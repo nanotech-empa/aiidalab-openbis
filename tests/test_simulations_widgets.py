@@ -6,6 +6,7 @@ import weakref
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
+import pandas as pd
 import pytest
 
 
@@ -146,6 +147,158 @@ def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_prod
     assert widget.children.index(
         widget.add_reacprod_concept_button
     ) < widget.children.index(widget.preview_suggestions_title)
+
+
+def test_experiment_selector_uses_bulk_properties(monkeypatch, simulations_widgets):
+    class BulkExperiments:
+        df = pd.DataFrame(
+            [
+                {
+                    "permId": "experiment-permid",
+                    "identifier": "/SPACE/PROJECT/EXP_1",
+                    "registrator": "current-user",
+                    "NAME": "Fast experiment",
+                }
+            ]
+        )
+
+        def __iter__(self):
+            raise AssertionError("bulk experiments must not be iterated")
+
+    calls = []
+
+    def get_collections(_session, **kwargs):
+        calls.append(kwargs)
+        return BulkExperiments()
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_collections",
+        get_collections,
+    )
+    session = SimpleNamespace(_get_username=lambda: "current-user")
+
+    widget = simulations_widgets.widgets.SelectExperimentWidget(session)
+
+    assert calls == [{"type": "EXPERIMENT", "props": ["name"]}]
+    assert widget.raw_experiments_df.to_dict(orient="records") == [
+        {
+            "display_name": ("Fast experiment from Project PROJECT and Space SPACE"),
+            "permId": "experiment-permid",
+            "is_mine": True,
+        }
+    ]
+
+
+def test_atom_model_selector_uses_bulk_names(monkeypatch, simulations_widgets):
+    class BulkAtomModels:
+        df = pd.DataFrame(
+            [
+                {"permId": "model-2", "NAME": "Zinc"},
+                {"permId": "model-1", "NAME": None},
+            ]
+        )
+
+        def __iter__(self):
+            raise AssertionError("bulk atomistic models must not be iterated")
+
+    calls = []
+
+    def get_objects(_session, **kwargs):
+        calls.append(kwargs)
+        return BulkAtomModels()
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Atomistic Model",
+        "ATOMISTIC_MODEL",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        get_objects,
+    )
+
+    widget = simulations_widgets.widgets.AtomModelWidget(object())
+
+    assert calls == [{"type": "ATOMISTIC_MODEL", "props": ["name"]}]
+    assert list(widget.atom_model_dropdown.options) == [
+        ("Select atomistic model...", "-1"),
+        ("Zinc", "model-2"),
+        ("model-1", "model-1"),
+    ]
+
+
+def test_external_export_inventories_are_loaded_lazily(
+    monkeypatch, simulations_widgets
+):
+    ipw = simulations_widgets.ipw
+    object_types = simulations_widgets.OPENBIS_OBJECT_TYPES
+    calls = []
+
+    class BulkObjects:
+        def __init__(self, records):
+            self.df = pd.DataFrame(records)
+
+        def __iter__(self):
+            raise AssertionError("bulk inventories must not be iterated")
+
+    class FakeAtomModelWidget(ipw.VBox):
+        def __init__(self, _session):
+            super().__init__()
+            calls.append(("atom-model-widget", {}))
+
+    inventories = {
+        object_types["Executable"]: [
+            {
+                "permId": "executable-permid",
+                "NAME": "cp2k-2024.3",
+                "CODE": "code-permid",
+                "COMPUTER": "computer-permid",
+            }
+        ],
+        object_types["Code"]: [{"permId": "code-permid", "NAME": "CP2K"}],
+        object_types["Computer"]: [{"permId": "computer-permid", "NAME": "Daint"}],
+    }
+
+    def get_objects(_session, **kwargs):
+        calls.append((kwargs["type"], kwargs))
+        return BulkObjects(inventories[kwargs["type"]])
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "AtomModelWidget",
+        FakeAtomModelWidget,
+    )
+    monkeypatch.setattr(
+        simulations_widgets.utils,
+        "get_openbis_objects",
+        get_objects,
+    )
+
+    widget = simulations_widgets.SimulationDetailsWidget(object(), True)
+
+    assert calls == []
+
+    widget.load_widgets(False)
+
+    assert [call[0] for call in calls] == [
+        "atom-model-widget",
+        object_types["Executable"],
+        object_types["Code"],
+        object_types["Computer"],
+    ]
+    assert list(widget.executables_multi_selector.options) == [
+        (
+            "cp2k-2024.3; code CP2K; computer Daint",
+            "executable-permid",
+        )
+    ]
+
+    widget.load_widgets(True)
+    widget.load_widgets(False)
+
+    assert len(calls) == 4
 
 
 def test_preview_image_widget_resamples_without_distortion(simulations_widgets):
