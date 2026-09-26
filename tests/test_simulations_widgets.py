@@ -1,5 +1,5 @@
-import importlib
 import gc
+import importlib
 import io
 import sys
 import weakref
@@ -282,7 +282,10 @@ def test_property_form_replacement_does_not_accumulate_widgets(simulations_widge
     widget.close()
 
 
-def test_details_close_releases_hidden_owned_forms(monkeypatch, simulations_widgets):
+@pytest.mark.parametrize("switch_modes", [False, True])
+def test_details_close_releases_hidden_owned_forms(
+    monkeypatch, simulations_widgets, switch_modes
+):
     from ipywidgets.widgets.widget import _instances
 
     monkeypatch.setattr(
@@ -295,6 +298,9 @@ def test_details_close_releases_hidden_owned_forms(monkeypatch, simulations_widg
     )
     baseline = set(_instances)
     widget = simulations_widgets.SimulationDetailsWidget(object(), True)
+    if switch_modes:
+        widget.load_widgets(False)
+        widget.load_widgets(True)
     reference = weakref.ref(widget)
     widget.close()
     widget.close()
