@@ -24,6 +24,7 @@ OPENBIS_OBJECT_TYPES, OPENBIS_OBJECT_CODES = (
     INTERFACE_CONFIG_INFO["object_types"],
     INTERFACE_CONFIG_INFO["object_types_codes"],
 )
+COMPONENTS_TYPES = INTERFACE_CONFIG_INFO["components_types"]
 MATERIALS_TYPES = INTERFACE_CONFIG_INFO["slabs_types"]
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
     "Collections"
@@ -2618,7 +2619,7 @@ class RegisterProcessStepWidget(ipw.VBox):
             # 2. Simplify Component Caching
             if instrument_permid not in INSTRUMENTS_COMPONENTS:
                 raw_components = utils.find_instrument_components(
-                    self.openbis_session, instrument_permid
+                    self.openbis_session, instrument_permid, COMPONENTS_TYPES.values()
                 )
                 INSTRUMENTS_COMPONENTS[instrument_permid] = {
                     k: list(v) for k, v in raw_components.items()
@@ -2811,7 +2812,7 @@ class RegisterActionWidget(ipw.VBox):
 
         if instrument_permid not in INSTRUMENTS_COMPONENTS:
             self.instrument_components = utils.find_instrument_components(
-                self.openbis_session, instrument_permid
+                self.openbis_session, instrument_permid, COMPONENTS_TYPES.values()
             )
             INSTRUMENTS_COMPONENTS[instrument_permid] = {
                 k: list(v) for k, v in self.instrument_components.items()
@@ -4097,7 +4098,7 @@ class RegisterObservableWidget(ipw.VBox):
 
         if instrument_permid not in INSTRUMENTS_COMPONENTS:
             self.instrument_components = utils.find_instrument_components(
-                self.openbis_session, instrument_permid
+                self.openbis_session, instrument_permid, COMPONENTS_TYPES.values()
             )
             INSTRUMENTS_COMPONENTS[instrument_permid] = {
                 k: list(v) for k, v in self.instrument_components.items()

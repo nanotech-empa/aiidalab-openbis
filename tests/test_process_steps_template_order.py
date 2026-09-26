@@ -50,6 +50,7 @@ utils.get_interface_config_info = MagicMock(
         "slabs_concepts_types": {},
         "slabs_concepts_codes": {},
         "instruments_types": {},
+        "components_types": {},
     }
 )
 

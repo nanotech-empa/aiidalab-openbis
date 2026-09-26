@@ -49,6 +49,24 @@ def test_interface_config_uses_bulk_object_type_metadata(monkeypatch):
                     "generatedCodePrefix": "ANN",
                     "metaData": {"type": "action", "icon": "fire"},
                 },
+                {
+                    "description": "Microscope",
+                    "code": "MICROSCOPE",
+                    "generatedCodePrefix": "MIC",
+                    "metaData": {"collectionType": "INSTRUMENT_COLLECTION"},
+                },
+                {
+                    "description": "Detector",
+                    "code": "DETECTOR",
+                    "generatedCodePrefix": "DET",
+                    "metaData": {"collectionType": "COMPONENT_COLLECTION"},
+                },
+                {
+                    "description": "No metadata",
+                    "code": "NO_METADATA",
+                    "generatedCodePrefix": "NONE",
+                    "metaData": None,
+                },
             ]
         )
 
@@ -65,6 +83,8 @@ def test_interface_config_uses_bulk_object_type_metadata(monkeypatch):
     assert info["slabs_concepts_types"]["Atomistic Model"] == "ATOMISTIC_MODEL"
     assert info["actions_types"]["Annealing"] == "ANNEALING"
     assert info["actions_types_icons"]["ANNEALING"] == "fire"
+    assert info["instruments_types"] == {"Microscope": "MICROSCOPE"}
+    assert info["components_types"] == {"Detector": "DETECTOR"}
     utils.get_interface_config_info.cache_clear()
 
 
@@ -106,3 +126,59 @@ def test_generated_links_do_not_duplicate_openbis_context():
 
     assert "/openbis/webapp/eln-lims/" in url
     assert "/openbis/openbis/" not in url
+
+
+def test_interface_config_discovers_instrument_and_component_collections(monkeypatch):
+    object_types = [
+        SimpleNamespace(
+            description=description,
+            code=code,
+            generatedCodePrefix=code,
+            metaData={"collectionType": collection},
+        )
+        for description, code, collection in [
+            ("Microscope", "MICROSCOPE", "INSTRUMENT_COLLECTION"),
+            ("Detector", "DETECTOR", "COMPONENT_COLLECTION"),
+            ("Unrelated", "UNRELATED", "OTHER_COLLECTION"),
+        ]
+    ]
+    session = SimpleNamespace(get_object_types=lambda: object_types)
+    monkeypatch.setattr(utils, "connect_openbis_aiida", lambda: (session, {}))
+    utils.get_interface_config_info.cache_clear()
+    try:
+        info = utils.get_interface_config_info()
+        assert info["instruments_types"] == {"Microscope": "MICROSCOPE"}
+        assert info["components_types"] == {"Detector": "DETECTOR"}
+    finally:
+        utils.get_interface_config_info.cache_clear()
+
+
+def test_instrument_components_use_discovered_types(monkeypatch):
+    import pandas as pd
+
+    components = {
+        "detector": SimpleNamespace(type="DETECTOR"),
+        "person": SimpleNamespace(type="PERSON"),
+        "sample": SimpleNamespace(type="SAMPLE"),
+    }
+    instrument = SimpleNamespace(type="MICROSCOPE", props={"links": list(components)})
+    session = SimpleNamespace(
+        get_object=lambda sample_ident: instrument
+        if sample_ident == "instrument"
+        else components[sample_ident]
+    )
+    assignments = SimpleNamespace(
+        df=pd.DataFrame([{"code": "LINKS", "dataType": "SAMPLE"}])
+    )
+    monkeypatch.setattr(
+        utils,
+        "get_openbis_object_type",
+        lambda *args, **kwargs: SimpleNamespace(
+            get_property_assignments=lambda: assignments
+        ),
+    )
+    monkeypatch.setattr(utils, "display", lambda *args: None)
+
+    assert utils.find_instrument_components(session, "instrument", ["DETECTOR"]) == {
+        "DETECTOR": [components["detector"]]
+    }
