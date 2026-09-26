@@ -17,7 +17,7 @@ import logging
 logger = logging.getLogger(__name__)
 app_folder = pathlib.Path().resolve().parent
 logging.basicConfig(
-    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
+    filename="/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",

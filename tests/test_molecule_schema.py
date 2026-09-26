@@ -66,7 +66,9 @@ def test_target_schema_documentation_covers_molecular_and_simulation_decisions()
     from src.simulation_schema import OBJECT_TYPES, VOCABULARIES
 
     repository = Path(__file__).parents[1]
-    documentation = (repository / "docs" / "openBIS_schema_documentation.md").read_text()
+    documentation = (
+        repository / "docs" / "openBIS_schema_documentation.md"
+    ).read_text()
     simulation_spec = (repository / "docs" / "simulation_object_types.md").read_text()
 
     assert "This is the normative target schema" in documentation
@@ -92,6 +94,23 @@ def test_target_schema_documentation_covers_molecular_and_simulation_decisions()
         assert f"* **Code:** `{code}`" in documentation
         for term_code, label in terms:
             assert f"| {term_code} | {label} |" in documentation
+
+
+def test_target_schema_retains_new_equipment_documentation():
+    documentation = (
+        Path(__file__).parents[1] / "docs" / "openBIS_schema_documentation.md"
+    ).read_text()
+
+    for title in (
+        "Mechanical Transfer Press",
+        "Mechanical Transfer Press Settings",
+        "Plasma Cleaner",
+        "Plasma Cleaner Settings",
+    ):
+        anchor = title.lower().replace(" ", "-")
+        code = title.upper().replace(" ", "_")
+        assert f"[{title}](#{anchor})" in documentation
+        assert f"### {title}\n* **Code:** `{code}`" in documentation
 
 
 def test_cxsmiles_migration_is_additive_and_idempotent():

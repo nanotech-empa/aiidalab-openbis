@@ -90,6 +90,8 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Mean Field Hubbard](#mean-field-hubbard)
     * [Measurement Session](#measurement-session)
     * [Mechanical Pressing](#mechanical-pressing)
+    * [Mechanical Transfer Press](#mechanical-transfer-press)
+    * [Mechanical Transfer Press Settings](#mechanical-transfer-press-settings)
     * [Minimum Energy Path](#minimum-energy-path)
     * [Molecule](#molecule)
     * [Molecular Dynamics](#molecular-dynamics)
@@ -100,6 +102,8 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Person](#person)
     * [Pipette](#pipette)
     * [Pipette Settings](#pipette-settings)
+    * [Plasma Cleaner](#plasma-cleaner)
+    * [Plasma Cleaner Settings](#plasma-cleaner-settings)
     * [Preparation](#preparation)
     * [Process](#process)
     * [Process Step](#process-step)
@@ -496,6 +500,9 @@ probe microscopy by `SPM_SIMULATION`.
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `weight_g` | Weight [g] | Weight [g] | REAL | False | False | False |
 
@@ -698,7 +705,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}`
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -845,7 +852,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -921,7 +928,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -987,7 +994,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
 | `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
@@ -1029,7 +1036,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -1337,7 +1344,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -1646,6 +1653,8 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -1654,6 +1663,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
+| `speed_level` | Speed level | Speed level | INTEGER | False | False | False |
 
 ### Hot Plate Settings
 * **Code:** `HOT_PLATE_SETTINGS`
@@ -1667,6 +1677,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
+| `speed_level` | Speed level | Speed level | INTEGER | False | False | False |
 
 ### Instrument
 * **Code:** `INSTRUMENT`
@@ -1686,7 +1697,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |
 
@@ -1708,7 +1719,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |
 
@@ -1762,7 +1773,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -1811,7 +1822,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -1912,6 +1923,43 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 | `stamp` | Stamp | Stamp | OBJECT (SAMPLE) | False | False | False |
 | `by_hand` | By hand | By hand | OBJECT (BY_HAND) | False | False | False |
 | `by_hand_settings` | By hand settings | By hand settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
+| `mechanical_transfer_press` | Mechanical transfer press | Mechanical transfer press | OBJECT (MECHANICAL_TRANSFER_PRESS) | False | False | False |
+| `mechanical_transfer_press_settings` | Mechanical transfer press settings | Mechanical transfer press settings | OBJECT (MECHANICAL_TRANSFER_PRESS_SETTINGS) | False | False | False |
+
+### Mechanical Transfer Press
+* **Code:** `MECHANICAL_TRANSFER_PRESS`
+* **Generated code prefix:** `METP`
+* **Semantic Annotation:**
+* **Metadata:** 
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+#### Section: Settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False |
+
+### Mechanical Transfer Press Settings
+* **Code:** `MECHANICAL_TRANSFER_PRESS_SETTINGS`
+* **Generated code prefix:** `MTPS`
+* **Semantic Annotation:**
+* **Metadata:** 
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
 
 ### Minimum Energy Path
 * **Code:** `MINIMUM_ENERGY_PATH`
@@ -2145,7 +2193,7 @@ The two required `ATOMISTIC_MODEL` parents are the initial and final structures.
 | `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
@@ -2205,6 +2253,9 @@ The two required `ATOMISTIC_MODEL` parents are the initial and final structures.
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 #### Section: Settings
@@ -2225,6 +2276,44 @@ The two required `ATOMISTIC_MODEL` parents are the initial and final structures.
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
+
+### Plasma Cleaner
+* **Code:** `PLASMA_CLEANER`
+* **Generated code prefix:** `PLCL`
+* **Semantic Annotation:**
+* **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `comments` | Comments | Comments | VARCHAR | False | False | False |
+
+#### Section: Settings
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `gas` | Gas | Gas | VARCHAR | False | False | False |
+| `power_w` | Power [W] | Power [W] | REAL | False | False | False |
+
+### Plasma Cleaner Settings
+* **Code:** `PLASMA_CLEANER_SETTINGS`
+* **Generated code prefix:** `PCST`
+* **Semantic Annotation:**
+* **Metadata:**
+
+#### Section: General information
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |
+| `gas` | Gas | Gas | VARCHAR | False | False | False |
+| `power_w` | Power [W] | Power [W] | REAL | False | False | False |
 
 ### Preparation
 * **Code:** `PREPARATION`
@@ -2487,13 +2576,7 @@ The two required `ATOMISTIC_MODEL` parents are the initial and final structures.
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
 | `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
 | `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
@@ -2699,6 +2782,8 @@ The two required `ATOMISTIC_MODEL` parents are the initial and final structures.
 | `description` | Description | Description | VARCHAR | False | False | False |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 | `duration` | Duration | Duration | VARCHAR | False | False | False |
+| `plasma_cleaner` | Plasma Cleaner | Plasma Cleaner | OBJECT (PLASMA_CLEANER) | False | False | False |
+| `plasma_cleaner_settings` | Plasma Cleaner Settings | Plasma Cleaner Settings | OBJECT (PLASMA_CLEANER_SETTINGS) | False | False | False |
 | `sputter_gun` | Sputter Gun | Sputter Gun | OBJECT (SPUTTER_GUN) | False | False | False |
 | `sputter_gun_settings` | Sputter Gun Settings | Sputter Gun Settings | OBJECT (SPUTTER_GUN_SETTINGS) | False | False | False |
 
@@ -2923,6 +3008,8 @@ A structural or concept parent is required when applicable; simulation parents a
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
 | `description` | Description | Description | VARCHAR | False | False | False |
+| `model` | Model | Model | VARCHAR | False | False | False |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
