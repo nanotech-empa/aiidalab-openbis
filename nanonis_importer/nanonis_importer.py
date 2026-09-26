@@ -17,8 +17,7 @@ import sys
 
 sys.path.append("/home/jovyan/aiidalab-openbis/")
 import os
-from pybis import Openbis, ImagingControl
-import pybis.imaging as imaging
+from pybis import Openbis, ImagingControl, ImagingDataSetControlVisibility, ImagingSemanticAnnotation, ImagingDataSetPropertyConfig, ImagingDataSetImage, ImagingDataSetConfig, ImagingDataSetControl, ImagingDataSetPreview, ImagingDataSetFilter
 import numpy as np
 from nanonis_importer.spmpy import Spm as spm
 from datetime import datetime
@@ -28,10 +27,10 @@ from src import utils
 import logging
 
 SXM_ADAPTOR = (
-    "ch.ethz.sis.openbis.generic.server.dss.plugins.imaging.adaptor.NanonisSxmAdaptor"
+    "ch.ethz.sis.openbis.generic.server.as.plugins.imaging.adaptor.NanonisSxmAdaptor"
 )
 DAT_ADAPTOR = (
-    "ch.ethz.sis.openbis.generic.server.dss.plugins.imaging.adaptor.NanonisDatAdaptor"
+    "ch.ethz.sis.openbis.generic.server.as.plugins.imaging.adaptor.NanonisDatAdaptor"
 )
 VERBOSE = False
 DEFAULT_URL = "local.openbis.ch"
@@ -39,7 +38,7 @@ DEFAULT_URL = "local.openbis.ch"
 logger = logging.getLogger(__name__)
 app_folder = pathlib.Path().resolve()
 logging.basicConfig(
-    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
+    filename = "/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
@@ -118,8 +117,8 @@ def create_preview(
     filterConfig=[],
     tags=[],
 ):
-    imaging_control = ImagingControl(openbis, service_type="DSS")
-    preview = imaging.ImagingDataSetPreview(
+    imaging_control = ImagingControl(openbis, service_type="AS")
+    preview = ImagingDataSetPreview(
         preview_format, config=config, filterConfig=filterConfig, tags=tags
     )
     preview = imaging_control.make_preview(perm_id, image_index, preview)
@@ -127,9 +126,9 @@ def create_preview(
 
 
 def update_image_with_preview(
-    openbis, perm_id, image_id, preview: imaging.ImagingDataSetPreview
+    openbis, perm_id, image_id, preview: ImagingDataSetPreview
 ):
-    imaging_control = ImagingControl(openbis, service_type="DSS")
+    imaging_control = ImagingControl(openbis, service_type="AS")
     config = imaging_control.get_property_config(perm_id)
     image = config.images[image_id]
     if len(image.previews) > preview.index:
@@ -153,7 +152,7 @@ def export_image(
 ):
     if include is None:
         include = ["IMAGE", "RAW_DATA"]
-    imaging_control = ImagingControl(openbis, service_type="DSS")
+    imaging_control = ImagingControl(openbis, service_type="AS")
     export_config = {
         "include": include,
         "image_format": image_format,
@@ -176,7 +175,7 @@ def multi_export_images(
 ):
     if include is None:
         include = ["IMAGE", "RAW_DATA"]
-    imaging_control = ImagingControl(openbis, service_type="DSS")
+    imaging_control = ImagingControl(openbis, service_type="AS")
     export_config = {
         "include": include,
         "image_format": image_format,
@@ -220,15 +219,15 @@ def demo_sxm_flow(session, file_path, experiment=None, sample=None):
     preview.index = 0
     update_image_with_preview(session, perm_id, 0, preview)
 
-    # config_preview = config_sxm_preview.copy()
-    # config_preview['Scaling'] = 'logarithmic'
-    # config_preview['Colormap'] = 'inferno'
+    config_preview = config_sxm_preview.copy()
+    config_preview['Scaling'] = 'logarithmic'
+    config_preview['Colormap'] = 'inferno'
 
-    # filter_config = [
-    #     imaging.ImagingDataSetFilter("Gaussian", {"Sigma":"20", "Truncate":"0.3"}),
-    #     imaging.ImagingDataSetFilter("Zero background", {}),
-    #     imaging.ImagingDataSetFilter("Laplace", {"Size":"3"})
-    # ]
+    filter_config = [
+        ImagingDataSetFilter("Gaussian", {"Sigma":"20", "Truncate":"0.3"}),
+        ImagingDataSetFilter("Zero background", {}),
+        ImagingDataSetFilter("Laplace", {"Size":"3"})
+    ]
 
     # preview = create_preview(openbis, perm_id, config_preview, filterConfig=filter_config, tags=['SXM'])
     # preview.index = 1
@@ -292,10 +291,10 @@ def create_sxm_dataset(
     channels = [default_channel] + [x for x in channels if x != default_channel]
 
     # Create openBIS image control object
-    imaging_control = ImagingControl(session, service_type="DSS")
+    imaging_control = ImagingControl(session, service_type="AS")
 
     color_scale_visibility = [
-        imaging.ImagingDataSetControlVisibility(
+        ImagingDataSetControlVisibility(
             "Channel",
             [channel],
             get_color_scale_range(img, channel),
@@ -305,30 +304,30 @@ def create_sxm_dataset(
     ]
 
     exports = [
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "include", "Dropdown", values=["image", "raw data"], multiselect=True
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "image-format",
             "Dropdown",
             values=["png", "svg"],
-            semanticAnnotation=imaging.ImagingSemanticAnnotation(
+            semanticAnnotation=ImagingSemanticAnnotation(
                 "schema.org",
                 "https://schema.org/version/28.1",
                 "https://schema.org/encoding",
             ),
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "archive-format",
             "Dropdown",
             values=["zip", "tar"],
-            semanticAnnotation=imaging.ImagingSemanticAnnotation(
+            semanticAnnotation=ImagingSemanticAnnotation(
                 "schema.org",
                 "https://schema.org/version/28.1",
                 "https://schema.org/fileFormat",
             ),
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "resolution",
             "Dropdown",
             values=["original", "150dpi", "300dpi"],
@@ -337,28 +336,28 @@ def create_sxm_dataset(
     ]
 
     inputs = [
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Channel", "Dropdown", values=channels, section="Data"
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "X-axis",
             "Range",
             section="Data",
             values_range=["0", str(img.get_param("width")[0]), "0.01"],
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Y-axis",
             "Range",
             section="Data",
             values_range=["0", str(img.get_param("height")[0]), "0.01"],
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Color-scale", "Range", section="Data", visibility=color_scale_visibility
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Scaling", "Dropdown", section="Data", values=["linear", "logarithmic"]
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Colormap",
             "Colormap",
             values=[
@@ -372,7 +371,7 @@ def create_sxm_dataset(
                 "RdBu",
                 "RdGy",
             ],
-            semanticAnnotation=imaging.ImagingSemanticAnnotation(
+            semanticAnnotation=ImagingSemanticAnnotation(
                 "schema.org",
                 "https://schema.org/version/28.1",
                 "https://schema.org/color",
@@ -382,15 +381,15 @@ def create_sxm_dataset(
 
     filters = {
         "Gaussian": [
-            imaging.ImagingDataSetControl(
+            ImagingDataSetControl(
                 "Sigma", "Slider", section="Gaussian", values_range=["1", "100", "1"]
             ),
-            imaging.ImagingDataSetControl(
+            ImagingDataSetControl(
                 "Truncate", "Slider", section="Gaussian", values_range=["0", "1", "0.1"]
             ),
         ],
         "Laplace": [
-            imaging.ImagingDataSetControl(
+            ImagingDataSetControl(
                 "Size", "Slider", section="Laplace", values_range=["3", "30", "1"]
             )
         ],
@@ -400,14 +399,14 @@ def create_sxm_dataset(
     }
 
     filterSemanticAnnotation = {
-        "Gaussian": imaging.ImagingSemanticAnnotation(
+        "Gaussian": ImagingSemanticAnnotation(
             "schema.org",
             "https://schema.org/version/28.1",
             "https://schema.org/headline",
         )
     }
 
-    imaging_config = imaging.ImagingDataSetConfig(
+    imaging_config = ImagingDataSetConfig(
         adaptor=SXM_ADAPTOR,
         version=1.0,
         resolutions=["original", "200x200", "2000x2000"],
@@ -421,13 +420,13 @@ def create_sxm_dataset(
     )
 
     images = [
-        imaging.ImagingDataSetImage(
+        ImagingDataSetImage(
             imaging_config,
-            previews=[imaging.ImagingDataSetPreview(preview_format="png")],
+            previews=[ImagingDataSetPreview(preview_format="png")],
             metadata=img.print_params_dict(False),
         )
     ]
-    imaging_property_config = imaging.ImagingDataSetPropertyConfig(images)
+    imaging_property_config = ImagingDataSetPropertyConfig(images)
     if VERBOSE:
         logger.info(imaging_property_config.to_json())
 
@@ -448,7 +447,7 @@ def create_dat_dataset(
     if [] == data:
         raise ValueError(f"No nanonis .DAT files found in {folder_path}")
 
-    imaging_control = ImagingControl(session, service_type="DSS")
+    imaging_control = ImagingControl(session, service_type="AS")
 
     for d in data:
         date_time = d.get_param("Saved Date")
@@ -509,7 +508,7 @@ def create_dat_dataset(
                 step_x = 10 ** np.floor(step_x)
 
         color_scale_visibility_x += [
-            imaging.ImagingDataSetControlVisibility(
+            ImagingDataSetControlVisibility(
                 "Channel X",
                 [channel_x],
                 [str(minimum_x), str(maximum_x), str(step_x)],
@@ -531,7 +530,7 @@ def create_dat_dataset(
                 step_y = 10 ** np.floor(step_y)
 
         color_scale_visibility_y += [
-            imaging.ImagingDataSetControlVisibility(
+            ImagingDataSetControlVisibility(
                 "Channel Y",
                 [channel_y],
                 [str(minimum_y), str(maximum_y), str(step_y)],
@@ -540,30 +539,30 @@ def create_dat_dataset(
         ]
 
     exports = [
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "include", "Dropdown", values=["image", "raw data"], multiselect=True
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "image-format",
             "Dropdown",
             values=["png", "svg"],
-            semanticAnnotation=imaging.ImagingSemanticAnnotation(
+            semanticAnnotation=ImagingSemanticAnnotation(
                 "schema.org",
                 "https://schema.org/version/28.1",
                 "https://schema.org/encoding",
             ),
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "archive-format",
             "Dropdown",
             values=["zip", "tar"],
-            semanticAnnotation=imaging.ImagingSemanticAnnotation(
+            semanticAnnotation=ImagingSemanticAnnotation(
                 "schema.org",
                 "https://schema.org/version/28.1",
                 "https://schema.org/fileFormat",
             ),
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "resolution", "Dropdown", values=["original", "150dpi", "300dpi"]
         ),
     ]
@@ -573,22 +572,22 @@ def create_dat_dataset(
     channels_y = [channel_y] + [x for x in channels if x != channel_y]
 
     inputs = [
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Channel X", "Dropdown", values=[channel for channel in channels_x]
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Channel Y", "Dropdown", values=[channel for channel in channels_y]
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "X-axis", "Range", visibility=color_scale_visibility_x
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Y-axis", "Range", visibility=color_scale_visibility_y
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Grouping", "Dropdown", values=[d.name for d in data], multiselect=True
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Colormap",
             "Colormap",
             values=[
@@ -603,13 +602,13 @@ def create_dat_dataset(
                 "RdGy",
             ],
         ),
-        imaging.ImagingDataSetControl(
+        ImagingDataSetControl(
             "Scaling", "Dropdown", values=["lin-lin", "lin-log", "log-lin", "log-log"]
         ),
-        # imaging.ImagingDataSetControl('Print legend', "Dropdown", values=['True', 'False']),
+        # ImagingDataSetControl('Print legend', "Dropdown", values=['True', 'False']),
     ]
 
-    imaging_config = imaging.ImagingDataSetConfig(
+    imaging_config = ImagingDataSetConfig(
         DAT_ADAPTOR,
         1.0,
         ["original", "200x200", "2000x2000"],
@@ -621,11 +620,11 @@ def create_dat_dataset(
     )
 
     images = [
-        imaging.ImagingDataSetImage(
+        ImagingDataSetImage(
             imaging_config, metadata=data[0].print_params_dict(False)
         )
     ]
-    imaging_property_config = imaging.ImagingDataSetPropertyConfig(images)
+    imaging_property_config = ImagingDataSetPropertyConfig(images)
     if VERBOSE:
         logger.info(imaging_property_config.to_json())
 
@@ -649,140 +648,159 @@ def process_measurement_files(
     measurement_datetimes = []
 
     # Check measurement files and measurement datetimes
-    for f in measurement_files:
-        # sxm and dat files
-        if f.endswith((".sxm", ".dat")):
-            try:
-                img = spm(f"{data_folder}/{f}")
-                img_datetime = img.record_datetime
-                readable_measurement_files.append(f)
-                measurement_datetimes.append(img_datetime)
-            except Exception as e:
-                logger.info(f"Cannot read {f}. Reason: {e}")
-
-    # Sort files by datetime first, then filename
-    paired = list(zip(measurement_datetimes, readable_measurement_files))
-    paired.sort(key=lambda x: (x[0], x[1]))
-
-    # Extract filenames in sorted order
-    sorted_measurement_files = [filename for _, filename in paired]
-
-    # Dat files belonging to the same measurement session, i.e., that are consecutive, should be grouped into just one list of files, except when they do not have the same channels.
-    grouped_measurement_files = []
-    group = []
-    img_cache = {}
-    for i, f in enumerate(sorted_measurement_files):
-        # SXM files are saved alone
-        if f.endswith(".sxm"):
-            if len(group) > 0:
-                grouped_measurement_files.append(group)
-                group = []
-            grouped_measurement_files.append([f])
-
-        # DAT files, in case they share the same signals and are consecutively acquired, are saved together
-        elif f.endswith(".dat"):
-            if f"{data_folder}/{f}" in img_cache:
-                f_img = img_cache[f"{data_folder}/{f}"]
-            else:
-                f_img = spm(f"{data_folder}/{f}")
-                img_cache[f"{data_folder}/{f}"] = f_img
-
-            files_with_different_channels = False
-
-            for file in group:
-                if f"{data_folder}/{file}" in img_cache:
-                    img = img_cache[f"{data_folder}/{file}"]
-                else:
-                    img = spm(f"{data_folder}/{file}")
-                    img_cache[f"{data_folder}/{file}"] = img
-
-                if img.signals != f_img.signals:
-                    files_with_different_channels = True
-                    break
-
-            if files_with_different_channels:
-                grouped_measurement_files.append(group)
-                group = [f]
-            else:
-                group.append(f)
-
-    if len(group) > 0:
-        grouped_measurement_files.append(group)
-
-    for group in grouped_measurement_files:
-        # Save sxm files
-        if group[0].endswith(".sxm"):
-            file_path = os.path.join(data_folder, group[0])
-            logger.info(f"SXM file: {file_path}")
-
-            if file_path not in logging_file["processed_files"]:
+    try:
+        for f in measurement_files:
+            # sxm and dat files
+            if f.endswith((".sxm", ".dat")):
                 try:
-                    measurements_object = session.get_sample(measurements_id)
-                    experiment = measurements_object.experiment
-                    demo_sxm_flow(
-                        session,
-                        file_path,
-                        sample=measurements_id,
-                        experiment=experiment,
-                    )
-                    logging_file["processed_files"].append(file_path)
-                    utils.write_json(logging_file, logging_filepath)
+                    img = spm(f"{data_folder}/{f}")
+                    img_datetime = img.record_datetime
+                    readable_measurement_files.append(f)
+                    measurement_datetimes.append(img_datetime)
+                except Exception as e:
+                    logger.info(f"Cannot read {f}. Reason: {e}")
 
-                except (ValueError, KeyError) as e:
-                    logger.info(f"Cannot upload {file_path}. Reason: {e}")
-                    # Report it in a logging file
-            else:
-                logger.info(f"{file_path} already in openBIS.")
-        else:
-            # Split the dat files by measurement type (e.g.: bias spec dI vs V in one list, bias spec z vs V in another list, etc.)
-            dat_files_types = []
-            for dat_file in group:
-                dat_filename = f"{data_folder}/{dat_file}"
-                dat_data = spm(dat_filename)
-                dat_files_types.append(dat_data.measurement_type)
+        # Sort files by datetime first, then filename
+        paired = list(zip(measurement_datetimes, readable_measurement_files))
+        paired.sort(key=lambda x: (x[0], x[1]))
 
-            grouped = defaultdict(list)
-            for item1, item2 in zip(group, dat_files_types):
-                grouped[item2].append(item1)
+        # Extract filenames in sorted order
+        sorted_measurement_files = [filename for _, filename in paired]
 
-            dat_files_grouped_by_type = list(grouped.values())
+        # Dat files belonging to the same measurement session, i.e., that are consecutive, should be grouped into just one list of files, except when they do not have the same channels.
+        grouped_measurement_files = []
+        group = []
+        img_cache = {}
+        for i, f in enumerate(sorted_measurement_files):
+            # SXM files are saved alone
+            if f.endswith(".sxm"):
+                if len(group) > 0:
+                    grouped_measurement_files.append(group)
+                    group = []
+                grouped_measurement_files.append([f])
 
-            # Save dat files
-            for dat_files_group in dat_files_grouped_by_type:
-                dat_files_directory = os.path.join(data_folder, "dat_files")
-                shutil.rmtree(dat_files_directory, ignore_errors=True)
-                os.mkdir(dat_files_directory)
+            # DAT files, in case they share the same signals and are consecutively acquired, are saved together
+            elif f.endswith(".dat"):
+                if f"{data_folder}/{f}" in img_cache:
+                    f_img = img_cache[f"{data_folder}/{f}"]
+                else:
+                    f_img = spm(f"{data_folder}/{f}")
+                    img_cache[f"{data_folder}/{f}"] = f_img
 
-                delete_original_openBIS_dataset = False
-                group_in_openbis = False
-                for dat_file in dat_files_group:
-                    original_dat_path = os.path.join(data_folder, dat_file)
-                    temporary_dat_path = os.path.join(dat_files_directory, dat_file)
-                    shutil.copy(original_dat_path, temporary_dat_path)
+                files_with_different_channels = False
 
-                    if original_dat_path in logging_file["processed_files"]:
-                        group_in_openbis = True
+                for file in group:
+                    if f"{data_folder}/{file}" in img_cache:
+                        img = img_cache[f"{data_folder}/{file}"]
                     else:
-                        delete_original_openBIS_dataset = True
-                        logging_file["processed_files"].append(original_dat_path)
+                        img = spm(f"{data_folder}/{file}")
+                        img_cache[f"{data_folder}/{file}"] = img
 
-                if group_in_openbis:
-                    if delete_original_openBIS_dataset:
+                    if img.signals != f_img.signals:
+                        files_with_different_channels = True
+                        break
+
+                if files_with_different_channels:
+                    grouped_measurement_files.append(group)
+                    group = [f]
+                else:
+                    group.append(f)
+
+        if len(group) > 0:
+            grouped_measurement_files.append(group)
+
+        for group in grouped_measurement_files:
+            # Save sxm files
+            if group[0].endswith(".sxm"):
+                file_path = os.path.join(data_folder, group[0])
+                logger.info(f"SXM file: {file_path}")
+
+                if file_path not in logging_file["processed_files"]:
+                    try:
+                        measurements_object = session.get_sample(measurements_id)
+                        experiment = measurements_object.experiment
+                        demo_sxm_flow(
+                            session,
+                            file_path,
+                            sample=measurements_id,
+                            experiment=experiment,
+                        )
+                        logging_file["processed_files"].append(file_path)
+                        utils.write_json(logging_file, logging_filepath)
+
+                    except (ValueError, KeyError) as e:
+                        logger.info(f"Cannot upload {file_path}. Reason: {e}")
+                        # Report it in a logging file
+                else:
+                    logger.info(f"{file_path} already in openBIS.")
+            else:
+                # Split the dat files by measurement type (e.g.: bias spec dI vs V in one list, bias spec z vs V in another list, etc.)
+                dat_files_types = []
+                for dat_file in group:
+                    dat_filename = f"{data_folder}/{dat_file}"
+                    dat_data = spm(dat_filename)
+                    dat_files_types.append(dat_data.measurement_type)
+
+                grouped = defaultdict(list)
+                for item1, item2 in zip(group, dat_files_types):
+                    grouped[item2].append(item1)
+
+                dat_files_grouped_by_type = list(grouped.values())
+
+                # Save dat files
+                for dat_files_group in dat_files_grouped_by_type:
+                    dat_files_directory = os.path.join(data_folder, "dat_files")
+                    shutil.rmtree(dat_files_directory, ignore_errors=True)
+                    os.mkdir(dat_files_directory)
+
+                    delete_original_openBIS_dataset = False
+                    group_in_openbis = False
+                    for dat_file in dat_files_group:
+                        original_dat_path = os.path.join(data_folder, dat_file)
+                        temporary_dat_path = os.path.join(dat_files_directory, dat_file)
+                        shutil.copy(original_dat_path, temporary_dat_path)
+
+                        if original_dat_path in logging_file["processed_files"]:
+                            group_in_openbis = True
+                        else:
+                            delete_original_openBIS_dataset = True
+                            logging_file["processed_files"].append(original_dat_path)
+
+                    if group_in_openbis:
+                        if delete_original_openBIS_dataset:
+                            try:
+                                measurements_object = session.get_sample(measurements_id)
+                                experiment = measurements_object.experiment
+
+                                # Delete old dataset in order to update it
+                                measurements_datasets = (
+                                    measurements_object.get_datasets().df.sort_values(
+                                        "registrationDate", ascending=False
+                                    )
+                                )
+                                dataset_to_remove = measurements_datasets.iloc[0]["permId"]
+                                session.get_dataset(dataset_to_remove).delete(
+                                    "update dataset group"
+                                )
+
+                                # Upload dat files
+                                demo_dat_flow(
+                                    session,
+                                    dat_files_directory,
+                                    sample=measurements_id,
+                                    experiment=experiment,
+                                )
+                                utils.write_json(logging_file, logging_filepath)
+
+                            except ValueError as e:
+                                logger.info(
+                                    f"Cannot upload {dat_files_directory}. Reason: {e}"
+                                )
+                                # Report it in a logging file
+                    else:
                         try:
                             measurements_object = session.get_sample(measurements_id)
                             experiment = measurements_object.experiment
-
-                            # Delete old dataset in order to update it
-                            measurements_datasets = (
-                                measurements_object.get_datasets().df.sort_values(
-                                    "registrationDate", ascending=False
-                                )
-                            )
-                            dataset_to_remove = measurements_datasets.iloc[0]["permId"]
-                            session.get_dataset(dataset_to_remove).delete(
-                                "update dataset group"
-                            )
-
                             # Upload dat files
                             demo_dat_flow(
                                 session,
@@ -791,27 +809,12 @@ def process_measurement_files(
                                 experiment=experiment,
                             )
                             utils.write_json(logging_file, logging_filepath)
-
                         except ValueError as e:
-                            logger.info(
-                                f"Cannot upload {dat_files_directory}. Reason: {e}"
-                            )
-                            # Report it in a logging file
-                else:
-                    try:
-                        measurements_object = session.get_sample(measurements_id)
-                        experiment = measurements_object.experiment
-                        # Upload dat files
-                        demo_dat_flow(
-                            session,
-                            dat_files_directory,
-                            sample=measurements_id,
-                            experiment=experiment,
-                        )
-                        utils.write_json(logging_file, logging_filepath)
-                    except ValueError as e:
-                        logger.info(f"Cannot upload {dat_files_directory}. Reason: {e}")
-                shutil.rmtree(dat_files_directory)
+                            logger.info(f"Cannot upload {dat_files_directory}. Reason: {e}")
+                    shutil.rmtree(dat_files_directory)
+    
+    except Exception as e:
+        logger.info(f"Error processing measurement files: {e}")
 
     session.logout()
 

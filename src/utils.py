@@ -50,6 +50,7 @@ def get_interface_config_info():
         "slabs_concepts_types": {},
         "slabs_concepts_codes": {},
         "instruments_types": {},
+        "components_types": {},
     }
 
     openbis_session = connect_openbis_aiida()[0]
@@ -78,6 +79,7 @@ def get_interface_config_info():
 
         meta = obj.metaData
         if meta:
+            meta_collection_type = meta.get("collectionType", "unknown")
             meta_type = meta.get("type")
             meta_icon = meta.get("icon", "")
             if meta_type == "slab":
@@ -90,8 +92,10 @@ def get_interface_config_info():
                 info["actions_types"][desc_str] = code_str
                 info["actions_types_codes"][desc_str] = prefix_str
                 info["actions_types_icons"][code_str] = meta_icon
-            elif meta_type == "instrument":
+            elif meta_collection_type == "INSTRUMENT_COLLECTION":
                 info["instruments_types"][desc_str] = code_str
+            elif meta_collection_type == "COMPONENT_COLLECTION":
+                info["components_types"][desc_str] = code_str
 
     return info
 
@@ -349,7 +353,8 @@ def create_openbis_collection(openbis_session, **kwargs):
         return collection
 
 
-def find_instrument_components(openbis_session, instrument_permid):
+
+def find_instrument_components(openbis_session, instrument_permid, components_types):
     display(Javascript(data="alert('Loading instrument components...')"))
 
     obj = openbis_session.get_object(instrument_permid)
@@ -380,13 +385,7 @@ def find_instrument_components(openbis_session, instrument_permid):
         for comp_id in component_ids_to_fetch:
             comp_obj = get_openbis_object(openbis_session, sample_ident=comp_id)
             comp_obj_type = str(comp_obj.type)
-            if comp_obj_type not in [
-                "PERSON",
-                "ORGANISATION",
-                "TEAM",
-                "GROUP",
-                "ROOM",
-            ]:
+            if comp_obj_type in components_types:
                 all_components[comp_obj_type].append(comp_obj)
     return dict(all_components)
 
