@@ -25,6 +25,7 @@ OPENBIS_OBJECT_TYPES, OPENBIS_OBJECT_CODES = (
     INTERFACE_CONFIG_INFO["object_types"],
     INTERFACE_CONFIG_INFO["object_types_codes"],
 )
+INSTRUMENT_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
 COMPONENTS_TYPES = INTERFACE_CONFIG_INFO["components_types"]
 MATERIALS_TYPES = INTERFACE_CONFIG_INFO["slabs_types"]
 OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
@@ -32,6 +33,7 @@ OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
 ]["Paths"]
 INSTRUMENTS_COMPONENTS = {}
 INSTRUMENTS_ACTIONS = {}
+LAB_ROOMS = []
 
 OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects"][
     "Paths"
@@ -254,6 +256,14 @@ class ProcessStepHistoryWidget(ipw.VBox):
         self.comments_hbox = ipw.HBox(
             children=[self.comments_label, self.comments_html]
         )
+        
+        self.room_label = ipw.HTML(
+            value="<b>Room:</b>", layout=label_layout
+        )
+        self.room_html = ipw.HTML()
+        self.room_hbox = ipw.HBox(
+            children=[self.room_label, self.room_html]
+        )
 
         self.instrument_label = ipw.HTML(
             value="<b>Instrument:</b>", layout=label_layout
@@ -283,6 +293,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
             self.name_hbox,
             self.description_hbox,
             self.comments_hbox,
+            self.room_hbox,
             self.instrument_hbox,
             self.actions_vbox,
             self.observables_vbox,
@@ -306,6 +317,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
 
         self.registration_date = self.openbis_object.registrationDate
 
+        room_object = None
         instruments_codes = [
             OPENBIS_OBJECT_CODES["Instrument"],
             OPENBIS_OBJECT_CODES["Instrument STM"],
@@ -323,6 +335,30 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 )
                 instrument_name = f'<a href="{instrument_openbis_url}" target="_blank" rel="noopener noreferrer">{instrument_name}</a>'
                 self.instrument_html.value = instrument_name
+                
+                room_permid = instrument_object.props.get("location")
+                room_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=room_permid
+                )
+                room_name = room_object.props["name"]
+                room_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, room_object
+                )
+                room_name = f'<a href="{room_openbis_url}" target="_blank" rel="noopener noreferrer">{room_name}</a>'
+                self.room_html.value = room_name
+                break
+            
+            elif parent_code[0:4] == OPENBIS_OBJECT_CODES["Room"] and room_object is None:
+                room_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=parent
+                )
+                room_name = room_object.props["name"]
+                room_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, room_object
+                )
+                room_name = f'<a href="{room_openbis_url}" target="_blank" rel="noopener noreferrer">{room_name}</a>'
+                self.room_html.value = room_name
+                self.instrument_html.value = "<i>Other tools</i>"
                 break
 
         self.load_actions()
@@ -1247,7 +1283,7 @@ class RegisterPreparationWidget(ipw.VBox):
                                                     action_properties_values[
                                                         prop_lower
                                                     ] = selected_value
-
+                                                    
                                                 selected_obj = utils.get_openbis_object(
                                                     self.openbis_session,
                                                     sample_ident=selected_value,
@@ -1603,9 +1639,12 @@ class RegisterPreparationWidget(ipw.VBox):
                     ]
                     new_process_object.props = process_properties
                     instrument_permid = process_widget.instrument_dropdown.value
+                    room_permid = process_widget.room_dropdown.value
 
-                    if instrument_permid != "-1":
+                    if instrument_permid != "-1" and "Other Tools" not in instrument_permid:
                         new_process_object_parents.append(instrument_permid)
+                    else:
+                        new_process_object_parents.append(room_permid)
 
                     new_process_object.add_parents(new_process_object_parents)
                     utils.update_openbis_object(new_process_object)
@@ -1845,6 +1884,12 @@ class RegisterPreparationWidget(ipw.VBox):
 
                     # Existing logic from the bottom of your loop
                     current_sample = new_sample
+                
+                display(
+                    Javascript(
+                        data="alert('New process steps registered successfully.')"
+                    )
+                )
 
             except Exception as e:
                 logger.error(f"Error while saving process steps: {e}")
@@ -1888,11 +1933,6 @@ class RegisterPreparationWidget(ipw.VBox):
             try:
                 self.select_sample_dropdown.sample_dropdown.value = (
                     current_sample.permId
-                )
-                display(
-                    Javascript(
-                        data="alert('New process steps registered successfully.')"
-                    )
                 )
             except TraitError:
                 logger.info(
@@ -2351,8 +2391,11 @@ class RegisterProcessWidget(ipw.VBox):
                     }
 
                     new_process_step_parents = []
-                    if process_step_instrument != "-1":
+                    process_step_room = process_widget.room_dropdown.value
+                    if process_step_instrument != "-1" and "Other Tools" not in process_step_instrument:
                         new_process_step_parents.append(process_step_instrument)
+                    else:
+                        new_process_step_parents.append(process_step_room)
 
                     new_process_step_object = utils.create_openbis_object(
                         self.openbis_session,
@@ -2475,6 +2518,43 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.description_hbox = ipw.HBox(
             children=[self.description_label, self.description_textbox]
         )
+        
+        global LAB_ROOMS
+        
+        instruments_and_components_types = [*COMPONENTS_TYPES.values(), *INSTRUMENT_TYPES.values()]
+        room_options = []
+        if LAB_ROOMS:
+            room_options = LAB_ROOMS.copy()
+        else:
+            locations_ids = set()
+            for obj_type in instruments_and_components_types:
+                objs = utils.get_openbis_objects(
+                    self.openbis_session, type = obj_type
+                )
+                for obj in objs:
+                    room_id = obj.props['location']
+                    if room_id is not None:
+                        locations_ids.add(room_id)
+                        
+            for location_id in locations_ids:
+                location_obj = utils.get_openbis_object(self.openbis_session, sample_ident=location_id)
+                location_name = location_obj.props['name']
+                location_type = location_obj.type.code
+                if location_type == OPENBIS_OBJECT_TYPES["Room"]:
+                    if (location_name, location_id) not in room_options:
+                        room_options.append((location_name, location_id))
+        
+            LAB_ROOMS = room_options.copy()
+        
+        room_options.sort(key=lambda x: x[0])
+        room_options.insert(0, ("Select a room...", "-1"))
+        self.room_label = ipw.HTML(value="<b>Room:</b>", layout=label_layout)
+        self.room_dropdown = ipw.Dropdown(
+            options=room_options,
+            value="-1",
+            layout=box_layout,
+        )
+        self.room_hbox = ipw.HBox(children=[self.room_label, self.room_dropdown])
 
         self.instrument_label = ipw.HTML(
             value="<b>Instrument:</b>", layout=label_layout
@@ -2487,7 +2567,7 @@ class RegisterProcessStepWidget(ipw.VBox):
         ]
         instrument_options.insert(0, ("Select an instrument...", "-1"))
         self.instrument_dropdown = ipw.Dropdown(
-            options=instrument_options, value="-1", layout=box_layout
+            options=instrument_options, value="-1", layout=box_layout, disabled=True
         )
         self.instrument_hbox = ipw.HBox(
             children=[self.instrument_label, self.instrument_dropdown]
@@ -2535,6 +2615,7 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.remove_process_step_button.on_click(self.remove_process_step)
         self.name_textbox.observe(self.change_process_step_title, names="value")
         self.add_action_button.on_click(self.add_action)
+        self.room_dropdown.observe(self.load_room_instruments, names="value")
         self.instrument_dropdown.observe(self.load_instrument_actions, names="value")
 
         # Load process step settings if provided
@@ -2564,6 +2645,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.name_hbox,
                 self.description_hbox,
                 self.comments_hbox,
+                self.room_hbox,
                 self.instrument_hbox,
                 self.actions_vbox,
                 self.observables_vbox,
@@ -2574,10 +2656,35 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.name_hbox,
                 self.description_hbox,
                 self.comments_hbox,
+                self.room_hbox,
                 self.instrument_hbox,
                 self.actions_vbox,
                 self.remove_process_step_button,
             ]
+    
+    def load_room_instruments(self, change):
+        room_permid = change["new"]
+
+        if room_permid == "-1":
+            self.instrument_dropdown.options = [("Select an instrument...", "-1")]
+            self.instrument_dropdown.value = "-1"
+            self.instrument_dropdown.disabled = True
+            return
+
+        instrument_objects = utils.get_openbis_objects(
+            self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Instrument"]
+        )
+        filtered_instruments = [
+            obj for obj in instrument_objects if obj.props.get("location") == room_permid
+        ]
+        instrument_options = [
+            (obj.props["name"], obj.permId) for obj in filtered_instruments
+        ]
+        instrument_options.insert(0, ("Select an instrument...", "-1"))
+        instrument_options.insert(1, ("Other Tools", "Other Tools - " + room_permid))
+        self.instrument_dropdown.options = instrument_options
+        self.instrument_dropdown.value = "-1"
+        self.instrument_dropdown.disabled = False
 
     def load_instrument_actions(self, change):
         global INSTRUMENTS_COMPONENTS
@@ -2587,6 +2694,52 @@ class RegisterProcessStepWidget(ipw.VBox):
 
         if instrument_permid == "-1":
             return
+        
+        elif instrument_permid == "Other Tools - " + self.room_dropdown.value:
+            display(Javascript(data="alert('Loading components...')"))
+            if instrument_permid not in INSTRUMENTS_ACTIONS:
+                not_attached_components = {}
+                for comp_type in COMPONENTS_TYPES.values():
+                    comp_objs = utils.get_openbis_objects(self.openbis_session, type=comp_type)
+                    for comp_obj in comp_objs:
+                        if comp_obj.props["location"] == self.room_dropdown.value:
+                            if comp_type not in not_attached_components:
+                                not_attached_components[comp_type] = []
+                            not_attached_components[comp_type].append(comp_obj)
+                
+                INSTRUMENTS_COMPONENTS[instrument_permid] = {
+                    k: list(v) for k, v in not_attached_components.items()
+                }
+            
+            instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
+            
+            if instrument_permid not in INSTRUMENTS_ACTIONS:
+                instrument_actions = []        
+                for action_label, action_type in ACTIONS_TYPES.items():
+                    obj_type_props = (
+                        utils.get_openbis_object_type(
+                            self.openbis_session, type=action_type
+                        )
+                        .get_property_assignments()
+                        .df.code.values
+                    )
+
+                    for prop in obj_type_props:
+                        prop_type = utils.get_openbis_property_type(
+                            self.openbis_session, code=prop
+                        )
+
+                        # Combine the type check and component match into one statement
+                        if (
+                            prop_type.dataType in ["SAMPLE", "OBJECT"]
+                            and str(prop_type.sampleType) in instrument_components
+                        ):
+                            instrument_actions.append((action_label, action_type))
+                            break
+
+                instrument_actions.insert(0, ("Action", "ACTION"))
+                INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
+                
         else:
             # 2. Simplify Component Caching
             if instrument_permid not in INSTRUMENTS_COMPONENTS:
@@ -2641,9 +2794,14 @@ class RegisterProcessStepWidget(ipw.VBox):
             parent_obj = utils.get_openbis_object(self.openbis_session, parent_id)
             if parent_obj.type.code in [
                 OPENBIS_OBJECT_TYPES["Instrument"],
-                OPENBIS_OBJECT_TYPES["Instrument STM"],
+                OPENBIS_OBJECT_TYPES["Instrument STM"]
             ]:
                 self.instrument_dropdown.value = parent_obj.permId
+                break
+            
+            if parent_obj.type.code == OPENBIS_OBJECT_TYPES["Room"]:
+                self.room_dropdown.value = parent_obj.permId
+                self.instrument_dropdown.value = "Other Tools - " + parent_obj.permId
                 break
 
         actions_list = process_step.props["actions"]
@@ -2662,6 +2820,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                     action_object,
                     process_step_widget=self,
                 )
+                self.room_dropdown.disabled = True
                 self.instrument_dropdown.disabled = True
                 actions_accordion_children.append(new_action_widget)
                 self.actions_accordion.children = actions_accordion_children
@@ -2697,6 +2856,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 instrument_permid,
                 process_step_widget=self,
             )
+            self.room_dropdown.disabled = True
             self.instrument_dropdown.disabled = True
             actions_accordion_children.append(new_action_widget)
             self.actions_accordion.children = actions_accordion_children
@@ -2740,12 +2900,29 @@ class RegisterActionWidget(ipw.VBox):
         global INSTRUMENTS_COMPONENTS
 
         if instrument_permid not in INSTRUMENTS_COMPONENTS:
-            self.instrument_components = utils.find_instrument_components(
-                self.openbis_session, instrument_permid, COMPONENTS_TYPES.values()
-            )
-            INSTRUMENTS_COMPONENTS[instrument_permid] = {
-                k: list(v) for k, v in self.instrument_components.items()
-            }
+            if "Other Tools" in instrument_permid:
+                display(Javascript(data="alert('Loading components...')"))
+                if instrument_permid not in INSTRUMENTS_ACTIONS:
+                    not_attached_components = {}
+                    for comp_type in COMPONENTS_TYPES.values():
+                        comp_objs = utils.get_openbis_objects(self.openbis_session, type=comp_type)
+                        for comp_obj in comp_objs:
+                            if comp_obj.props["location"] == self.room_dropdown.value:
+                                if comp_type not in not_attached_components:
+                                    not_attached_components[comp_type] = []
+                                not_attached_components[comp_type].append(comp_obj)
+                
+                INSTRUMENTS_COMPONENTS[instrument_permid] = {
+                    k: list(v) for k, v in not_attached_components.items()
+                }
+            
+            else:
+                self.instrument_components = utils.find_instrument_components(
+                    self.openbis_session, instrument_permid, COMPONENTS_TYPES.values()
+                )
+                INSTRUMENTS_COMPONENTS[instrument_permid] = {
+                    k: list(v) for k, v in self.instrument_components.items()
+                }
         else:
             self.instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
 
@@ -3504,7 +3681,7 @@ class RegisterActionWidget(ipw.VBox):
                     # --- 2. Initialize pybis Spreadsheet ---
                     # Create a spreadsheet with 4 columns and exactly the number of valid rows we need
                     spreadsheet = self.openbis_session.new_spreadsheet(
-                        columns=4, rows=len(valid_rows)
+                        columns=5, rows=len(valid_rows)
                     )
 
                     # Set the column headers (A, B, C, D are the default alphabetic identifiers)

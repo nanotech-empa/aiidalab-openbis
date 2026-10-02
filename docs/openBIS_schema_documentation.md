@@ -1913,6 +1913,7 @@ By mapping the detailed relationships between physical materials, hardware state
 | SAMPLE | 1 | - |
 | INSTRUMENT | 0 | - |
 | INSTRUMENT.STM | 0 | - |
+| ROOM | 0 | 1 |
 
 #### Section:
 
@@ -2007,13 +2008,13 @@ By mapping the detailed relationships between physical materials, hardware state
 #### Parents:
 | Object Type| Minimum | Maximum |
 | :--- | :--- | :--- |
-| ORGANISATION | 1 | 1 |
 
 #### Section:
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |
+| `organisation` | Organisation | Organisation | OBJECT (ORGANISATION) | False | False | False |
 
 ### Sample
 * **Code:** `SAMPLE`
