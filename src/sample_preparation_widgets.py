@@ -256,6 +256,14 @@ class ProcessStepHistoryWidget(ipw.VBox):
         self.comments_hbox = ipw.HBox(
             children=[self.comments_label, self.comments_html]
         )
+        
+        self.room_label = ipw.HTML(
+            value="<b>Room:</b>", layout=label_layout
+        )
+        self.room_html = ipw.HTML()
+        self.room_hbox = ipw.HBox(
+            children=[self.room_label, self.room_html]
+        )
 
         self.instrument_label = ipw.HTML(
             value="<b>Instrument:</b>", layout=label_layout
@@ -285,6 +293,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
             self.name_hbox,
             self.description_hbox,
             self.comments_hbox,
+            self.room_hbox,
             self.instrument_hbox,
             self.actions_vbox,
             self.observables_vbox,
@@ -308,6 +317,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
 
         self.registration_date = self.openbis_object.registrationDate
 
+        room_object = None
         instruments_codes = [
             OPENBIS_OBJECT_CODES["Instrument"],
             OPENBIS_OBJECT_CODES["Instrument STM"],
@@ -325,6 +335,30 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 )
                 instrument_name = f'<a href="{instrument_openbis_url}" target="_blank" rel="noopener noreferrer">{instrument_name}</a>'
                 self.instrument_html.value = instrument_name
+                
+                room_permid = instrument_object.props.get("location")
+                room_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=room_permid
+                )
+                room_name = room_object.props["name"]
+                room_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, room_object
+                )
+                room_name = f'<a href="{room_openbis_url}" target="_blank" rel="noopener noreferrer">{room_name}</a>'
+                self.room_html.value = room_name
+                break
+            
+            elif parent_code[0:4] == OPENBIS_OBJECT_CODES["Room"] and room_object is None:
+                room_object = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=parent
+                )
+                room_name = room_object.props["name"]
+                room_openbis_url = utils.generate_openbis_object_url(
+                    self.openbis_session, room_object
+                )
+                room_name = f'<a href="{room_openbis_url}" target="_blank" rel="noopener noreferrer">{room_name}</a>'
+                self.room_html.value = room_name
+                self.instrument_html.value = "<i>Other tools</i>"
                 break
 
         self.load_actions()
@@ -1249,7 +1283,7 @@ class RegisterPreparationWidget(ipw.VBox):
                                                     action_properties_values[
                                                         prop_lower
                                                     ] = selected_value
-
+                                                    
                                                 selected_obj = utils.get_openbis_object(
                                                     self.openbis_session,
                                                     sample_ident=selected_value,
@@ -1850,6 +1884,12 @@ class RegisterPreparationWidget(ipw.VBox):
 
                     # Existing logic from the bottom of your loop
                     current_sample = new_sample
+                
+                display(
+                    Javascript(
+                        data="alert('New process steps registered successfully.')"
+                    )
+                )
 
             except Exception as e:
                 logger.error(f"Error while saving process steps: {e}")
@@ -1893,11 +1933,6 @@ class RegisterPreparationWidget(ipw.VBox):
             try:
                 self.select_sample_dropdown.sample_dropdown.value = (
                     current_sample.permId
-                )
-                display(
-                    Javascript(
-                        data="alert('New process steps registered successfully.')"
-                    )
                 )
             except TraitError:
                 logger.info(
@@ -3646,7 +3681,7 @@ class RegisterActionWidget(ipw.VBox):
                     # --- 2. Initialize pybis Spreadsheet ---
                     # Create a spreadsheet with 4 columns and exactly the number of valid rows we need
                     spreadsheet = self.openbis_session.new_spreadsheet(
-                        columns=4, rows=len(valid_rows)
+                        columns=5, rows=len(valid_rows)
                     )
 
                     # Set the column headers (A, B, C, D are the default alphabetic identifiers)
