@@ -769,6 +769,9 @@ class RegisterPreparationWidget(ipw.VBox):
 
         header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
 
+        self.select_project_title = ipw.HTML(
+            f"<div style='{header_style}'>Select project</div>"
+        )
         self.select_experiment_title = ipw.HTML(
             f"<div style='{header_style}'>Select experiment</div>"
         )
@@ -802,7 +805,11 @@ class RegisterPreparationWidget(ipw.VBox):
 
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5;">
                         <li style="margin-bottom: 6px;">
-                            <b>Select experiment:</b> Determines where the preparation is going to be saved in openBIS.
+                            <b>Select project:</b> Only experiments that belong to the selected project will be available for selection.
+                            <i>(Note: This auto-fills when you select a sample. In the case, the project is not available, you have to open openBIS first and register it).</i>
+                        </li>
+                        <li style="margin-bottom: 6px;">
+                            <b>Select experiment:</b> Determines where the preparation is going to be saved in openBIS. Only experiments that belong to the selected project will be available for selection.
                             <i>(Note: This auto-fills when you select a sample, but if the experiment does not exist, you can create one by clicking the <b>+</b> button).</i>
                         </li>
                         <li style="margin-bottom: 6px;"><b>Select sample:</b> Choose a sample created in the <i>Create sample</i> tab.</li>
@@ -817,8 +824,10 @@ class RegisterPreparationWidget(ipw.VBox):
         )
 
         self.process_short_name = ""
+        
+        self.select_project_widget = widgets.SelectProjectWidget(self.openbis_session)
 
-        self.select_experiment_dropdown = widgets.SelectExperimentWidget(
+        self.select_experiment_widget = widgets.SelectExperimentWidget(
             self.openbis_session
         )
         self.select_sample_dropdown = widgets.SelectSampleWidget(self.openbis_session)
@@ -870,8 +879,10 @@ class RegisterPreparationWidget(ipw.VBox):
 
         self.children = [
             self.notes,
+            self.select_project_title,
+            self.select_project_widget,
             self.select_experiment_title,
-            self.select_experiment_dropdown,
+            self.select_experiment_widget,
             self.select_sample_title,
             self.select_sample_dropdown,
             self.sample_history_title,
@@ -882,7 +893,15 @@ class RegisterPreparationWidget(ipw.VBox):
             button_row,
             save_row,
         ]
+        
+        self.select_project_widget.project_dropdown.observe(
+            self.load_experiment_data, names="value"
+        )
 
+        self.select_experiment_widget.create_experiment_button.on_click(
+            self.show_create_experiment_ui
+        )
+        
         self.select_sample_dropdown.sample_dropdown.observe(
             self.load_sample_data, names="value"
         )
@@ -891,6 +910,71 @@ class RegisterPreparationWidget(ipw.VBox):
         self.processes_dropdown.observe(self.load_process_settings, names="value")
         self.add_process_step_button.on_click(self.add_process_step)
         self.save_button.on_click(self.save_process_steps)
+    
+    def load_experiment_data(self, change):
+        project_identifier = self.select_project_widget.project_dropdown.value
+        self.select_experiment_widget.load_experiments(project_identifier)
+    
+    def show_create_experiment_ui(self, b):
+        if self.select_project_widget.project_dropdown.value == "-1":
+            display(Javascript(data="alert('Select a project first.')"))
+            return
+        else:
+            self.select_experiment_widget.show_create_panel()
+            self.select_project_widget.project_dropdown.disabled = True
+            self.select_project_widget.filter_my_projects_cb.disabled = True
+            self.select_project_widget.sort_date_cb.disabled = True
+            self.select_project_widget.sort_name_cb.disabled = True
+            self.select_experiment_widget.save_btn.on_click(self.save_new_experiment)
+            self.select_experiment_widget.cancel_btn.on_click(self.cancel_new_experiment)
+    
+    def save_new_experiment(self, b):
+        project_identifier = self.select_project_widget.project_dropdown.value
+        new_experiment_name = self.select_experiment_widget.new_exp_name_textbox.value.strip()
+        new_experiment_description = self.select_experiment_widget.new_exp_description_textbox.value.strip()
+
+        if project_identifier == "-1":
+            display(Javascript(data="alert('Select a project.')"))
+            return
+        if not new_experiment_name:
+            display(Javascript(data="alert('Experiment name cannot be empty.')"))
+            return
+
+        try:
+            new_experiment = utils.create_openbis_collection(
+                self.openbis_session,
+                type="EXPERIMENT",
+                project=project_identifier,
+                props={
+                    "name": new_experiment_name,
+                    "description": new_experiment_description,
+                    "default_collection_view": "IMAGING_GALLERY_VIEW",
+                },
+            )
+            self.select_experiment_widget.hide_create_panel()
+            project_identifier = self.select_project_widget.project_dropdown.value
+            self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
+            self.select_experiment_widget.experiment_dropdown.value = new_experiment.permId
+            display(Javascript(data="alert('Experiment successfully created!')"))
+
+        except ValueError:
+            display(
+                Javascript(data="alert('Error! Check if experiment already exists.')")
+            )
+        finally:
+            self.select_project_widget.project_dropdown.disabled = False
+            self.select_project_widget.filter_my_projects_cb.disabled = False
+            self.select_project_widget.sort_date_cb.disabled = False
+            self.select_project_widget.sort_name_cb.disabled = False
+
+    def cancel_new_experiment(self, b):
+        self.select_experiment_widget.hide_create_panel()
+        project_identifier = self.select_project_widget.project_dropdown.value
+        self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
+        self.select_project_widget.project_dropdown.disabled = False
+        self.select_project_widget.filter_my_projects_cb.disabled = False
+        self.select_project_widget.sort_date_cb.disabled = False
+        self.select_project_widget.sort_name_cb.disabled = False
 
     def load_sample_data(self, change):
         if self.select_sample_dropdown.sample_dropdown.value == "-1":
@@ -925,12 +1009,20 @@ class RegisterPreparationWidget(ipw.VBox):
         if most_recent_parent:
             if (
                 most_recent_parent.experiment.permId
-                != self.select_experiment_dropdown.experiment_dropdown.value
+                != self.select_experiment_widget.experiment_dropdown.value
             ):
-                self.select_experiment_dropdown.experiment_dropdown.value = (
+                most_recent_parent_experiment = utils.get_openbis_collection(
+                    self.openbis_session,
+                    code=most_recent_parent.experiment.identifier
+                )
+                
+                self.select_project_widget.project_dropdown.value = most_recent_parent_experiment.project.permId
+                
+                self.select_experiment_widget.experiment_dropdown.value = (
                     most_recent_parent.experiment.permId
                 )
-                display(Javascript(data="alert('Experiment was changed!')"))
+                
+                display(Javascript(data="alert('Project and Experiment were auto-updated based on the sample!')"))
 
             for parent in most_recent_parent.parents:
                 parent_object = utils.get_openbis_object(
@@ -1063,8 +1155,9 @@ class RegisterPreparationWidget(ipw.VBox):
 
             self.children = [
                 self.notes,
-                self.select_experiment_title,
-                self.select_experiment_dropdown,
+                self.select_project_title,
+                self.select_project_widget,
+                self.select_experiment_widget,
                 self.select_sample_title,
                 self.select_sample_dropdown,
                 self.sample_history_title,
@@ -1104,7 +1197,7 @@ class RegisterPreparationWidget(ipw.VBox):
         return None
 
     def save_process_steps(self, b):
-        experiment_id = self.select_experiment_dropdown.experiment_dropdown.value
+        experiment_id = self.select_experiment_widget.experiment_dropdown.value
         if experiment_id == "-1":
             display(Javascript(data="alert('Select an experiment.')"))
             return
@@ -1907,8 +2000,11 @@ class RegisterPreparationWidget(ipw.VBox):
                 )
 
             self.children = [
+                self.notes,
+                self.select_project_title,
+                self.select_project_widget,
                 self.select_experiment_title,
-                self.select_experiment_dropdown,
+                self.select_experiment_widget,
                 self.select_sample_title,
                 self.select_sample_dropdown,
                 self.sample_history_title,

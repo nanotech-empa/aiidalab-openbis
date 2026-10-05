@@ -213,6 +213,10 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
                         <li style="margin-bottom: 6px;">
+                            <b>Select project:</b> Only experiments that belong to the selected project will be available for selection.
+                            <i>(Note: This auto-fills when you select a sample. In the case, the project is not available, you have to open openBIS first and register it).</i>
+                        </li>
+                        <li style="margin-bottom: 6px;">
                             <b>Select experiment:</b> Determines where the measurement data will be saved in openBIS.
                             <i>(Note: If the experiment does not exist, you can create one by clicking the <b>+</b> button, selecting a project, and giving it a name).</i>
                         </li>
@@ -238,11 +242,23 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         )
 
         # Dropdowns
+        self.select_project_title = ipw.HTML(
+            f"<div style='{header_style}'>Select project</div>"
+        )
+        self.select_project_widget = widgets.SelectProjectWidget(self.openbis_session)
+        self.select_project_widget.project_dropdown.observe(
+            self.load_experiment_data, names="value"
+        )
+        
         self.select_experiment_title = ipw.HTML(
             value=f"<div style='{header_style}'>Select experiment</div>"
         )
         self.select_experiment_widget = widgets.SelectExperimentWidget(
             self.openbis_session
+        )
+        
+        self.select_experiment_widget.create_experiment_button.on_click(
+            self.show_create_experiment_ui
         )
 
         self.select_sample_title = ipw.HTML(
@@ -284,6 +300,8 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
         self.children = [
             self.notes,
+            self.select_project_title,
+            self.select_project_widget,
             self.select_experiment_title,
             self.select_experiment_widget,
             self.select_sample_title,
@@ -296,6 +314,78 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             self.select_measurements_folder_widget,
             self.generate_watchdog_button,
         ]
+    
+    def load_experiment_data(self, change):
+        project_identifier = self.select_project_widget.project_dropdown.value
+        self.select_experiment_widget.load_experiments(project_identifier)
+        
+        if self.select_project_widget.project_dropdown.value == "-1":
+            self.select_experiment_widget.create_experiment_button.disabled = True
+            return
+        
+        else:
+            self.select_experiment_widget.create_experiment_button.disabled = False
+            self.select_experiment_widget.create_experiment_button.on_click(
+                self.show_create_experiment_ui
+            )
+    
+    def show_create_experiment_ui(self, b):
+        self.select_experiment_widget.show_create_panel()
+        self.select_project_widget.project_dropdown.disabled = True
+        self.select_project_widget.filter_my_projects_cb.disabled = True
+        self.select_project_widget.sort_date_cb.disabled = True
+        self.select_project_widget.sort_name_cb.disabled = True
+        self.select_experiment_widget.save_btn.on_click(self.save_new_experiment)
+        self.select_experiment_widget.cancel_btn.on_click(self.cancel_new_experiment)
+        
+    def save_new_experiment(self, b):
+        project_identifier = self.select_project_widget.project_dropdown.value
+        new_experiment_name = self.select_experiment_widget.new_exp_name_textbox.value.strip()
+        new_experiment_description = self.select_experiment_widget.new_exp_description_textbox.value.strip()
+
+        if project_identifier == "-1":
+            display(Javascript(data="alert('Select a project.')"))
+            return
+        if not new_experiment_name:
+            display(Javascript(data="alert('Experiment name cannot be empty.')"))
+            return
+
+        try:
+            new_experiment = utils.create_openbis_collection(
+                self.openbis_session,
+                type="EXPERIMENT",
+                project=project_identifier,
+                props={
+                    "name": new_experiment_name,
+                    "description": new_experiment_description,
+                    "default_collection_view": "IMAGING_GALLERY_VIEW",
+                },
+            )
+            self.select_experiment_widget.hide_create_panel()
+            project_identifier = self.select_project_widget.project_dropdown.value
+            self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
+            self.select_experiment_widget.experiment_dropdown.value = new_experiment.permId
+            display(Javascript(data="alert('Experiment successfully created!')"))
+
+        except ValueError:
+            display(
+                Javascript(data="alert('Error! Check if experiment already exists.')")
+            )
+        finally:
+            self.select_project_widget.project_dropdown.disabled = False
+            self.select_project_widget.filter_my_projects_cb.disabled = False
+            self.select_project_widget.sort_date_cb.disabled = False
+            self.select_project_widget.sort_name_cb.disabled = False
+
+    def cancel_new_experiment(self, b):
+        self.select_experiment_widget.hide_create_panel()
+        project_identifier = self.select_project_widget.project_dropdown.value
+        self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
+        self.select_project_widget.project_dropdown.disabled = False
+        self.select_project_widget.filter_my_projects_cb.disabled = False
+        self.select_project_widget.sort_date_cb.disabled = False
+        self.select_project_widget.sort_name_cb.disabled = False
+    
 
     def _get_most_recent_process_step(self, sample_object):
         """Helper to extract the most recent 'Process Step' parent from a sample."""
@@ -336,15 +426,19 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
         if new_exp_id == current_exp_id:
             return  # Early exit if they are already the same
-
-        # 3. Apply the updates
-        self.select_experiment_widget.experiment_dropdown.value = new_exp_id
-
-        display(
-            Javascript(
-                data="alert('Experiment was auto-updated based on the sample!');"
-            )
+        
+        most_recent_parent_experiment = utils.get_openbis_collection(
+            self.openbis_session,
+            code=most_recent_parent.experiment.identifier
         )
+        
+        self.select_project_widget.project_dropdown.value = most_recent_parent_experiment.project.permId
+        
+        self.select_experiment_widget.experiment_dropdown.value = (
+            most_recent_parent.experiment.permId
+        )
+        
+        display(Javascript(data="alert('Project and Experiment were auto-updated based on the sample!')"))
 
         # 4. Better logging: Actually log *what* happened
         logger.info(
