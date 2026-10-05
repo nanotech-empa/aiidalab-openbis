@@ -17,10 +17,10 @@
                 "</div>"
             ],
             "AI Agent": [
-                "<div id='box' style='display: flex;'>",
+                "<div id='box' style='display: flex; pointer-events: none;'>",
                 "<div style='flex: 1; padding: 10px;'>",
-                "<li><a href='4_openbis_chatbot.ipynb' style='font-size: 13px;' target='_blank'>Open openBIS chatbot</a></li>",
-                "<li><a href='5_setup_chatbot.ipynb' style='font-size: 13px;' target='_blank'>Setup openBIS chatbot</a></li>",
+                "<li><a href='4_openbis_chatbot.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Open openBIS chatbot</a></li>",
+                "<li><a href='5_setup_chatbot.ipynb' style='color: gray; font-size: 13px;' target='_blank'>Setup openBIS chatbot</a></li>",
                 "</div>",
                 "</div>"
             ]
