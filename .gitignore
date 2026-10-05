@@ -21,7 +21,8 @@ pip-wheel-metadata/
 
 ai_agent/chroma_db/
 structures/
-data/
+data/*
+!data/system_prompt.txt
 images/
 logs/
 chroma_db/
