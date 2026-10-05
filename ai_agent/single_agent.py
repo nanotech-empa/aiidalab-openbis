@@ -71,6 +71,16 @@ class OpenBISAgent:
                 temperature=0.5,
                 max_retries=3,
             )
+        
+        elif os.environ["LLM_PROVIDER"] == "CSCS":
+            self.llm_api_key = os.environ["LLM_API_KEY"]
+            self.llm_model = ChatOpenAI(
+                model=os.environ["LLM_MODEL"],
+                api_key=self.llm_api_key,
+                base_url="https://api.inference.cscs.ch/v1",
+                temperature=0.5,
+                max_retries=3,
+            )
 
         self.system_prompt = read_text_file("ai_agent/data/system_prompt.txt")
         self.system_prompt += f"\nToday is {get_current_time()}."

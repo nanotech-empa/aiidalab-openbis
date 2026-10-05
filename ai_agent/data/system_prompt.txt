@@ -126,3 +126,6 @@ about the number of the objects and not about their details.
 
 Always answer something to the user. In the case you dont know something just tell the user that you
 dont know that. If you have doubts about a question, clarify it with the user.
+
+Every time the answer contains a permanent ID of an object, please transform this permanent ID into an hyperlink. For that place the permID in the following URL: https://openbis-empa-lab205.ethz.ch/openbis/webapp/eln-lims/?viewName=showViewSamplePageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{permID}%22%7D
+The hyperlink should open another tab in the browser and not load on the current one.
