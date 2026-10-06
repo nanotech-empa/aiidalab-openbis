@@ -4,6 +4,7 @@ Provides cached querying, robust error handling, and generates clickable hyperli
 to the official openBIS ELN-LIMS instance for all retrieved permIDs.
 """
 
+import json
 import re
 import urllib.parse
 from functools import lru_cache
@@ -35,25 +36,65 @@ def get_eln_url() -> str:
     return _ELN_URL or ""
 
 
-def generate_openbis_url(permid: str, entity_type: str = "SAMPLE") -> str:
-    """Generate a direct clickable openBIS ELN-LIMS URL for a given permId."""
+def generate_openbis_url(permid: str, entity_type: str = "SAMPLE", identifier: str = "") -> str:
+    """Generate a direct clickable openBIS ELN-LIMS URL for a given entity."""
     base = get_eln_url()
     if not base or not permid:
         return ""
-    encoded_id = urllib.parse.quote(f'{{"permIdOrIdentifier":"{permid}"}}')
     entity_upper = entity_type.upper()
+
     if entity_upper in ["EXPERIMENT", "COLLECTION"]:
-        return f"{base}?viewName=showViewExperimentPageFromPermId&viewData={encoded_id}"
+        ident_val = identifier
+        if not ident_val:
+            try:
+                s = get_session()
+                if s:
+                    exp = s.get_experiment(permid)
+                    if exp:
+                        ident_val = exp.identifier
+            except Exception:
+                pass
+        if not ident_val:
+            ident_val = permid
+        menu_id = urllib.parse.quote(json.dumps({"type": "EXPERIMENT", "id": permid}, separators=(',', ':')))
+        view_data = urllib.parse.quote(json.dumps([ident_val, False], separators=(',', ':')))
+        return f"{base}?menuUniqueId={menu_id}&viewName=showExperimentPageFromIdentifier&viewData={view_data}"
+
+    elif entity_upper == "PROJECT":
+        ident_val = identifier
+        if not ident_val:
+            try:
+                s = get_session()
+                if s:
+                    proj = s.get_project(permid)
+                    if proj:
+                        ident_val = proj.identifier
+            except Exception:
+                pass
+        if not ident_val:
+            ident_val = permid
+        menu_id = urllib.parse.quote(json.dumps({"type": "PROJECT", "id": permid}, separators=(',', ':')))
+        view_data = urllib.parse.quote(json.dumps([ident_val, False], separators=(',', ':')))
+        return f"{base}?menuUniqueId={menu_id}&viewName=showProjectPageFromIdentifier&viewData={view_data}"
+
+    elif entity_upper == "SPACE":
+        ident_val = identifier if identifier else permid
+        view_data = urllib.parse.quote(json.dumps([ident_val, False], separators=(',', ':')))
+        return f"{base}?viewName=showSpacePageFromIdentifier&viewData={view_data}"
+
     elif entity_upper in ["DATASET", "DATA_SET"]:
+        encoded_id = urllib.parse.quote(f'{{"permIdOrIdentifier":"{permid}"}}')
         return f"{base}?viewName=showViewDataSetPageFromPermId&viewData={encoded_id}"
+
     else:
+        encoded_id = urllib.parse.quote(f'{{"permIdOrIdentifier":"{permid}"}}')
         return f"{base}?viewName=showViewSamplePageFromPermId&viewData={encoded_id}"
 
 
-def format_link(label: str, permid: str, entity_type: str = "SAMPLE") -> str:
+def format_link(label: str, permid: str, entity_type: str = "SAMPLE", identifier: str = "") -> str:
     """Format an entity label and permId into a single clean markdown link."""
-    url = generate_openbis_url(permid, entity_type)
-    display_label = label if label and label.strip() else permid
+    url = generate_openbis_url(permid, entity_type, identifier=identifier)
+    display_label = label if label and label.strip() else (identifier or permid)
     if url:
         if display_label != permid:
             return f"[{display_label} ({permid})]({url})"
@@ -637,12 +678,240 @@ def get_tools_in_room(room_query: str) -> Dict[str, Any]:
     }
 
 
+def get_current_user() -> Dict[str, Any]:
+    """Retrieve details of the currently authenticated openBIS user and home space."""
+    s = get_session()
+    if not s:
+        return {"error": "openBIS session is not connected."}
+
+    username = ""
+    home_space = ""
+    email = ""
+    first_name = ""
+    last_name = ""
+    reg_date = ""
+
+    try:
+        resp = s._post_request(s.as_v3, {"method": "getSessionInformation", "params": [s.token]})
+        if resp:
+            username = resp.get("userName") or ""
+            home_space = resp.get("homeGroupCode") or ""
+            person = resp.get("person") or {}
+            email = person.get("email") or ""
+            first_name = person.get("firstName") or ""
+            last_name = person.get("lastName") or ""
+            if person.get("registrationDate"):
+                import datetime
+                reg_date = datetime.datetime.fromtimestamp(person["registrationDate"] / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        print(f"Error querying session information: {e}")
+
+    # Fallback from token if username missing
+    if not username and s.token and s.token.startswith("$pat-"):
+        parts = s.token.split("-")
+        if len(parts) > 1:
+            username = parts[1]
+
+    if not home_space and username:
+        home_space = f"LAB205_{username.upper()}"
+
+    return {
+        "username": username,
+        "home_space": home_space,
+        "email": email,
+        "first_name": first_name,
+        "last_name": last_name,
+        "registration_date": reg_date,
+    }
+
+
+def find_experiments(query: str) -> List[Any]:
+    """Find experiments matching query by code, identifier, permId, or name."""
+    s = get_session()
+    if not s or not query:
+        return []
+    q = query.strip().lower()
+    q_norm = q.replace(" ", "_").replace("-", "_")
+    try:
+        exps = s.get_experiments()
+    except Exception:
+        return []
+
+    exact_matches = []
+    fuzzy_matches = []
+    for e in exps:
+        p_name = str(getattr(e.props, "name", "") or "").lower()
+        e_id = e.identifier.lower()
+        e_code = e.code.lower()
+        e_pid = e.permId.lower()
+        if q == e_pid or q == e_id or q == e_code or q_norm == e_code or (p_name and (q == p_name or q_norm == p_name)):
+            exact_matches.append(e)
+        elif q in e_id or q_norm in e_id or (p_name and (q in p_name or q_norm in p_name)) or (len(q) > 3 and q in e_pid):
+            fuzzy_matches.append(e)
+
+    candidates = exact_matches if exact_matches else fuzzy_matches
+    if len(candidates) > 1:
+        user_info = get_current_user()
+        home_sp = (user_info.get("home_space") or "").lower()
+        if home_sp:
+            home_matches = [c for c in candidates if home_sp in c.identifier.lower()]
+            if home_matches:
+                return home_matches
+    return candidates
+
+
+def find_projects(query: str) -> List[Any]:
+    """Find projects matching query by code, identifier, permId, or description."""
+    s = get_session()
+    if not s or not query:
+        return []
+    q = query.strip().lower()
+    q_norm = q.replace(" ", "_").replace("-", "_")
+    try:
+        projs = s.get_projects()
+    except Exception:
+        return []
+
+    exact_matches = []
+    fuzzy_matches = []
+    for p in projs:
+        p_id = p.identifier.lower()
+        p_code = p.code.lower()
+        p_pid = p.permId.lower()
+        p_desc = str(getattr(p, "description", "") or "").lower()
+        if q == p_pid or q == p_id or q == p_code or q_norm == p_code:
+            exact_matches.append(p)
+        elif q in p_id or q_norm in p_id or q in p_code or q_norm in p_code or (q and q in p_desc):
+            fuzzy_matches.append(p)
+
+    candidates = exact_matches if exact_matches else fuzzy_matches
+    if len(candidates) > 1:
+        user_info = get_current_user()
+        home_sp = (user_info.get("home_space") or "").lower()
+        if home_sp:
+            home_matches = [c for c in candidates if home_sp in c.identifier.lower()]
+            if home_matches:
+                return home_matches
+    return candidates
+
+
 def get_sample_preparation_lineage(query: str) -> List[Dict[str, Any]]:
-    """Trace sample preparations, process steps, and actions matching a sample, crystal, or substance."""
+    """Trace sample preparations, process steps, and actions matching an experiment, project, sample, crystal, or substance."""
     s = get_session()
     if not s:
         return [{"error": "openBIS session is not connected."}]
 
+    # 1. Check if query matches an experiment
+    matched_exps = find_experiments(query)
+    if matched_exps:
+        results = []
+        for exp in matched_exps[:3]:
+            try:
+                samples = s.get_samples(experiment=exp.identifier)
+                for sm in samples:
+                    if str(sm.type.code).upper() == "PREPARATION":
+                        p_name = getattr(sm.props, "name", None) or sm.permId
+                        steps_info = []
+                        try:
+                            children = sm.get_children()
+                            for c_idx in range(len(children)):
+                                st = children[c_idx]
+                                st_name = getattr(st.props, "name", None) or st.permId
+                                actions_list = []
+                                act_ids = getattr(st.props, "actions", []) or []
+                                for act_id in act_ids:
+                                    act_obj = get_object(act_id)
+                                    if act_obj:
+                                        act_props = act_obj.props.all()
+                                        actions_list.append({
+                                            "permId": act_obj.permId,
+                                            "type": str(act_obj.type.code),
+                                            "name": getattr(act_obj.props, "name", None) or act_obj.permId,
+                                            "duration": act_props.get("duration"),
+                                            "details": {k: v for k, v in act_props.items() if v and k not in ["name", "duration"]},
+                                            "link": format_link(getattr(act_obj.props, "name", act_obj.permId), act_obj.permId, "SAMPLE"),
+                                        })
+                                steps_info.append({
+                                    "permId": st.permId,
+                                    "name": str(st_name),
+                                    "actions": actions_list,
+                                    "link": format_link(str(st_name), st.permId, "SAMPLE", identifier=st.identifier),
+                                })
+                        except Exception:
+                            pass
+                        results.append({
+                            "preparation_name": str(p_name),
+                            "permId": sm.permId,
+                            "identifier": sm.identifier,
+                            "context": f"Experiment: {getattr(exp.props, 'name', exp.code)}",
+                            "experiment_link": format_link(str(getattr(exp.props, 'name', exp.code)), exp.permId, "EXPERIMENT", identifier=exp.identifier),
+                            "steps": steps_info,
+                            "link": format_link(str(p_name), sm.permId, "SAMPLE", identifier=sm.identifier),
+                        })
+            except Exception:
+                pass
+        if results:
+            return results
+
+    # 2. Check if query matches a project
+    matched_projs = find_projects(query)
+    if matched_projs:
+        results = []
+        for prj in matched_projs[:3]:
+            try:
+                all_sm = list(s.get_samples(project=prj.identifier))
+                pr_exps = s.get_experiments(project=prj.identifier)
+                for pe_idx in range(len(pr_exps)):
+                    pe = pr_exps[pe_idx]
+                    try:
+                        all_sm.extend(list(s.get_samples(experiment=pe.identifier)))
+                    except Exception:
+                        pass
+                for sm in all_sm:
+                    if str(sm.type.code).upper() == "PREPARATION":
+                        p_name = getattr(sm.props, "name", None) or sm.permId
+                        steps_info = []
+                        try:
+                            children = sm.get_children()
+                            for c_idx in range(len(children)):
+                                st = children[c_idx]
+                                st_name = getattr(st.props, "name", None) or st.permId
+                                actions_list = []
+                                act_ids = getattr(st.props, "actions", []) or []
+                                for act_id in act_ids:
+                                    act_obj = get_object(act_id)
+                                    if act_obj:
+                                        act_props = act_obj.props.all()
+                                        actions_list.append({
+                                            "permId": act_obj.permId,
+                                            "type": str(act_obj.type.code),
+                                            "name": getattr(act_obj.props, "name", None) or act_obj.permId,
+                                            "duration": act_props.get("duration"),
+                                            "details": {k: v for k, v in act_props.items() if v and k not in ["name", "duration"]},
+                                            "link": format_link(getattr(act_obj.props, "name", act_obj.permId), act_obj.permId, "SAMPLE"),
+                                        })
+                                steps_info.append({
+                                    "permId": st.permId,
+                                    "name": str(st_name),
+                                    "actions": actions_list,
+                                    "link": format_link(str(st_name), st.permId, "SAMPLE", identifier=st.identifier),
+                                })
+                        except Exception:
+                            pass
+                        results.append({
+                            "preparation_name": str(p_name),
+                            "permId": sm.permId,
+                            "identifier": sm.identifier,
+                            "context": f"Project: {prj.code}",
+                            "steps": steps_info,
+                            "link": format_link(str(p_name), sm.permId, "SAMPLE", identifier=sm.identifier),
+                        })
+            except Exception:
+                pass
+        if results:
+            return results
+
+    # 3. Fallback: Search all PREPARATION objects in openBIS by name, description, or children
     preps = s.get_objects(type="PREPARATION", props=["name", "description"])
     matched_preps = []
     q = query.lower()
@@ -712,8 +981,90 @@ def get_sample_preparation_lineage(query: str) -> List[Dict[str, Any]]:
     return results
 
 
-def get_experiments_by_project(project_query: str = "") -> Dict[str, Any]:
-    """Retrieve all experiments and collections within a specified project."""
+def list_spaces(query: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+    """List or search spaces in openBIS."""
+    s = get_session()
+    if not s:
+        return [{"error": "openBIS session is not connected."}]
+
+    try:
+        spaces = s.get_spaces()
+    except Exception as e:
+        return [{"error": f"Failed to retrieve spaces: {str(e)}"}]
+
+    q = query.strip().lower()
+    results = []
+    for sp in spaces:
+        code = str(sp.code)
+        desc = str(getattr(sp, "description", "") or "")
+        if not q or q in code.lower() or q in desc.lower():
+            results.append({
+                "code": code,
+                "description": desc,
+                "registrator": str(getattr(sp, "registrator", "") or ""),
+                "registration_date": str(getattr(sp, "registrationDate", "") or ""),
+                "link": format_link(code, code, "SPACE", identifier=f"/{code}"),
+            })
+            if len(results) >= limit:
+                break
+    return results
+
+
+def list_projects(space: str = "", query: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+    """List or search projects in openBIS, optionally filtered by space."""
+    s = get_session()
+    if not s:
+        return [{"error": "openBIS session is not connected."}]
+
+    try:
+        if space:
+            sp_clean = space.strip().strip("/")
+            all_spaces = s.get_spaces()
+            matched_space = None
+            for sp in all_spaces:
+                if sp.code.lower() == sp_clean.lower() or sp_clean.lower() in sp.code.lower():
+                    matched_space = sp.code
+                    break
+            projs = s.get_projects(space=matched_space or sp_clean)
+        else:
+            projs = s.get_projects()
+    except Exception as e:
+        return [{"error": f"Failed to retrieve projects: {str(e)}"}]
+
+    q = query.strip().lower()
+    q_norm = q.replace(" ", "_").replace("-", "_")
+    results = []
+    for p in projs:
+        p_id = str(p.identifier)
+        p_code = str(p.code)
+        p_desc = str(getattr(p, "description", "") or "")
+        matches = True
+        if q:
+            matches = (
+                q in p_id.lower() or q_norm in p_id.lower() or
+                q in p_code.lower() or q_norm in p_code.lower() or
+                q in p_desc.lower()
+            )
+        if matches:
+            sp_code = p_id.split("/")[1] if p_id.startswith("/") and len(p_id.split("/")) > 1 else ""
+            results.append({
+                "permId": p.permId,
+                "identifier": p_id,
+                "code": p_code,
+                "space": sp_code,
+                "description": p_desc,
+                "registrator": str(getattr(p, "registrator", "") or ""),
+                "registration_date": str(getattr(p, "registrationDate", "") or ""),
+                "leader": str(getattr(p, "leader", "") or ""),
+                "link": format_link(p_code, p.permId, "PROJECT", identifier=p_id),
+            })
+            if len(results) >= limit:
+                break
+    return results
+
+
+def get_experiments_by_project(project_query: str = "", include_collections: bool = False) -> Dict[str, Any]:
+    """Retrieve all experiments within a specified project (excludes collections by default)."""
     s = get_session()
     if not s:
         return {"error": "openBIS session is not connected."}
@@ -722,33 +1073,74 @@ def get_experiments_by_project(project_query: str = "") -> Dict[str, Any]:
     matched_proj = None
 
     if project_query:
-        q = project_query.lower()
+        q = project_query.strip().lower()
+        q_norm = q.replace(" ", "_").replace("-", "_")
+        candidates = []
         for p in projects:
-            if q in p.identifier.lower() or q in p.code.lower() or q in p.permId.lower():
-                matched_proj = p
-                break
+            p_id = p.identifier.lower()
+            p_code = p.code.lower()
+            p_desc = (p.description or "").lower() if hasattr(p, "description") and p.description else ""
+            if q == p_code or q_norm == p_code or q in p_id or q_norm in p_id or (q and q in p_desc):
+                candidates.append(p)
+
+        if len(candidates) == 1:
+            matched_proj = candidates[0]
+        elif len(candidates) > 1:
+            # Disambiguate: prioritize current user's home space first
+            user_info = get_current_user()
+            home_sp = (user_info.get("home_space") or "").lower()
+            if home_sp:
+                for c in candidates:
+                    if home_sp in c.identifier.lower():
+                        matched_proj = c
+                        break
+            # Next prioritize candidate that actually contains experiments
+            if not matched_proj:
+                for c in candidates:
+                    try:
+                        if len(s.get_experiments(project=c.identifier)) > 0:
+                            matched_proj = c
+                            break
+                    except Exception:
+                        pass
+            if not matched_proj:
+                matched_proj = candidates[0]
     elif len(projects) > 0:
         matched_proj = projects[0]
 
     if not matched_proj:
+        # Convert to list safely to avoid pybis Things slice crash
+        proj_identifiers = projects.df["identifier"].tolist() if hasattr(projects, "df") else [p.identifier for p in projects]
         return {
             "error": f"Project matching '{project_query}' not found.",
-            "available_projects": [p.identifier for p in projects[:15]]
+            "available_projects": proj_identifiers[:15]
         }
 
     exps = s.get_experiments(project=matched_proj.identifier)
     exp_list = []
+    col_list = []
     for i in range(len(exps)):
         e = exps[i]
+        e_type = str(e.type.code if hasattr(e.type, "code") else e.type)
+        is_collection = "COLLECTION" in e_type.upper()
+
         e_name = getattr(e.props, "name", None) if hasattr(e, "props") else None
         label = e_name or e.identifier or e.code
-        exp_list.append({
+        item = {
             "permId": e.permId,
             "identifier": e.identifier,
-            "type": str(e.type.code),
+            "type": e_type,
             "name": str(label),
-            "link": format_link(str(label), e.permId, "EXPERIMENT"),
-        })
+            "registrator": str(getattr(e, "registrator", "") or ""),
+            "registration_date": str(getattr(e, "registrationDate", "") or ""),
+            "link": format_link(str(label), e.permId, "COLLECTION" if is_collection else "EXPERIMENT", identifier=e.identifier),
+        }
+        if is_collection:
+            col_list.append(item)
+            if include_collections:
+                exp_list.append(item)
+        else:
+            exp_list.append(item)
 
     return {
         "project_identifier": matched_proj.identifier,
@@ -756,15 +1148,276 @@ def get_experiments_by_project(project_query: str = "") -> Dict[str, Any]:
         "project_permId": matched_proj.permId,
         "total_experiments": len(exp_list),
         "experiments": exp_list,
+        "collections_count": len(col_list),
+    }
+
+
+def get_experiment_details(experiment_query: str) -> Dict[str, Any]:
+    """Retrieve full details of an experiment, including all preparations, process steps, measurement sessions, and datasets."""
+    s = get_session()
+    if not s:
+        return {"error": "openBIS session is not connected."}
+
+    candidates = find_experiments(experiment_query)
+    if not candidates:
+        return {
+            "error": f"Experiment matching '{experiment_query}' not found.",
+            "suggestion": "Check the experiment name, code, or permId."
+        }
+
+    exp = candidates[0]
+    e_name = getattr(exp.props, "name", None) or exp.identifier
+    e_desc = getattr(exp.props, "description", None) or ""
+
+    # Fetch samples inside the experiment
+    try:
+        samples = s.get_samples(experiment=exp.identifier)
+    except Exception:
+        samples = []
+
+    preps_info = []
+    meas_info = []
+    steps_info = []
+    other_samples = []
+
+    for i in range(len(samples)):
+        sm = samples[i]
+        stype = str(sm.type.code).upper()
+        s_name = getattr(sm.props, "name", None) or sm.identifier
+        item = {
+            "permId": sm.permId,
+            "identifier": sm.identifier,
+            "name": str(s_name),
+            "type": stype,
+            "registrator": str(getattr(sm, "registrator", "") or ""),
+            "registration_date": str(getattr(sm, "registrationDate", "") or ""),
+            "link": format_link(str(s_name), sm.permId, "SAMPLE", identifier=sm.identifier),
+        }
+
+        if stype == "PREPARATION":
+            child_steps = []
+            try:
+                children = sm.get_children()
+                for c_idx in range(len(children)):
+                    c = children[c_idx]
+                    c_name = getattr(c.props, "name", None) or c.identifier
+                    actions_list = []
+                    act_ids = getattr(c.props, "actions", []) or []
+                    for act_id in act_ids:
+                        act_obj = get_object(act_id)
+                        if act_obj:
+                            act_props = act_obj.props.all()
+                            actions_list.append({
+                                "permId": act_obj.permId,
+                                "type": str(act_obj.type.code),
+                                "name": getattr(act_obj.props, "name", None) or act_obj.permId,
+                                "duration": act_props.get("duration"),
+                                "details": {k: v for k, v in act_props.items() if v and k not in ["name", "duration"]},
+                                "link": format_link(getattr(act_obj.props, "name", act_obj.permId), act_obj.permId, "SAMPLE"),
+                            })
+                    child_steps.append({
+                        "permId": c.permId,
+                        "name": str(c_name),
+                        "actions": actions_list,
+                        "link": format_link(str(c_name), c.permId, "SAMPLE", identifier=c.identifier),
+                    })
+            except Exception:
+                pass
+            item["steps"] = child_steps
+            preps_info.append(item)
+
+        elif stype == "MEASUREMENT_SESSION":
+            target_samples = []
+            try:
+                parents = sm.get_parents()
+                for p_idx in range(len(parents)):
+                    p = parents[p_idx]
+                    p_name = getattr(p.props, "name", None) or p.identifier
+                    target_samples.append({
+                        "name": str(p_name),
+                        "permId": p.permId,
+                        "type": str(p.type.code),
+                        "link": format_link(str(p_name), p.permId, "SAMPLE", identifier=p.identifier),
+                    })
+            except Exception:
+                pass
+            item["target_samples"] = target_samples
+            try:
+                dsets = sm.get_datasets()
+                item["total_datasets"] = len(dsets)
+                item["datasets"] = [
+                    {
+                        "permId": dsets[d_idx].permId,
+                        "type": str(dsets[d_idx].type.code),
+                        "link": format_link(f"{dsets[d_idx].type.code} ({dsets[d_idx].permId})", dsets[d_idx].permId, "DATASET"),
+                    }
+                    for d_idx in range(min(len(dsets), 10))
+                ]
+            except Exception:
+                item["total_datasets"] = 0
+                item["datasets"] = []
+            meas_info.append(item)
+
+        elif stype == "PROCESS_STEP":
+            steps_info.append(item)
+        else:
+            other_samples.append(item)
+
+    # Datasets directly attached to the experiment
+    try:
+        exp_dsets = s.get_datasets(experiment=exp.identifier)
+        total_exp_dsets = len(exp_dsets)
+        exp_dsets_sample = [
+            {
+                "permId": exp_dsets[d_idx].permId,
+                "type": str(exp_dsets[d_idx].type.code),
+                "link": format_link(f"{exp_dsets[d_idx].type.code} ({exp_dsets[d_idx].permId})", exp_dsets[d_idx].permId, "DATASET"),
+            }
+            for d_idx in range(min(len(exp_dsets), 10))
+        ]
+    except Exception:
+        total_exp_dsets = 0
+        exp_dsets_sample = []
+
+    # Project info
+    proj_id = exp.identifier.rsplit("/", 1)[0] if "/" in exp.identifier else ""
+    proj_code = proj_id.split("/")[-1] if "/" in proj_id else ""
+
+    return {
+        "experiment_name": str(e_name),
+        "permId": exp.permId,
+        "identifier": exp.identifier,
+        "code": exp.code,
+        "type": str(exp.type.code),
+        "description": e_desc,
+        "registrator": str(getattr(exp, "registrator", "") or ""),
+        "registration_date": str(getattr(exp, "registrationDate", "") or ""),
+        "project_identifier": proj_id,
+        "project_code": proj_code,
+        "project_link": format_link(proj_code, proj_code, "PROJECT", identifier=proj_id) if proj_id else "",
+        "link": format_link(str(e_name), exp.permId, "EXPERIMENT", identifier=exp.identifier),
+        "total_samples": len(samples),
+        "preparations": preps_info,
+        "measurement_sessions": meas_info,
+        "process_steps": steps_info,
+        "other_samples": other_samples,
+        "total_datasets": total_exp_dsets,
+        "datasets_sample": exp_dsets_sample,
     }
 
 
 def get_measurements_by_sample(sample_query: str) -> List[Dict[str, Any]]:
-    """Retrieve measurement sessions and datasets associated with a sample."""
+    """Retrieve measurement sessions and datasets associated with an experiment, project, or sample."""
     s = get_session()
     if not s:
         return [{"error": "openBIS session is not connected."}]
 
+    # 1. Check if sample_query matches an experiment
+    matched_exps = find_experiments(sample_query)
+    if matched_exps:
+        results = []
+        for exp in matched_exps[:3]:
+            try:
+                samples = s.get_samples(experiment=exp.identifier)
+                for sm_idx in range(len(samples)):
+                    sm = samples[sm_idx]
+                    if str(sm.type.code).upper() == "MEASUREMENT_SESSION":
+                        ms_name = getattr(sm.props, "name", None) or sm.permId
+                        sample_names = []
+                        try:
+                            parents = sm.get_parents()
+                            for p_idx in range(len(parents)):
+                                p = parents[p_idx]
+                                p_name = getattr(p.props, "name", None) or p.permId
+                                sample_names.append(str(p_name))
+                        except Exception:
+                            pass
+                        datasets_info = []
+                        try:
+                            dsets = sm.get_datasets()
+                            for d_idx in range(min(len(dsets), 3)):
+                                ds = dsets[d_idx]
+                                ds_label = f"{ds.type.code} ({ds.permId})"
+                                datasets_info.append({
+                                    "permId": ds.permId,
+                                    "type": str(ds.type.code),
+                                    "link": format_link(ds_label, ds.permId, "DATASET"),
+                                })
+                            tot_dsets = len(dsets)
+                        except Exception:
+                            tot_dsets = 0
+
+                        results.append({
+                            "session_name": str(ms_name),
+                            "permId": sm.permId,
+                            "identifier": sm.identifier,
+                            "context": f"Experiment: {getattr(exp.props, 'name', exp.code)}",
+                            "experiment_link": format_link(str(getattr(exp.props, 'name', exp.code)), exp.permId, "EXPERIMENT", identifier=exp.identifier),
+                            "samples": sample_names,
+                            "total_datasets": tot_dsets,
+                            "datasets": datasets_info,
+                            "link": format_link(str(ms_name), sm.permId, "SAMPLE", identifier=sm.identifier),
+                        })
+            except Exception:
+                pass
+        if results:
+            return results
+
+    # 2. Check if sample_query matches a project
+    matched_projs = find_projects(sample_query)
+    if matched_projs:
+        results = []
+        for prj in matched_projs[:3]:
+            try:
+                all_sm = list(s.get_samples(project=prj.identifier))
+                pr_exps = s.get_experiments(project=prj.identifier)
+                for pe_idx in range(len(pr_exps)):
+                    pe = pr_exps[pe_idx]
+                    try:
+                        all_sm.extend(list(s.get_samples(experiment=pe.identifier)))
+                    except Exception:
+                        pass
+                for sm in all_sm:
+                    if str(sm.type.code).upper() == "MEASUREMENT_SESSION":
+                        ms_name = getattr(sm.props, "name", None) or sm.permId
+                        sample_names = []
+                        try:
+                            parents = sm.get_parents()
+                            for p_idx in range(len(parents)):
+                                p = parents[p_idx]
+                                sample_names.append(str(getattr(p.props, "name", None) or p.permId))
+                        except Exception:
+                            pass
+                        datasets_info = []
+                        try:
+                            dsets = sm.get_datasets()
+                            for d_idx in range(min(len(dsets), 3)):
+                                ds = dsets[d_idx]
+                                datasets_info.append({
+                                    "permId": ds.permId,
+                                    "type": str(ds.type.code),
+                                    "link": format_link(f"{ds.type.code} ({ds.permId})", ds.permId, "DATASET"),
+                                })
+                            tot_dsets = len(dsets)
+                        except Exception:
+                            tot_dsets = 0
+
+                        results.append({
+                            "session_name": str(ms_name),
+                            "permId": sm.permId,
+                            "identifier": sm.identifier,
+                            "context": f"Project: {prj.code}",
+                            "samples": sample_names,
+                            "total_datasets": tot_dsets,
+                            "datasets": datasets_info,
+                            "link": format_link(str(ms_name), sm.permId, "SAMPLE", identifier=sm.identifier),
+                        })
+            except Exception:
+                pass
+        if results:
+            return results
+
+    # 3. Fallback: Search all MEASUREMENT_SESSION objects in openBIS by session name or parent sample
     ms_sessions = s.get_objects(type="MEASUREMENT_SESSION")
     matched = []
     q = sample_query.lower()
@@ -792,7 +1445,7 @@ def get_measurements_by_sample(sample_query: str) -> List[Dict[str, Any]]:
             try:
                 dsets = ms.get_datasets()
                 if dsets:
-                    for d_idx in range(len(dsets)):
+                    for d_idx in range(min(len(dsets), 25)):
                         ds = dsets[d_idx]
                         ds_label = f"{ds.type.code} ({ds.permId})"
                         datasets_info.append({

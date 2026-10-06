@@ -69,6 +69,21 @@ def load_system_prompt() -> str:
 
     prompt_text += f"\n\nCURRENT DATE & TIME: {get_current_time()}."
 
+    # Dynamically inject the active openBIS user and home space if available
+    try:
+        from src.ai_agent import openbis_client
+        user_info = openbis_client.get_current_user()
+        if user_info and user_info.get("username"):
+            prompt_text += (
+                f"\n\n### Current Active User & Session Context:\n"
+                f"- **Logged-in Username**: `{user_info['username']}`\n"
+                f"- **Home Space**: `{user_info['home_space']}`\n"
+                f"When the user asks 'who am I?', 'what is my username?', 'my projects', or 'my space', "
+                f"refer to this user and their home space directly.\n"
+            )
+    except Exception as e:
+        print(f"Could not load user context: {e}")
+
     # Always dynamically append the latest openBIS schema documentation from the markdown file
     schema_doc = load_schema_documentation()
     if schema_doc:
@@ -169,6 +184,9 @@ class OpenBISAgent:
             model=model,
             system_prompt=self.system_prompt,
             tools=[
+                tools.get_current_user_info,
+                tools.list_spaces,
+                tools.list_projects,
                 tools.get_inventory_summary,
                 tools.search_inventory,
                 tools.get_sample_details,
@@ -176,6 +194,7 @@ class OpenBISAgent:
                 tools.get_tools_in_room,
                 tools.get_sample_preparation,
                 tools.get_experiments_in_project,
+                tools.get_experiment_details,
                 tools.get_sample_measurements,
                 tools.get_publications,
                 tools.get_process_templates,

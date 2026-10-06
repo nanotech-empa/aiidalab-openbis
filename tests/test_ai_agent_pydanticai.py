@@ -11,8 +11,16 @@ def test_openbis_url_generation():
     assert pid in url
     assert "showViewSamplePageFromPermId" in url
 
-    exp_url = openbis_client.generate_openbis_url("20260319141141722-6358", "EXPERIMENT")
-    assert "showViewExperimentPageFromPermId" in exp_url
+    exp_url = openbis_client.generate_openbis_url("20260319141141722-6358", "EXPERIMENT", identifier="/DEFAULT/DEFAULT/EXP1")
+    assert "showExperimentPageFromIdentifier" in exp_url
+    assert "menuUniqueId" in exp_url
+
+    proj_url = openbis_client.generate_openbis_url("20220816104445380-1", "PROJECT", identifier="/DEFAULT/DEFAULT")
+    assert "showProjectPageFromIdentifier" in proj_url
+    assert "menuUniqueId" in proj_url
+
+    sp_url = openbis_client.generate_openbis_url("DEFAULT", "SPACE")
+    assert "showSpacePageFromIdentifier" in sp_url
 
     ds_url = openbis_client.generate_openbis_url("20260402125234156-6478", "DATASET")
     assert "showViewDataSetPageFromPermId" in ds_url
@@ -112,4 +120,110 @@ def test_registration_metadata_in_sample_details():
     assert "registration_date" in details
     assert details["registrator"] != ""
     assert "2025" in details["registration_date"]
+
+
+def test_get_current_user_and_tool():
+    """Verify that current user info is retrieved correctly from session."""
+    user = openbis_client.get_current_user()
+    assert "username" in user
+    assert user["username"] != ""
+    assert "home_space" in user
+    assert user["home_space"] != ""
+
+    from unittest.mock import MagicMock
+    ctx = MagicMock()
+    user_str = tools.get_current_user_info(ctx)
+    assert user["username"] in user_str
+    assert user["home_space"] in user_str
+
+
+def test_list_spaces_and_projects_tools():
+    """Verify that spaces and projects can be listed and searched."""
+    spaces = openbis_client.list_spaces()
+    assert len(spaces) > 0
+    assert any("LAB205" in s["code"] for s in spaces)
+
+    from unittest.mock import MagicMock
+    ctx = MagicMock()
+    spaces_str = tools.list_spaces(ctx, "LAB205")
+    assert "OpenBIS Spaces" in spaces_str
+    assert "LAB205" in spaces_str
+
+    projs = openbis_client.list_projects()
+    assert len(projs) > 0
+
+    projs_str = tools.list_projects(ctx, query="TEST_PROJECT")
+    assert "TEST_PROJECT" in projs_str
+
+
+def test_get_experiments_by_project_filtering_and_safe_slicing():
+    """Verify that get_experiments_by_project filters collections and does not crash on slicing."""
+    # 1. Non-existent project search must safely report error without 'slice' object has no attribute 'upper'
+    res_not_found = openbis_client.get_experiments_by_project("NonExistentProject12345")
+    assert "error" in res_not_found
+    assert "available_projects" in res_not_found
+    assert isinstance(res_not_found["available_projects"], list)
+
+    # 2. Query 'Test Project' (with space) should match TEST_PROJECT
+    res = openbis_client.get_experiments_by_project("Test Project")
+    assert "error" not in res
+    assert "TEST_PROJECT" in res["project_identifier"]
+    assert res["total_experiments"] > 0
+    # Must NOT contain collections by default
+    for exp in res["experiments"]:
+        assert "COLLECTION" not in exp["type"].upper()
+
+    assert res["collections_count"] > 0
+
+    # 3. Via tool
+    from unittest.mock import MagicMock
+    ctx = MagicMock()
+    tool_output = tools.get_experiments_in_project(ctx, "Test Project")
+    assert "TEST_PROJECT" in tool_output
+    assert "Collections in Project" in tool_output
+
+
+def test_get_experiment_details_and_tool():
+    """Verify get_experiment_details extracts preparations, measurement sessions, and datasets."""
+    res = openbis_client.get_experiment_details("Tiptime3_012026")
+    assert "error" not in res
+    assert res["code"] == "EXPERIMENT_7"
+    assert "SPE_HBN" in res["identifier"]
+    assert len(res["preparations"]) == 3
+    assert len(res["measurement_sessions"]) == 11
+    assert res["total_datasets"] > 0
+
+    from unittest.mock import MagicMock
+    ctx = MagicMock()
+    out = tools.get_experiment_details(ctx, "Tiptime3_012026")
+    assert "Tiptime3_012026" in out
+    assert "Preparations (3)" in out
+    assert "Measurement Sessions (11)" in out
+    assert "Total Datasets Attached" in out
+
+
+def test_preparations_and_measurements_by_experiment_and_project():
+    """Verify preparations and measurements can be found via experiment or project queries."""
+    from unittest.mock import MagicMock
+    ctx = MagicMock()
+
+    # Query preparations with experiment name
+    preps_exp = tools.get_sample_preparation(ctx, "Tiptime3_012026")
+    assert "PREP_20260108125337_Ag111" in preps_exp or "Preparation" in preps_exp
+    assert "Step" in preps_exp
+
+    # Query measurements with experiment name
+    meas_exp = tools.get_sample_measurements(ctx, "Tiptime3_012026")
+    assert "Measurement Session on Sample" in meas_exp
+    assert "Datasets Count" in meas_exp
+
+    # Query preparations with project name
+    preps_proj = tools.get_sample_preparation(ctx, "SPE_HBN")
+    assert "Preparation" in preps_proj
+
+    # Query measurements with project name
+    meas_proj = tools.get_sample_measurements(ctx, "SPE_HBN")
+    assert "Measurement Session" in meas_proj
+
+
 

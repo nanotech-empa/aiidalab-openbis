@@ -13,6 +13,94 @@ from pydantic_ai import RunContext
 from . import openbis_client
 
 
+def get_current_user_info(ctx: RunContext[None]) -> str:
+    """Get information about the currently logged-in openBIS user, their username, and home space.
+
+    ALWAYS call this tool when the user asks 'who am I?', 'what is my username?',
+    'which account am I using?', or asks about their user profile or personal space.
+    """
+    u = openbis_client.get_current_user()
+    if "error" in u:
+        return f"Could not retrieve user info: {u['error']}"
+
+    out = [
+        "### Current openBIS User Information:",
+        f"- **Username**: `{u.get('username')}`",
+        f"- **Home Space**: `{u.get('home_space')}`",
+    ]
+    if u.get("email"):
+        out.append(f"- **Email**: {u.get('email')}")
+    if u.get("first_name") or u.get("last_name"):
+        out.append(f"- **Name**: {u.get('first_name')} {u.get('last_name')}".strip())
+    if u.get("registration_date"):
+        out.append(f"- **User Registration Date**: {u.get('registration_date')}")
+    return "\n".join(out)
+
+
+def list_spaces(ctx: RunContext[None], query: str = "") -> str:
+    """List or search spaces available in the openBIS instance.
+
+    Args:
+        query: Optional filter string to search space codes or descriptions (e.g. 'LAB205', 'FABIO', 'STORAGE').
+               Leave blank to list available spaces.
+
+    Returns:
+        Markdown table of spaces with space codes, descriptions, registrator, and openBIS links.
+    """
+    spaces = openbis_client.list_spaces(query=query)
+    if not spaces:
+        return f"No spaces found matching '{query}'." if query else "No spaces found."
+    if "error" in spaces[0]:
+        return spaces[0]["error"]
+
+    out = [
+        f"### OpenBIS Spaces ({len(spaces)} shown):",
+        "",
+        "| Space | Description | Registrator |",
+        "| :--- | :--- | :--- |",
+    ]
+    for sp in spaces:
+        desc = sp.get("description") or "-"
+        out.append(f"| {sp.get('link')} | {desc} | {sp.get('registrator') or '-'} |")
+    return "\n".join(out)
+
+
+def list_projects(ctx: RunContext[None], space: str = "", query: str = "") -> str:
+    """List or search projects in openBIS, optionally filtered by space or keyword.
+
+    ALWAYS call this tool when the user asks 'what projects are available?', 'list projects',
+    or searches for projects within a specific space (e.g. the user's home space or 'DEFAULT').
+
+    Args:
+        space: Optional space code to filter projects (e.g. 'LAB205_FABIO.LOPES_AT_EMPA.CH', 'DEFAULT').
+        query: Optional search keyword to filter project code, identifier, or description (e.g. 'TEST_PROJECT').
+
+    Returns:
+        Markdown table of projects with identifiers, codes, spaces, descriptions, and openBIS links.
+    """
+    projects = openbis_client.list_projects(space=space, query=query)
+    if not projects:
+        msg = "No projects found"
+        if space:
+            msg += f" in space '{space}'"
+        if query:
+            msg += f" matching '{query}'"
+        return msg + "."
+    if "error" in projects[0]:
+        return projects[0]["error"]
+
+    out = [
+        f"### OpenBIS Projects ({len(projects)} shown):",
+        "",
+        "| Project Code | Space | Identifier | Description |",
+        "| :--- | :--- | :--- | :--- |",
+    ]
+    for p in projects:
+        desc = p.get("description") or "-"
+        out.append(f"| {p.get('link')} | `{p.get('space')}` | `{p.get('identifier')}` | {desc} |")
+    return "\n".join(out)
+
+
 def get_inventory_summary(ctx: RunContext[None]) -> str:
     """Get the true total counts and statistics of all items, samples, and workflows registered in openBIS.
 
@@ -246,21 +334,22 @@ def get_tools_in_room(ctx: RunContext[None], room_name: str) -> str:
 
 
 def get_sample_preparation(ctx: RunContext[None], query: str) -> str:
-    """Trace preparation history, process steps, and actions performed on or using a sample/crystal/substance.
+    """Trace preparation history, process steps, and actions performed within an experiment, project, or on a sample/crystal/substance.
 
     Args:
-        query: Sample, crystal, or substance name/identifier (e.g. 'Au111_Bubble', 'Ag110_VT', '704a').
+        query: Experiment name (e.g. 'Tiptime3_012026'), project name (e.g. 'SPE_HBN'), or sample/crystal/substance name/identifier (e.g. 'Au111_Bubble', 'Ag110_VT', '704a').
 
     Returns:
-        Sequence of preparation process steps and actions (deposition, annealing, sputtering) with parameters.
+        Sequence of preparation process steps and actions (deposition, annealing, sputtering) with parameters and links.
     """
     preps = openbis_client.get_sample_preparation_lineage(query)
     if not preps or "error" in preps[0]:
         return f"No preparation history found matching '{query}'."
 
-    out = [f"### Sample Preparation Lineage for '{query}':"]
+    out = [f"### Sample Preparation History for '{query}':"]
     for p in preps:
-        out.append(f"\n#### Preparation: {p.get('link')}")
+        ctx_info = f" *({p.get('context')})*" if p.get("context") else ""
+        out.append(f"\n#### Preparation: {p.get('link')}{ctx_info}")
         steps = p.get("steps", [])
         if not steps:
             out.append("*(No registered process steps)*")
@@ -276,58 +365,146 @@ def get_sample_preparation(ctx: RunContext[None], query: str) -> str:
     return "\n".join(out)
 
 
-def get_experiments_in_project(ctx: RunContext[None], project_name: str = "") -> str:
-    """List experiments and collections performed within a specified openBIS project.
+def get_experiment_details(ctx: RunContext[None], experiment_query: str) -> str:
+    """Retrieve full details of a specific experiment: metadata, preparations, process steps, measurement sessions, and datasets.
 
     Args:
-        project_name: Project identifier or code (e.g. '/DEFAULT/DEFAULT' or 'DEFAULT').
-                      Leave blank to view the default project.
+        experiment_query: Experiment name (e.g. 'Tiptime3_012026'), code (e.g. 'EXPERIMENT_7'), identifier (e.g. '/LAB205_ANTONELLA.TREGLIA_AT_EMPA.CH/SPE_HBN/EXPERIMENT_7'), or permId.
 
     Returns:
-        List of experiments and collections with their types and openBIS links.
+        Comprehensive breakdown of the experiment contents including all preparations, steps, measurement sessions, and datasets.
     """
-    res = openbis_client.get_experiments_by_project(project_name)
+    details = openbis_client.get_experiment_details(experiment_query)
+    if "error" in details:
+        err = details["error"]
+        if "suggestion" in details:
+            err += f" ({details['suggestion']})"
+        return err
+
+    out = [
+        f"### Experiment: {details.get('link')}",
+        f"- **Code**: `{details.get('code')}` | **PermId**: `{details.get('permId')}`",
+        f"- **Type**: `{details.get('type')}`",
+        f"- **Project**: {details.get('project_link') or details.get('project_identifier') or 'N/A'}",
+        f"- **Registered By**: `{details.get('registrator') or 'N/A'}` | **Registration Date**: `{details.get('registration_date') or 'N/A'}`",
+    ]
+    if details.get("description"):
+        out.append(f"- **Description**: {details.get('description')}")
+
+    out.append(f"- **Total Samples Inside Experiment**: {details.get('total_samples')}")
+    out.append(f"- **Total Datasets Attached**: {details.get('total_datasets')}")
+    out.append("")
+
+    # Preparations
+    preps = details.get("preparations", [])
+    if preps:
+        out.append(f"#### Preparations ({len(preps)}):")
+        for p in preps:
+            out.append(f"- **Preparation**: {p.get('link')} (Registered: `{p.get('registration_date') or 'N/A'}`)")
+            for st_idx, st in enumerate(p.get("steps", []), 1):
+                out.append(f"  - Step {st_idx}: {st.get('link')}")
+                for a in st.get("actions", []):
+                    dur = f" (Duration: {a.get('duration')})" if a.get("duration") else ""
+                    out.append(f"    - Action `{a.get('type')}`: {a.get('link')}{dur}")
+        out.append("")
+    else:
+        out.append("#### Preparations:\n*(No preparations registered in this experiment)*\n")
+
+    # Measurement Sessions
+    meas = details.get("measurement_sessions", [])
+    if meas:
+        out.append(f"#### Measurement Sessions ({len(meas)}):")
+        for m in meas:
+            targets = [t.get("link", t.get("name")) for t in m.get("target_samples", [])]
+            t_str = f" | Target Sample(s): {', '.join(targets)}" if targets else ""
+            out.append(f"- **Session**: {m.get('link')}{t_str} — **Datasets**: {m.get('total_datasets')}")
+            if m.get("datasets"):
+                d_links = [d.get("link") for d in m.get("datasets", [])[:5]]
+                out.append(f"  - Sample datasets: {', '.join(d_links)}" + (" ..." if m.get("total_datasets", 0) > 5 else ""))
+        out.append("")
+    else:
+        out.append("#### Measurement Sessions:\n*(No measurement sessions registered in this experiment)*\n")
+
+    # Other process steps or samples
+    other = details.get("other_samples", [])
+    if other:
+        out.append(f"#### Other Samples ({len(other)}):")
+        for o in other:
+            out.append(f"- {o.get('link')} (`{o.get('type')}`)")
+        out.append("")
+
+    return "\n".join(out)
+
+
+def get_experiments_in_project(
+    ctx: RunContext[None],
+    project_name: str = "",
+    include_collections: bool = False,
+) -> str:
+    """List experiments performed within a specified openBIS project (excludes collections by default).
+
+    Args:
+        project_name: Project identifier or code (e.g. 'TEST_PROJECT', '/LAB205_FABIO.LOPES_AT_EMPA.CH/TEST_PROJECT', or 'DEFAULT').
+                      Leave blank to view the default project.
+        include_collections: Set to True ONLY if the user explicitly asks for collections.
+                             Default is False (strictly experiments, no collections).
+
+    Returns:
+        Markdown table of experiments with links, types, and registration metadata.
+    """
+    res = openbis_client.get_experiments_by_project(project_name, include_collections=include_collections)
     if "error" in res:
         err = res["error"]
         if "available_projects" in res:
             err += "\nAvailable projects: " + ", ".join(res["available_projects"])
         return err
 
+    exps = res.get("experiments", [])
     out = [
         f"### Project: `{res.get('project_identifier')}`",
         f"- **PermId**: `{res.get('project_permId')}`",
         f"- **Total Experiments**: {res.get('total_experiments')}",
-        "",
-        "#### Experiments & Collections:",
     ]
-    for exp in res.get("experiments", []):
-        out.append(f"- {exp.get('link')} (`{exp.get('type')}`)")
+    if res.get("collections_count") and not include_collections:
+        out.append(f"- **Collections in Project**: {res.get('collections_count')} *(collections filtered out)*")
+    out.append("")
+
+    if not exps:
+        out.append("No experiments found in this project.")
+        return "\n".join(out)
+
+    out.append("| Experiment | Type | Registered By | Registration Date |")
+    out.append("| :--- | :--- | :--- | :--- |")
+    for exp in exps:
+        out.append(f"| {exp.get('link')} | `{exp.get('type')}` | {exp.get('registrator') or 'N/A'} | {exp.get('registration_date') or 'N/A'} |")
 
     return "\n".join(out)
 
 
 def get_sample_measurements(ctx: RunContext[None], sample_name_or_id: str) -> str:
-    """Retrieve measurement sessions (STM, AFM, STS) and datasets acquired on a given sample.
+    """Retrieve measurement sessions (STM, AFM, STS) and datasets acquired within an experiment, project, or on a given sample.
 
     Args:
-        sample_name_or_id: Name or permId of the sample (e.g. '20260402074626332-6475' or sample name).
+        sample_name_or_id: Experiment name (e.g. 'Tiptime3_012026'), project name (e.g. 'SPE_HBN'), or sample name/permId (e.g. '20260402074626332-6475' or sample name).
 
     Returns:
         Measurement sessions, date/instruments, and attached raw/imaging datasets with links.
     """
     sessions = openbis_client.get_measurements_by_sample(sample_name_or_id)
     if not sessions or "error" in sessions[0]:
-        return f"No measurement sessions found for sample '{sample_name_or_id}'."
+        return f"No measurement sessions found for '{sample_name_or_id}'."
 
     out = [f"### Measurements for '{sample_name_or_id}':"]
     for s in sessions:
-        out.append(f"\n- **Session**: {s.get('link')}")
+        ctx_info = f" *({s.get('context')})*" if s.get("context") else ""
+        out.append(f"\n- **Session**: {s.get('link')}{ctx_info}")
         samples_str = ", ".join(s.get("samples", []))
         if samples_str:
             out.append(f"  - **Target Sample(s)**: {samples_str}")
         out.append(f"  - **Datasets Count**: {s.get('total_datasets')}")
-        for ds in s.get("datasets", []):
-            out.append(f"    - {ds.get('link')}")
+        ds_links = [ds.get("link") for ds in s.get("datasets", [])]
+        if ds_links:
+            out.append(f"  - **Sample Datasets**: {', '.join(ds_links)}" + (" ..." if s.get("total_datasets", 0) > len(ds_links) else ""))
 
     return "\n".join(out)
 
