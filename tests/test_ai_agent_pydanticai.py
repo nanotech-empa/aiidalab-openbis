@@ -226,4 +226,106 @@ def test_preparations_and_measurements_by_experiment_and_project():
     assert "Measurement Session" in meas_proj
 
 
+def test_latex_arrow_normalization_and_table_alignment():
+    """Verify that latex arrows are converted to unicode and multi-action tables are aligned."""
+    from src.ai_agent.agent import standardize_markdown
+
+    # 1. Test arrow normalization
+    text_with_arrow = "Annealing \\rightarrow Triple Deposition \\rightarrow Final Annealing"
+    normalized = standardize_markdown(text_with_arrow)
+    assert "\\rightarrow" not in normalized
+    assert "Annealing → Triple Deposition → Final Annealing" in normalized
+
+    # 2. Test table alignment with unaligned multi-action rows (3 columns in a 5-column table)
+    raw_table = (
+        "| Step | Process Step | Action | Details | Duration |\n"
+        "| :--- | :--- | :--- | :--- | :--- |\n"
+        "| 1 | Annealing of the Slab | ANNEALING | Annealing 1 | 10 min |\n"
+        "| 2 | Deposition of molecules | DEPOSITION | Deposition of 125a | 20 min |\n"
+        "| DEPOSITION | Deposition of 701a | 20 min |\n"
+        "| DEPOSITION | Deposition of 702a | 20 min |\n"
+        "| 3 | Annealing after depositions | ANNEALING | Annealing 2 | 10 min |"
+    )
+    fixed_table = standardize_markdown(raw_table)
+    lines = [ln.strip() for ln in fixed_table.strip().split("\n") if ln.strip().startswith("|")]
+    assert len(lines) == 7  # header + separator + 5 rows
+    # Check that rows 4 and 5 (index 4 and 5) now have 5 columns with empty leading cells
+    for row_idx in [4, 5]:
+        cells = [c.strip() for c in lines[row_idx].strip("|").split("|")]
+        assert len(cells) == 5
+        assert cells[0] == ""
+        assert cells[1] == ""
+        assert cells[2] == "DEPOSITION"
+        assert "Deposition of 70" in cells[3]
+        assert cells[4] == "20 min"
+
+
+def test_preparation_lookup_with_space():
+    """Verify that sample preparation search resolves with spaces like 'Au111 Bubble' matching 'Au111_Bubble'."""
+    from unittest.mock import MagicMock
+    ctx = MagicMock()
+    res = tools.get_sample_preparation(ctx, "Au111 Bubble")
+    assert "PREP_20260918133938_Au111_Bubble" in res or "Au111_Bubble" in res
+    assert "Step" in res
+
+
+def test_local_tracer_logging(tmp_path):
+    """Verify that LocalTracer creates structured logs and chat history."""
+    from src.ai_agent.tracer import LocalTracer
+    from unittest.mock import MagicMock
+
+    tracer = LocalTracer(log_dir=tmp_path)
+    mock_res = MagicMock()
+    mock_res.run_id = "test-run-1234"
+    mock_res.output = "Test agent response"
+    mock_res.usage.input_tokens = 100
+    mock_res.usage.output_tokens = 50
+    mock_res.usage.requests = 1
+    mock_res.new_messages.return_value = []
+
+    trace = tracer.log_run(
+        user_prompt="What is sample 727a?",
+        result=mock_res,
+        elapsed_seconds=1.5,
+        model_name="test-model",
+        provider_name="CSCS",
+    )
+    assert trace["run_id"] == "test-run-1234"
+    assert trace["usage"]["total_tokens"] == 150
+    assert trace["elapsed_seconds"] == 1.5
+
+    # Verify retrieval
+    last = tracer.get_last_trace()
+    assert last is not None
+    assert last["user_prompt"] == "What is sample 727a?"
+    assert last["model"] == "test-model"
+
+    # Verify log files exist
+    assert (tmp_path / "traces.jsonl").exists()
+    assert (tmp_path / "chat_history.log").exists()
+
+
+def test_resolve_openbis_previews():
+    """Verify preview tag resolution and graceful fallback when preview is missing."""
+    from src.ai_agent.agent import resolve_openbis_previews
+    from unittest.mock import patch
+
+    # 1. Successful resolution with mock
+    fake_b64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    with patch("src.ai_agent.openbis_client.get_preview_image_base64", return_value=fake_b64):
+        raw = "### Molecule 704\n- **Structure Preview**: ![Structure Preview](openbis-preview:20251013130838253-406)"
+        resolved = resolve_openbis_previews(raw)
+        assert fake_b64 in resolved
+        assert "openbis-preview:" not in resolved
+
+    # 2. Graceful removal when preview returns None
+    with patch("src.ai_agent.openbis_client.get_preview_image_base64", return_value=None):
+        raw = "### Sample Without Image\n- **Structure Preview**: ![Structure Preview](openbis-preview:nonexistent)\n- **Other**: Info"
+        resolved = resolve_openbis_previews(raw)
+        assert "openbis-preview:" not in resolved
+        assert "- **Other**: Info" in resolved
+
+
+
+
 

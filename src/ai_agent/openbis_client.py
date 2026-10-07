@@ -4,14 +4,21 @@ Provides cached querying, robust error handling, and generates clickable hyperli
 to the official openBIS ELN-LIMS instance for all retrieved permIDs.
 """
 
+import base64
 import json
+import logging
 import re
+import tempfile
 import urllib.parse
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from src import utils
+
+logger = logging.getLogger("ai_agent.openbis_client")
+
 
 _SESSION = None
 _SESSION_DATA = None
@@ -448,15 +455,36 @@ def get_sample_details(sample_id: str) -> Dict[str, Any]:
     """Retrieve full metadata, parents, and children of any sample."""
     obj = get_object(sample_id)
     if not obj:
-        s = get_session()
+        # Fast lookup via substances cache
         try:
-            objs = s.get_objects(props=["name"])
-            for o in objs:
-                if getattr(o.props, "name", None) == sample_id:
-                    obj = o
-                    break
+            subs_df = get_substances_cache()
+            if not subs_df.empty:
+                m = subs_df[subs_df["NAME"].astype(str).str.lower() == str(sample_id).lower()]
+                if not m.empty:
+                    obj = get_object(m.iloc[0]["PERMID"])
         except Exception:
             pass
+
+    if not obj:
+        # Fast lookup via molecules cache
+        try:
+            mols_df = get_molecules_cache()
+            if not mols_df.empty:
+                m = mols_df[mols_df["NAME"].astype(str).str.lower() == str(sample_id).lower()]
+                if not m.empty:
+                    obj = get_object(m.iloc[0]["PERMID"])
+        except Exception:
+            pass
+
+    if not obj:
+        s = get_session()
+        if s:
+            try:
+                samples = s.get_samples(code=sample_id)
+                if samples:
+                    obj = samples[0]
+            except Exception:
+                pass
 
     if not obj:
         return {"error": f"Sample '{sample_id}' not found in openBIS."}
@@ -508,6 +536,25 @@ def get_sample_details(sample_id: str) -> Dict[str, Any]:
     }
     if str(obj.type.code).upper() == "SUBSTANCE":
         details["parent_molecules"] = get_molecule_details_for_substance(obj)
+
+    # Check for ELN_PREVIEW image (direct or via parent molecule)
+    preview_pid = None
+    try:
+        if obj.get_datasets(type="ELN_PREVIEW"):
+            preview_pid = obj.permId
+        elif details.get("parent_molecules"):
+            for pm in details["parent_molecules"]:
+                pid = pm.get("permId")
+                if pid:
+                    p_obj = get_object(pid)
+                    if p_obj and p_obj.get_datasets(type="ELN_PREVIEW"):
+                        preview_pid = pid
+                        break
+    except Exception:
+        pass
+    if preview_pid:
+        details["preview_permid"] = preview_pid
+
     return details
 
 
@@ -915,11 +962,12 @@ def get_sample_preparation_lineage(query: str) -> List[Dict[str, Any]]:
     preps = s.get_objects(type="PREPARATION", props=["name", "description"])
     matched_preps = []
     q = query.lower()
+    q_norm = q.replace(" ", "_").replace("-", "_")
 
     for p in preps:
         p_name = getattr(p.props, "name", "") or ""
         p_desc = getattr(p.props, "description", "") or ""
-        if q in p_name.lower() or q in p_desc.lower() or q in p.permId.lower():
+        if q in p_name.lower() or q_norm in p_name.lower() or q in p_desc.lower() or q_norm in p_desc.lower() or q in p.permId.lower():
             matched_preps.append(p)
 
     if not matched_preps:
@@ -930,7 +978,7 @@ def get_sample_preparation_lineage(query: str) -> List[Dict[str, Any]]:
                     step_match = False
                     for st in steps:
                         st_name = getattr(st.props, "name", "") or ""
-                        if q in st_name.lower() or q in st.permId.lower():
+                        if q in st_name.lower() or q_norm in st_name.lower() or q in st.permId.lower():
                             step_match = True
                             break
                     if step_match:
@@ -1540,3 +1588,121 @@ def get_process_templates(query: str = "") -> List[Dict[str, Any]]:
             })
 
     return results
+
+
+_PREVIEW_BASE64_CACHE: Dict[str, str] = {}
+PREVIEW_DISK_CACHE_DIR = Path("/tmp/openbis_preview_cache")
+
+
+def get_preview_image_base64(permid_or_code: str) -> Optional[str]:
+    """Retrieve the ELN_PREVIEW image (PNG/JPEG) for a sample, molecule, or substance.
+    
+    Checks the sample itself first, then checks parent molecules.
+    Caches results in memory and on disk, returning a data:image/...;base64,... URI.
+    """
+    if not permid_or_code:
+        return None
+
+    key = str(permid_or_code).strip()
+    if key in _PREVIEW_BASE64_CACHE:
+        return _PREVIEW_BASE64_CACHE[key]
+
+    # Check disk cache
+    safe_key = re.sub(r'[^a-zA-Z0-9_\-]', '_', key)
+    disk_file = PREVIEW_DISK_CACHE_DIR / f"{safe_key}.b64"
+    if disk_file.exists():
+        try:
+            cached_val = disk_file.read_text(encoding="utf-8")
+            if cached_val.startswith("data:image/"):
+                _PREVIEW_BASE64_CACHE[key] = cached_val
+                return cached_val
+        except Exception:
+            pass
+
+    s = get_session()
+    if not s:
+        return None
+
+    try:
+        obj = get_object(key)
+        if not obj:
+            try:
+                objs = s.get_samples(code=key)
+                if objs:
+                    obj = objs[0]
+            except Exception:
+                pass
+
+        if not obj:
+            return None
+
+        # 1. Check direct ELN_PREVIEW datasets
+        ds_list = []
+        try:
+            ds_list = obj.get_datasets(type="ELN_PREVIEW")
+        except Exception:
+            pass
+
+        # 2. Check parents if not direct
+        if not ds_list:
+            try:
+                for p in obj.get_parents():
+                    p_ds = p.get_datasets(type="ELN_PREVIEW")
+                    if p_ds:
+                        ds_list = p_ds
+                        break
+            except Exception:
+                pass
+
+        if not ds_list:
+            return None
+
+        ds = ds_list[0]
+        if not ds.file_list:
+            return None
+
+        img_filename = None
+        for fn in ds.file_list:
+            lower = fn.lower()
+            if lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                img_filename = fn
+                break
+        if not img_filename:
+            img_filename = ds.file_list[0]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ds.download(files=[img_filename], destination=tmpdir)
+            expected = Path(img_filename).name
+            candidates = [p for p in Path(tmpdir).rglob("*") if p.is_file() and p.name == expected]
+            if not candidates:
+                return None
+            img_bytes = candidates[0].read_bytes()
+
+        ext = "png"
+        if img_filename.lower().endswith((".jpg", ".jpeg")):
+            ext = "jpeg"
+        elif img_filename.lower().endswith(".gif"):
+            ext = "gif"
+        elif img_filename.lower().endswith(".webp"):
+            ext = "webp"
+
+        b64_str = base64.b64encode(img_bytes).decode("ascii")
+        data_uri = f"data:image/{ext};base64,{b64_str}"
+        _PREVIEW_BASE64_CACHE[key] = data_uri
+        if hasattr(obj, "permId") and obj.permId != key:
+            _PREVIEW_BASE64_CACHE[str(obj.permId)] = data_uri
+
+        # Persist to disk cache
+        try:
+            PREVIEW_DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            disk_file.write_text(data_uri, encoding="utf-8")
+            if hasattr(obj, "permId") and obj.permId != key:
+                (PREVIEW_DISK_CACHE_DIR / f"{obj.permId}.b64").write_text(data_uri, encoding="utf-8")
+        except Exception:
+            pass
+
+        return data_uri
+    except Exception as e:
+        logger.warning(f"Error fetching preview image for {key}: {e}")
+        return None
+

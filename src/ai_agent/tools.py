@@ -247,6 +247,8 @@ def get_sample_details(ctx: RunContext[None], sample_id: str) -> str:
                 f"  - {m.get('link')} | Formula: {m.get('sum_formula')} | Registrator: `{m.get('registrator')}` | Reg. Date: `{m.get('registration_date')}`"
             )
         out.append("- **Parent Molecule(s)**:\n" + "\n".join(mol_items))
+    if details.get("preview_permid"):
+        out.append(f"- **Structure Preview**: ![Structure Preview](openbis-preview:{details['preview_permid']})")
 
     out.append(f"- **Parents ({len(parents)})**: {', '.join(parents) if parents else 'None'}")
     out.append(f"- **Children ({len(children)})**: {', '.join(children) if children else 'None'}")
