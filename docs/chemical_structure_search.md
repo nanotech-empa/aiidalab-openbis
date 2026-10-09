@@ -90,3 +90,21 @@ multi-crossing example must also complete an independent ChemAxon/ChemDraw
 round trip. RDKit 2025.09 writes standards-numbered SRU bond references for the
 example but does not reliably read them back for ring-rich ladder polymers;
 the app therefore uses its own narrow decoder for validation.
+
+## Shared chemical-sketch previews
+
+Uploaded and generated CDXML queries show a PNG before searching. The generator's
+review preview and exported PNG use the same `aiidalab_widgets_empa.cdxml_rendering`
+renderer as the Surface CDXML editor. The exported PNG is rendered from the exact
+CDXML bytes attached to the molecular concept. Pending bond suggestions appear
+orange and dashed in the review image and are omitted from the exported files.
+
+The renderer preserves drawing coordinates and aspect ratio, respects explicit
+`DoublePosition` choices, and places unspecified ring double bonds inward. Shared
+image sizing caps the longest displayed side at 300 pixels without changing the
+PNG bytes or enlarging small images. Existing stored openBIS previews are displayed
+from their stored bytes.
+
+The development dependency pins the first EMPA widget commit containing this
+shared API. Replace that pin with the corresponding released version after
+`nanotech-empa/aiidalab-widgets-empa#9` is merged and released.

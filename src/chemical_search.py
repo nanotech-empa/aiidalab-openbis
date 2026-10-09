@@ -207,9 +207,7 @@ def search_representations_from_cdxml(
                 periodic_formula(graph),
                 source="periodic CDXML",
                 source_id=(
-                    source_id
-                    if count == 1
-                    else f"{source_id}#repeat-{index + 1}"
+                    source_id if count == 1 else f"{source_id}#repeat-{index + 1}"
                 ),
             )
             for index, graph in enumerate(periodic_graphs)
@@ -245,8 +243,7 @@ def search_representation_from_cdxml(
 
 def _properties(openbis_object) -> dict:
     return {
-        str(key).lower(): value
-        for key, value in openbis_object.props.all().items()
+        str(key).lower(): value for key, value in openbis_object.props.all().items()
     }
 
 
@@ -326,7 +323,9 @@ class OpenbisChemicalIndex:
         if payload.get("version") != CACHE_VERSION:
             raise ValueError("The cached chemical index has an incompatible version")
         if payload.get("session") != self.session_identity:
-            raise ValueError("The cached chemical index belongs to another openBIS server")
+            raise ValueError(
+                "The cached chemical index belongs to another openBIS server"
+            )
         if payload.get("collection") != self.collection:
             raise ValueError("The cached chemical index belongs to another collection")
         self.generated_at = str(payload.get("generated_at", ""))
@@ -415,9 +414,7 @@ class OpenbisChemicalIndex:
                 "permid": _reference(dataset),
                 "sample": _reference(getattr(dataset, "sample", "")),
                 "type": _type_code(dataset.type),
-                "modification_date": str(
-                    getattr(dataset, "modificationDate", "")
-                ),
+                "modification_date": str(getattr(dataset, "modificationDate", "")),
                 "files": sorted(_dataset_cdxml_files(dataset)),
             }
             for dataset in datasets
@@ -459,9 +456,7 @@ class OpenbisChemicalIndex:
         previous_objects = {
             item["permid"]: item for item in self.manifest.get("objects", [])
         }
-        remote_objects = {
-            item["permid"]: item for item in remote_manifest["objects"]
-        }
+        remote_objects = {item["permid"]: item for item in remote_manifest["objects"]}
         remote_references = set(remote_objects) | {
             item["identifier"]
             for item in remote_objects.values()
@@ -558,9 +553,7 @@ class OpenbisChemicalIndex:
                 formula=str(props.get("sum_formula") or ""),
                 smiles=str(props.get("smiles") or ""),
                 cxsmiles=str(props.get("cxsmiles") or ""),
-                modification_date=str(
-                    getattr(openbis_object, "modificationDate", "")
-                ),
+                modification_date=str(getattr(openbis_object, "modificationDate", "")),
             )
             if record.smiles:
                 try:
@@ -589,9 +582,7 @@ class OpenbisChemicalIndex:
         relevant_datasets = []
         if include_cdxml and unique_records:
             permids = list(unique_records)
-            progress(
-                f"Inspecting attachments for all {len(permids)} molecules …"
-            )
+            progress(f"Inspecting attachments for all {len(permids)} molecules …")
             if datasets is None:
                 datasets = list(self.session.get_datasets(sample=permids) or [])
             relevant_datasets = [
@@ -794,6 +785,8 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         )
         self.cdxml.layout.display = "none"
         self.active_source = ipw.HTML()
+        self.query_preview = ipw.Image(format="png", layout={"display": "none"})
+        self.preview_message = ipw.HTML()
         self.quality = ipw.IntSlider(
             value=0,
             min=0,
@@ -853,6 +846,8 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 self.smiles,
                 self.cdxml,
                 self.active_source,
+                self.query_preview,
+                self.preview_message,
                 ipw.HBox([self.quality, self.limit]),
                 ipw.HBox([self.update_button, self.search_button]),
                 self.status,
@@ -887,7 +882,31 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 "<b>Active CDXML:</b> generated and reviewed in this form · "
                 f"{html.escape(filename)}"
             )
+        self._refresh_query_preview()
         self._clear_search_state()
+
+    def _refresh_query_preview(self):
+        """Draw the same active CDXML bytes that will be searched."""
+        from aiidalab_widgets_empa.cdxml_rendering import (
+            render_cdxml_png,
+            set_png_widget,
+        )
+
+        set_png_widget(self.query_preview, b"")
+        self.query_preview.layout.display = "none"
+        self.preview_message.value = ""
+        if self.input_kind.value != "cdxml":
+            return
+        _filename, content = self._generated_cdxml or _upload_content(self.cdxml)
+        if not content:
+            return
+        try:
+            set_png_widget(self.query_preview, render_cdxml_png(content))
+            self.query_preview.layout.display = ""
+        except Exception as exc:
+            self.preview_message.value = (
+                f"Sketch preview unavailable: {html.escape(str(exc))}"
+            )
 
     def _smiles_changed(self, change):
         if change.get("new") != change.get("old"):
@@ -901,6 +920,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 "<b>Active CDXML:</b> browser upload "
                 f"{html.escape(filename or 'query.cdxml')}"
             )
+            self._refresh_query_preview()
             self._clear_search_state()
 
     def _clear_search_state(self):
@@ -920,6 +940,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             "<b>Active CDXML:</b> generated and reviewed in this form · "
             f"{html.escape(str(filename))}"
         )
+        self._refresh_query_preview()
         self._clear_search_state()
         self._set_status(
             f"Generated CDXML ready for search: {filename}.",
@@ -931,9 +952,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.search_button.disabled = True
         try:
             self.index.refresh(progress=self._set_status)
-            self._set_status(
-                f"Index ready: {len(self.index.records)} molecules.", "ok"
-            )
+            self._set_status(f"Index ready: {len(self.index.records)} molecules.", "ok")
         except Exception as exc:
             self._set_status(
                 f"Index update failed: {type(exc).__name__}: {exc}", "error"
@@ -1011,9 +1030,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         except Exception as exc:
             self.last_query = None
             self.last_hits = ()
-            self._set_status(
-                f"Search failed: {type(exc).__name__}: {exc}", "error"
-            )
+            self._set_status(f"Search failed: {type(exc).__name__}: {exc}", "error")
         finally:
             self.search_button.disabled = False
 

@@ -1,6 +1,7 @@
 """Tests for collection-scoped SMILES/CDXML search."""
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
@@ -94,9 +95,7 @@ def test_index_is_scoped_to_one_molecule_collection(tmp_path):
         cache_path=tmp_path / "index.json",
     ).refresh()
 
-    assert session.object_calls == [
-        {"type": "MOLECULE", "collection": collection}
-    ]
+    assert session.object_calls == [{"type": "MOLECULE", "collection": collection}]
     assert session.dataset_calls == [{"sample": ["ethanol"]}]
     hit = index.search(search_representation_from_smiles("OCC"))[0]
     assert hit.record.permid == "ethanol"
@@ -163,9 +162,7 @@ def test_periodic_cxsmiles_property_matches_periodic_cdxml(tmp_path):
 def test_search_index_expands_multiple_periodic_repeat_units():
     root = ET.fromstring(GNR_CDXML.read_bytes().decode("utf-8-sig"))
     page = next(
-        element
-        for element in root.iter()
-        if element.tag.rsplit("}", 1)[-1] == "page"
+        element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "page"
     )
     group = next(
         element
@@ -368,3 +365,53 @@ def test_successful_search_reports_query_and_hits_to_parent(tmp_path):
     assert hits == ()
     assert widget.last_query == query
     assert widget.last_hits == ()
+
+
+def test_cdxml_query_preview_uses_shared_renderer_and_clears_for_smiles(tmp_path):
+    from aiidalab_widgets_empa.cdxml_rendering import render_cdxml_png
+
+    widget = MoleculeStructureSearchWidget(
+        FakeSession([]),
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+        cache_path=tmp_path / "preview-index.json",
+    )
+    content = GNR_CDXML.read_bytes()
+    widget.set_cdxml_query(content, "reviewed.cdxml")
+    assert bytes(widget.query_preview.value) == render_cdxml_png(content)
+    assert max(int(widget.query_preview.width), int(widget.query_preview.height)) <= 300
+    widget.input_kind.value = "smiles"
+    assert not widget.query_preview.value
+    assert widget.query_preview.layout.display == "none"
+    widget.input_kind.value = "cdxml"
+    assert widget.query_preview.value
+    assert not widget.index.session.object_calls
+
+
+def test_uploaded_cdxml_preview_clears_when_replaced_by_malformed_xml(tmp_path):
+    widget = MoleculeStructureSearchWidget(
+        FakeSession([]),
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+        cache_path=tmp_path / "preview-index.json",
+    )
+    widget.input_kind.value = "cdxml"
+    widget.cdxml.value = (
+        {
+            "name": "reviewed.cdxml",
+            "type": "text/xml",
+            "size": len(GNR_CDXML.read_bytes()),
+            "content": memoryview(GNR_CDXML.read_bytes()),
+            "last_modified": datetime.now(timezone.utc),
+        },
+    )
+    assert widget.query_preview.value
+    widget.cdxml.value = (
+        {
+            "name": "bad.cdxml",
+            "type": "text/xml",
+            "size": 4,
+            "content": memoryview(b"<bad"),
+            "last_modified": datetime.now(timezone.utc),
+        },
+    )
+    assert not widget.query_preview.value
+    assert "unavailable" in widget.preview_message.value

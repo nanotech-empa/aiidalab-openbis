@@ -5,13 +5,13 @@ from __future__ import annotations
 import base64
 import html
 from collections import Counter
-from io import BytesIO
+import xml.etree.ElementTree as ET
 
 import bqplot as bq
 import ipywidgets as ipw
-import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import display
+from aiidalab_widgets_empa.cdxml_rendering import render_cdxml_png, set_png_widget
 
 from .cdxml_generator import (
     PeriodicBond,
@@ -108,7 +108,9 @@ class PeriodicCdxmlEditor(ipw.VBox):
             indent=False,
             layout={"width": "300px"},
         )
-        self.load_button = ipw.Button(description="Load structure", button_style="primary")
+        self.load_button = ipw.Button(
+            description="Load structure", button_style="primary"
+        )
         self.reset_button = ipw.Button(description="Reset edits")
         self.status = ipw.HTML(
             "Review the detected connectivity before generating the CDXML."
@@ -117,8 +119,12 @@ class PeriodicCdxmlEditor(ipw.VBox):
         )
 
         self.selection = ipw.HTML("Selected atoms: none")
-        self.add_button = ipw.Button(description="Add bond", button_style="success", disabled=True)
-        self.remove_button = ipw.Button(description="Remove bond", button_style="warning", disabled=True)
+        self.add_button = ipw.Button(
+            description="Add bond", button_style="success", disabled=True
+        )
+        self.remove_button = ipw.Button(
+            description="Remove bond", button_style="warning", disabled=True
+        )
         self.clear_button = ipw.Button(description="Clear selection", disabled=True)
 
         self.radical_atom = ipw.Dropdown(description="Atom", options=[], disabled=True)
@@ -144,9 +150,7 @@ class PeriodicCdxmlEditor(ipw.VBox):
         self.summary = ipw.HTML()
         self.suggestions = ipw.HTML()
         self.export_result = ipw.HTML()
-        self.png_preview = ipw.Image(
-            format="png", layout={"width": "430px", "max_height": "780px"}
-        )
+        self.png_preview = ipw.Image(format="png")
 
         self.x_scale = bq.LinearScale(allow_padding=False)
         self.y_scale = bq.LinearScale(allow_padding=False)
@@ -172,7 +176,9 @@ class PeriodicCdxmlEditor(ipw.VBox):
                 self.selection,
                 ipw.HBox([self.add_button, self.remove_button, self.clear_button]),
                 ipw.HTML("<b>Atom state</b>"),
-                ipw.HBox([self.radical_atom, self.radical_state, self.apply_radical_button]),
+                ipw.HBox(
+                    [self.radical_atom, self.radical_state, self.apply_radical_button]
+                ),
                 ipw.HBox([self.accept_pending_button, self.reject_pending_button]),
                 self.summary,
                 self.suggestions,
@@ -261,7 +267,9 @@ class PeriodicCdxmlEditor(ipw.VBox):
             ) = perceive_graph(self.atoms)
             inferred_keys = {bond_key(bond) for bond in inferred}
             self.strict_bonds = {
-                bond_key(bond): bond for bond in all_bonds if bond_key(bond) not in inferred_keys
+                bond_key(bond): bond
+                for bond in all_bonds
+                if bond_key(bond) not in inferred_keys
             }
             self.added_bonds = (
                 {bond_key(bond): bond for bond in inferred}
@@ -292,7 +300,9 @@ class PeriodicCdxmlEditor(ipw.VBox):
         except Exception as exc:
             self._valid = False
             self.export_button.disabled = True
-            self.status.value = f"<span style='color:#b00020'><b>Error:</b> {exc}</span>"
+            self.status.value = (
+                f"<span style='color:#b00020'><b>Error:</b> {exc}</span>"
+            )
 
     def _current_bonds(self):
         current = {
@@ -463,7 +473,7 @@ class PeriodicCdxmlEditor(ipw.VBox):
         self.reference_boundary = reference_boundary
         self.graphic_boundary = graphic_boundary
         self._draw_interactive()
-        self.png_preview.value = self._render_png(show_suggestions=True)
+        set_png_widget(self.png_preview, self._render_png(show_suggestions=True))
         self._update_summary(error)
         self.export_button.disabled = not self._valid
 
@@ -545,8 +555,12 @@ class PeriodicCdxmlEditor(ipw.VBox):
         self._atom_mark.on_element_click(self._atom_clicked)
         marks.append(self._atom_mark)
 
-        central_x = [self.base[self.local_index[index], 0] for index in self.heavy_indices]
-        central_y = [self.base[self.local_index[index], 1] for index in self.heavy_indices]
+        central_x = [
+            self.base[self.local_index[index], 0] for index in self.heavy_indices
+        ]
+        central_y = [
+            self.base[self.local_index[index], 1] for index in self.heavy_indices
+        ]
         marks.append(
             bq.Label(
                 x=central_x,
@@ -590,12 +604,19 @@ class PeriodicCdxmlEditor(ipw.VBox):
         ):
             lip = 0.28 * direction
             bracket_x.extend(
-                [x_position, x_position, np.nan, x_position, x_position + lip, np.nan,
-                 x_position, x_position + lip, np.nan]
+                [
+                    x_position,
+                    x_position,
+                    np.nan,
+                    x_position,
+                    x_position + lip,
+                    np.nan,
+                    x_position,
+                    x_position + lip,
+                    np.nan,
+                ]
             )
-            bracket_y.extend(
-                [low, high, np.nan, low, low, np.nan, high, high, np.nan]
-            )
+            bracket_y.extend([low, high, np.nan, low, low, np.nan, high, high, np.nan])
         marks.append(
             bq.Lines(
                 x=bracket_x,
@@ -612,90 +633,86 @@ class PeriodicCdxmlEditor(ipw.VBox):
         self.y_scale.max = high + 0.2
         self._refresh_selection()
 
-    def _render_png(self, show_suggestions=False):
-        fig, axis = plt.subplots(figsize=(4.2, 7.8))
-        for bond, cell, target_cell in iter_bond_instances(self.assigned_bonds):
-            first = self.base[self.local_index[bond.begin]] + np.array(
-                [cell * self.period, 0.0]
-            )
-            second = self.base[self.local_index[bond.end]] + np.array(
-                [target_cell * self.period, 0.0]
-            )
-            direction = second - first
-            normal = np.array([-direction[1], direction[0]]) / np.linalg.norm(direction)
-            offsets = [0.0] if bond.order == 1 else [-0.05, 0.05]
-            for offset in offsets:
-                shifted = normal * offset
-                axis.plot(
-                    [first[0] + shifted[0], second[0] + shifted[0]],
-                    [first[1] + shifted[1], second[1] + shifted[1]],
-                    color="#303030",
-                    linewidth=1.35,
-                    solid_capstyle="round",
-                    zorder=1,
-                )
+    def _drawing_cdxml(self):
+        """Use the exact export drawing as the source for every PNG."""
+        target = _MemoryTextTarget(self.filename)
+        write_cdxml(
+            target,
+            self.atoms,
+            self.heavy_indices,
+            self.explicit_h,
+            self.local_index,
+            self.base,
+            self.period,
+            self.assigned_bonds,
+            self.reference_edge,
+            self.reference_boundary,
+            self.graphic_boundary,
+            radicals=self.radicals,
+        )
+        return target.value.encode("utf-8")
+
+    def _render_png(self, show_suggestions=False, content=None):
+        content = self._drawing_cdxml() if content is None else content
+        highlighted = []
         if show_suggestions:
             current_keys = {bond_key(bond) for bond in self._current_bonds()}
             pending = [
-                bond for key, bond in self.candidates.items()
+                bond
+                for key, bond in self.candidates.items()
                 if key not in current_keys and key not in self.rejected_candidates
             ]
-            for bond, cell, target_cell in iter_bond_instances(pending):
-                first = self.base[self.local_index[bond.begin]] + np.array(
-                    [cell * self.period, 0.0]
+            if pending:
+                root = ET.fromstring(content)
+                fragment = next(root.iter("fragment"))
+                node_ids = dict(
+                    zip(
+                        (
+                            (atom, cell)
+                            for cell in (-1, 0, 1)
+                            for atom in self.heavy_indices
+                        ),
+                        (node.get("id") for node in fragment.iter("n")),
+                    )
                 )
-                second = self.base[self.local_index[bond.end]] + np.array(
-                    [target_cell * self.period, 0.0]
-                )
-                axis.plot(
-                    [first[0], second[0]], [first[1], second[1]],
-                    color="#e58e26", linewidth=2.0, linestyle="--", zorder=1,
-                )
-        for cell in (-1, 0, 1):
-            positions = np.asarray(
-                [
-                    self.base[self.local_index[index]]
-                    + np.array([cell * self.period, 0.0])
-                    for index in self.heavy_indices
-                ]
-            )
-            axis.scatter(positions[:, 0], positions[:, 1], s=7, color="#303030", zorder=2)
-            for atom_index in self.radicals:
-                position = self.base[self.local_index[atom_index]] + np.array(
-                    [cell * self.period + 0.12, 0.12]
-                )
-                axis.scatter(*position, s=7, color="#111111", zorder=3)
-        low = float(np.min(self.base[:, 1]) - 0.6)
-        high = float(np.max(self.base[:, 1]) + 0.6)
-        for x_position, direction in (
-            (self.graphic_boundary, 1),
-            (self.graphic_boundary + self.period, -1),
-        ):
-            lip = 0.28 * direction
-            axis.plot([x_position, x_position], [low, high], color="#111111", linewidth=1.3)
-            axis.plot([x_position, x_position + lip], [low, low], color="#111111", linewidth=1.3)
-            axis.plot([x_position, x_position + lip], [high, high], color="#111111", linewidth=1.3)
-        axis.set_aspect("equal")
-        axis.set_xlim(self.graphic_boundary - 0.75 * self.period, self.graphic_boundary + 1.75 * self.period)
-        axis.set_ylim(low - 0.2, high + 0.2)
-        axis.axis("off")
-        fig.tight_layout(pad=0.1)
-        buffer = BytesIO()
-        fig.savefig(buffer, format="png", dpi=180, bbox_inches="tight", facecolor="white")
-        plt.close(fig)
-        return buffer.getvalue()
+                for index, (bond, cell, target_cell) in enumerate(
+                    iter_bond_instances(pending)
+                ):
+                    identifier = f"suggestion-{index}"
+                    ET.SubElement(
+                        fragment,
+                        "b",
+                        {
+                            "id": identifier,
+                            "B": node_ids[(bond.begin, cell)],
+                            "E": node_ids[(bond.end, target_cell)],
+                            "Order": "1",
+                        },
+                    )
+                    highlighted.append(identifier)
+                content = ET.tostring(root, encoding="utf-8")
+        return render_cdxml_png(content, highlighted_bonds=highlighted)
 
     def _update_summary(self, error=None):
-        order_counts = Counter(getattr(bond, "order", 1) for bond in self.assigned_bonds)
+        order_counts = Counter(
+            getattr(bond, "order", 1) for bond in self.assigned_bonds
+        )
         pending = [
-            key for key in self.candidates
+            key
+            for key in self.candidates
             if key not in self.added_bonds and key not in self.rejected_candidates
         ]
-        radical_text = ", ".join(f"C{index}" for index in sorted(self.radicals)) or "none"
+        radical_text = (
+            ", ".join(f"C{index}" for index in sorted(self.radicals)) or "none"
+        )
         if error:
-            validity = f"<span style='color:#b00020'><b>Invalid valence:</b> {error}</span>"
+            validity = (
+                f"<span style='color:#b00020'><b>Invalid valence:</b> {error}</span>"
+            )
         else:
-            validity = "<span style='color:#187b35'><b>Valence solution valid.</b></span>"
+            validity = (
+                "<span style='color:#187b35'><b>Valence solution valid.</b></span>"
+            )
         self.summary.value = (
             f"{validity}<br>Single bonds: {order_counts.get(1, 0)}; "
             f"double bonds: {order_counts.get(2, 0)}; radicals: {radical_text}; "
@@ -718,7 +735,8 @@ class PeriodicCdxmlEditor(ipw.VBox):
             )
         self.suggestions.value = (
             "<b>Long-bond suggestions</b><ul>" + "".join(rows) + "</ul>"
-            if rows else "<b>Long-bond suggestions:</b> none"
+            if rows
+            else "<b>Long-bond suggestions:</b> none"
         )
         self.accept_pending_button.disabled = not bool(pending)
         self.reject_pending_button.disabled = not bool(pending)
@@ -726,23 +744,8 @@ class PeriodicCdxmlEditor(ipw.VBox):
     def _export_clicked(self, _):
         if not self._valid:
             return
-        target = _MemoryTextTarget(self.filename)
-        write_cdxml(
-            target,
-            self.atoms,
-            self.heavy_indices,
-            self.explicit_h,
-            self.local_index,
-            self.base,
-            self.period,
-            self.assigned_bonds,
-            self.reference_edge,
-            self.reference_boundary,
-            self.graphic_boundary,
-            radicals=self.radicals,
-        )
-        self.last_cdxml = target.value.encode("utf-8")
-        self.last_png = self._render_png(show_suggestions=False)
+        self.last_cdxml = self._drawing_cdxml()
+        self.last_png = self._render_png(content=self.last_cdxml)
         self.last_representation = representation_from_cdxml(self.last_cdxml)
         cdxml_data = base64.b64encode(self.last_cdxml).decode("ascii")
         png_data = base64.b64encode(self.last_png).decode("ascii")

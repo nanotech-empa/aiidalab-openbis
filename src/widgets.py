@@ -2,7 +2,6 @@ import html
 import io
 import os
 import shutil
-import struct
 
 import ipywidgets as ipw
 import pandas as pd
@@ -908,42 +907,22 @@ class MoleculeWidget(ipw.VBox):
             ]
 
     def _select_search_result(self, permid):
-        values = {
-            str(value): value
-            for _label, value in self.dropdown.options
-        }
+        values = {str(value): value for _label, value in self.dropdown.options}
         value = values.get(str(permid))
         if value is None:
             hit = self.structure_search._hits_by_permid.get(str(permid))
             label = (
-                hit.record.name
-                if hit is not None and hit.record.name
-                else str(permid)
+                hit.record.name if hit is not None and hit.record.name else str(permid)
             )
             self.dropdown.options = list(self.dropdown.options) + [(label, permid)]
             value = permid
         self.dropdown.value = value
 
     def _set_molecule_sketch(self, content):
-        """Display a PNG at its aspect ratio with neither side above 300 px."""
-        data = bytes(content)
-        self.molecule_sketch.value = data
-        width = height = 0
-        if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
-            width, height = struct.unpack(">II", data[16:24])
-        if width and height:
-            scale = min(1.0, 300.0 / max(width, height))
-            display_width = max(1, round(width * scale))
-            display_height = max(1, round(height * scale))
-            self.molecule_sketch.width = str(display_width)
-            self.molecule_sketch.height = str(display_height)
-            self.molecule_sketch.layout.width = f"{display_width}px"
-            self.molecule_sketch.layout.height = f"{display_height}px"
-        else:
-            self.molecule_sketch.width = ""
-            self.molecule_sketch.height = ""
-            self.molecule_sketch.layout.width = "auto"
-            self.molecule_sketch.layout.height = "auto"
+        """Use the shared longest-side cap without changing stored PNG bytes."""
+        from aiidalab_widgets_empa.cdxml_rendering import set_png_widget
+
+        set_png_widget(self.molecule_sketch, bytes(content))
 
     def load_details(self, change):
         obj_permid = self.dropdown.value
