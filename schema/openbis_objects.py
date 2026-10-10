@@ -596,6 +596,12 @@ class Author(OpenBISObject):
 
 
 class Molecule(OpenBISObject):
+    molecules: List["Molecule"] = Field(
+        default_factory=list,
+        title="Molecule parent(s)",
+        description="Optional parent molecules used to define this molecular concept",
+        metadata={"type": "PARENT"},
+    )
     empa_number: int = Field(
         default=0,
         title="Empa number",
@@ -607,6 +613,15 @@ class Molecule(OpenBISObject):
         default="",
         title="SMILES",
         description="SMILES string for the substance, e.g. CCO",
+        metadata={"type": "VARCHAR"},
+    )
+    cxsmiles: str = Field(
+        default="",
+        title="CXSMILES",
+        description=(
+            "Round-trip validated CXSMILES representation of a periodic "
+            "repeat unit"
+        ),
         metadata={"type": "VARCHAR"},
     )
     sum_formula: str = Field(
@@ -1478,34 +1493,9 @@ class Sample(OpenBISObject):
         return "Sample"
 
 
-class ReactionProductConcept(OpenBISObject):
-    sum_formula: str = Field(
-        default=None,
-        title="Sum formula",
-        description="Sum formula of the reaction product concept",
-        metadata={"type": "VARCHAR"},
-    )
-    molecules: List[Molecule] = Field(
-        default_factory=list,
-        title="Molecule(s)",
-        description="List of molecules involved",
-        metadata={"type": "PARENT"},
-    )
-    crystal_concepts: List[CrystalConcept] = Field(
-        default_factory=list,
-        title="Crystal concept(s)",
-        description="List of crystal concepts associated",
-        metadata={"type": "PARENT"},
-    )
-
-    @classmethod
-    def get_code(cls) -> str:
-        return "RPCO"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Reaction Product Concept"
-
+# Compatibility name for callers that still use the former concept label.
+# Product concepts and precursor concepts are both MOLECULE objects.
+ReactionProductConcept = Molecule
 
 class ReactionProduct(OpenBISObject):
     reaction_temperature: TemperatureValue = Field(
@@ -1522,8 +1512,8 @@ class ReactionProduct(OpenBISObject):
     )
     reaction_product_concept: ReactionProductConcept = Field(
         default=None,
-        title="Reaction product concept",
-        description="Concept associated with the reaction product",
+        title="Product molecule",
+        description="Molecule concept associated with the reaction product",
         metadata={"type": "PARENT"},
     )
     sample: Sample = Field(
@@ -2364,12 +2354,6 @@ class AtomisticModel(Simulation):
         default_factory=list,
         title="Molecule(s)",
         description="List of molecules in the model",
-        metadata={"type": "PARENT"},
-    )
-    reaction_product_concepts: List[ReactionProductConcept] = Field(
-        default_factory=list,
-        title="Reaction product concept(s)",
-        description="List of reaction product concepts",
         metadata={"type": "PARENT"},
     )
 

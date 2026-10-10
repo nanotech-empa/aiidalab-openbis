@@ -114,7 +114,7 @@ def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_prod
     ]
     widget = SimpleNamespace(
         **{name: object() for name in attribute_names},
-        reaction_products_available=False,
+        product_molecules_available=False,
     )
 
     simulations_widgets.SimulationDetailsWidget.load_widgets(widget, True)
@@ -138,7 +138,7 @@ def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_prod
     ]
     assert widget.select_reacprod_concepts_title not in widget.children
 
-    widget.reaction_products_available = True
+    widget.product_molecules_available = True
     simulations_widgets.SimulationDetailsWidget.load_widgets(widget, True)
 
     assert widget.children.index(widget.material_details_vbox) < widget.children.index(
@@ -188,6 +188,318 @@ def test_experiment_selector_uses_bulk_properties(monkeypatch, simulations_widge
             "is_mine": True,
         }
     ]
+
+
+def test_product_selector_reads_molecules_from_product_collection(
+    monkeypatch, simulations_widgets
+):
+    calls = []
+    products = [
+        SimpleNamespace(
+            permId="product-z",
+            props={"name": "Zigzag GNR", "empa_number": None},
+        ),
+        SimpleNamespace(
+            permId="product-a",
+            props={"name": "Armchair GNR", "empa_number": None},
+        ),
+    ]
+
+    def get_objects(_session, **kwargs):
+        calls.append(kwargs)
+        return products
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        get_objects,
+    )
+
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+        role="product molecule",
+    )
+
+    assert calls == [
+        {
+            "collection": "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+            "type": "MOLECULE",
+        }
+    ]
+    assert list(selector.dropdown.options) == [
+        ("Select a product molecule...", "-1"),
+        ("Armchair GNR", "product-a"),
+        ("Zigzag GNR", "product-z"),
+    ]
+    assert selector.structure_search.results.value == ""
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_object",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            get_datasets=lambda **_kwargs: [],
+            props=SimpleNamespace(all=lambda: {}),
+        ),
+    )
+    selector._select_search_result("product-a")
+    assert selector.dropdown.value == "product-a"
+
+
+def test_molecule_preview_constrains_only_the_longest_side(
+    monkeypatch, simulations_widgets
+):
+    import struct
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        lambda *_args, **_kwargs: [],
+    )
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+    )
+
+    def png_header(width, height):
+        return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(
+            ">II", width, height
+        )
+
+    selector._set_molecule_sketch(png_header(600, 400))
+    assert selector.molecule_sketch.width == "300"
+    assert selector.molecule_sketch.height == "200"
+    assert selector.molecule_sketch.layout.width == "300px"
+    assert selector.molecule_sketch.layout.height == "200px"
+
+    selector._set_molecule_sketch(png_header(300, 900))
+    assert selector.molecule_sketch.width == "100"
+    assert selector.molecule_sketch.height == "300"
+    assert selector.molecule_sketch.layout.width == "100px"
+    assert selector.molecule_sketch.layout.height == "300px"
+
+    selector._set_molecule_sketch(png_header(150, 100))
+    assert selector.molecule_sketch.width == "150"
+    assert selector.molecule_sketch.height == "100"
+    assert selector.molecule_sketch.layout.width == "150px"
+    assert selector.molecule_sketch.layout.height == "100px"
+
+
+def test_generated_cdxml_can_create_only_after_identity_search(
+    monkeypatch, simulations_widgets
+):
+    from src.chemical_search import search_representation_from_cdxml
+    from src.chemical_structures import representation_from_cdxml
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        lambda *_args, **_kwargs: [],
+    )
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+        role="product molecule",
+    )
+    cdxml = (Path(__file__).parent / "data" / "periodic_gnr.cdxml").read_bytes()
+    representation = representation_from_cdxml(cdxml)
+    query = search_representation_from_cdxml(cdxml)
+    selector._use_generated_cdxml(
+        cdxml,
+        "generated-gnr.cdxml",
+        b"\x89PNG\r\n\x1a\nreviewed",
+        representation,
+    )
+
+    selector._search_completed(query, ())
+
+    assert selector.create_generated_button in selector.create_generated_box.children
+    assert (
+        "product molecule collection" in selector.create_generated_box.children[0].value
+    )
+
+    existing = SimpleNamespace(
+        match_type="exact",
+        record=SimpleNamespace(name="Existing GNR", permid="existing"),
+    )
+    selector.new_molecule_name.value = "Duplicate GNR"
+    monkeypatch.setattr(
+        selector.structure_search.index, "refresh", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        selector.structure_search.index,
+        "search",
+        lambda *_args, **_kwargs: [existing],
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.molecule_creation,
+        "create_molecule_from_cdxml",
+        lambda *_args, **_kwargs: pytest.fail("duplicate creation must be blocked"),
+    )
+
+    selector._create_generated_molecule()
+
+    assert "already exists" in selector.create_generated_box.children[0].value
+
+
+def test_generated_cdxml_creation_selects_and_verifies_new_product(
+    monkeypatch, simulations_widgets
+):
+    from src.chemical_search import search_representation_from_cdxml
+    from src.chemical_structures import representation_from_cdxml
+
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_OBJECT_TYPES,
+        "Molecule",
+        "MOLECULE",
+    )
+    monkeypatch.setitem(
+        simulations_widgets.widgets.OPENBIS_COLLECTIONS_PATHS,
+        "Product Molecule",
+        "/LAB205_MATERIALS/MOLECULES/PRODUCT_COLLECTION",
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_objects",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils,
+        "get_openbis_object",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            get_datasets=lambda **_kwargs: [],
+            props=SimpleNamespace(all=dict),
+        ),
+    )
+    selector = simulations_widgets.widgets.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+        role="product molecule",
+    )
+    cdxml = (Path(__file__).parent / "data" / "periodic_gnr.cdxml").read_bytes()
+    representation = representation_from_cdxml(cdxml)
+    query = search_representation_from_cdxml(cdxml)
+    selector._use_generated_cdxml(
+        cdxml,
+        "generated-gnr.cdxml",
+        b"\x89PNG\r\n\x1a\nreviewed",
+        representation,
+    )
+    selector._search_completed(query, ())
+    selector.new_molecule_name.value = "First product GNR"
+    created = SimpleNamespace(permId="new-product")
+    exact_hit = SimpleNamespace(
+        match_type="exact",
+        similarity=1.0,
+        record=SimpleNamespace(
+            permid="new-product",
+            name="First product GNR",
+            empa_number="",
+        ),
+    )
+    searches = iter([[], [exact_hit]])
+    monkeypatch.setattr(
+        selector.structure_search.index, "refresh", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        selector.structure_search.index,
+        "search",
+        lambda *_args, **_kwargs: next(searches),
+    )
+    calls = []
+
+    def create(_session, **kwargs):
+        calls.append(kwargs)
+        return created
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets.molecule_creation,
+        "create_molecule_from_cdxml",
+        create,
+    )
+
+    selector._create_generated_molecule()
+
+    assert calls[0]["collection"].endswith("/PRODUCT_COLLECTION")
+    assert calls[0]["expected_representation"] == representation
+    assert selector.dropdown.value == "new-product"
+    assert "created, indexed" in selector.create_generated_box.children[0].value
+    assert selector.structure_search.last_hits == (exact_hit,)
+
+
+def test_simulation_add_product_uses_product_molecule_selector(
+    monkeypatch, simulations_widgets
+):
+    calls = []
+
+    class FakeMoleculeWidget(simulations_widgets.ipw.VBox):
+        def __init__(self, session, accordion, index, **kwargs):
+            super().__init__()
+            calls.append((session, accordion, index, kwargs))
+            self.dropdown = simulations_widgets.ipw.Dropdown()
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "MoleculeWidget",
+        FakeMoleculeWidget,
+    )
+    accordion = simulations_widgets.ipw.Accordion()
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        reacprod_concepts_accordion=accordion,
+    )
+
+    simulations_widgets.SimulationDetailsWidget.add_reacprod_concept(widget, None)
+
+    assert calls == [
+        (
+            widget.openbis_session,
+            accordion,
+            0,
+            {
+                "collection_key": "Product Molecule",
+                "role": "product molecule",
+            },
+        )
+    ]
+    assert len(accordion.children) == 1
 
 
 def test_atom_model_selector_uses_bulk_names(monkeypatch, simulations_widgets):
@@ -2097,3 +2409,37 @@ def test_spm_editor_uses_multi_mode_checkboxes_and_numeric_lists(
     values = widget.values()
     assert values["bias_voltages_v"] == [-1.0, 0.0, 1.0]
     assert values["heights_angstrom"] == [4.0, 6.0]
+
+
+def test_simulation_add_product_offers_checked_aiida_structure(
+    monkeypatch, simulations_widgets
+):
+    calls = []
+
+    class FakeMoleculeWidget(simulations_widgets.ipw.VBox):
+        def __init__(self, session, accordion, index, **kwargs):
+            super().__init__()
+            calls.append((session, accordion, index, kwargs))
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets,
+        "MoleculeWidget",
+        FakeMoleculeWidget,
+    )
+    structure = object()
+    accordion = simulations_widgets.ipw.Accordion()
+    widget = SimpleNamespace(
+        openbis_session=object(),
+        reacprod_concepts_accordion=accordion,
+        _checked_workchain=SimpleNamespace(
+            inputs=SimpleNamespace(structure=structure)
+        ),
+    )
+
+    simulations_widgets.SimulationDetailsWidget.add_reacprod_concept(widget, None)
+
+    assert calls[0][3] == {
+        "collection_key": "Product Molecule",
+        "role": "product molecule",
+        "structure": structure,
+    }
