@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE CDXML SYSTEM "https://static.chemistry.revvitycloud.com/cdxml/CDXML.dtd" >
+<CDXML CreationProgram="AiiDA periodic CDXML prototype" Name="periodic-gnr.cdxml" BoundingBox="0 0 212.47 265.06" BondLength="14.40" BondSpacing="18" ChainAngle="120" InterpretChemically="yes" HideImplicitHydrogens="no" ShowTerminalCarbonLabels="no" ShowNonTerminalCarbonLabels="no">
+  <page id="1">
+    <fragment id="2">
+      <n id="10" p="40.2178 169.5800" />
+      <n id="11" p="40.2178 183.9715" />
+      <n id="12" p="52.5117 162.1091" />
+      <n id="13" p="64.1623 170.5608" />
+      <n id="14" p="64.1623 184.9693" />
+      <n id="15" p="51.8535 192.4331" />
+      <n id="16" p="52.1930 147.7125" />
+      <n id="17" p="76.1315 147.7125" />
+      <n id="18" p="75.8128 162.1091" />
+      <n id="19" p="40.2178 125.3286" />
+      <n id="20" p="40.2178 139.7311" />
+      <n id="21" p="40.2178 81.0882" />
+      <n id="22" p="40.2178 95.4797" />
+      <n id="23" p="51.8535 72.6266" />
+      <n id="24" p="47.4294 206.1380" />
+      <n id="25" p="56.9454 216.9623" />
+      <n id="26" p="47.4254 227.7797" />
+      <n id="27" p="47.4253 37.2800" />
+      <n id="28" p="56.9453 48.0974" />
+      <n id="29" p="47.4294 58.9216" />
+      <n id="30" p="64.1622 80.0904" />
+      <n id="31" p="64.1622 94.4989" />
+      <n id="32" p="75.8128 102.9506" />
+      <n id="33" p="76.4710 72.6266" />
+      <n id="34" p="52.5116 102.9506" />
+      <n id="35" p="52.1930 117.3471" />
+      <n id="36" p="64.1622 125.3311" />
+      <n id="37" p="76.1315 117.3471" />
+      <n id="38" p="76.4710 192.4331" />
+      <n id="39" p="64.1622 139.7286" />
+      <n id="40" p="80.8951 58.9216" />
+      <n id="41" p="80.8991 37.2800" />
+      <n id="42" p="71.3791 48.0974" />
+      <n id="43" p="80.8951 206.1380" />
+      <n id="44" p="71.3792 216.9623" />
+      <n id="45" p="80.8992 227.7797" />
+      <n id="46" p="88.1067 169.5800" NumHydrogens="0" />
+      <n id="47" p="88.1067 183.9715" NumHydrogens="0" />
+      <n id="48" p="100.4005 162.1091" NumHydrogens="0" />
+      <n id="49" p="112.0511 170.5608" NumHydrogens="0" />
+      <n id="50" p="112.0511 184.9693" NumHydrogens="0" />
+      <n id="51" p="99.7424 192.4331" NumHydrogens="0" />
+      <n id="52" p="100.0818 147.7125" NumHydrogens="0" />
+      <n id="53" p="124.0203 147.7125" NumHydrogens="0" />
+      <n id="54" p="123.7017 162.1091" NumHydrogens="0" />
+      <n id="55" p="88.1067 125.3286" NumHydrogens="0" />
+      <n id="56" p="88.1067 139.7311" NumHydrogens="0" />
+      <n id="57" p="88.1066 81.0882" NumHydrogens="0" />
+      <n id="58" p="88.1066 95.4797" NumHydrogens="0" />
+      <n id="59" p="99.7423 72.6266" NumHydrogens="0" />
+      <n id="60" p="95.3183 206.1380" NumHydrogens="0" />
+      <n id="61" p="104.8342 216.9623" NumHydrogens="0" />
+      <n id="62" p="95.3142 227.7797" NumHydrogens="1" />
+      <n id="63" p="95.3141 37.2800" NumHydrogens="1" />
+      <n id="64" p="104.8341 48.0974" NumHydrogens="0" />
+      <n id="65" p="95.3182 58.9216" NumHydrogens="0" />
+      <n id="66" p="112.0511 80.0904" NumHydrogens="0" />
+      <n id="67" p="112.0511 94.4989" NumHydrogens="0" />
+      <n id="68" p="123.7016 102.9506" NumHydrogens="0" />
+      <n id="69" p="124.3598 72.6266" NumHydrogens="0" />
+      <n id="70" p="100.4005 102.9506" NumHydrogens="0" />
+      <n id="71" p="100.0818 117.3471" NumHydrogens="0" />
+      <n id="72" p="112.0511 125.3311" NumHydrogens="0" />
+      <n id="73" p="124.0203 117.3471" NumHydrogens="0" />
+      <n id="74" p="124.3598 192.4331" NumHydrogens="0" />
+      <n id="75" p="112.0511 139.7286" NumHydrogens="0" />
+      <n id="76" p="128.7839 58.9216" NumHydrogens="0" />
+      <n id="77" p="128.7880 37.2800" NumHydrogens="1" />
+      <n id="78" p="119.2680 48.0974" NumHydrogens="0" />
+      <n id="79" p="128.7840 206.1380" NumHydrogens="0" />
+      <n id="80" p="119.2680 216.9623" NumHydrogens="0" />
+      <n id="81" p="128.7880 227.7797" NumHydrogens="1" />
+      <n id="82" p="135.9955 169.5800" />
+      <n id="83" p="135.9955 183.9715" />
+      <n id="84" p="148.2894 162.1091" />
+      <n id="85" p="159.9399 170.5608" />
+      <n id="86" p="159.9399 184.9693" />
+      <n id="87" p="147.6312 192.4331" />
+      <n id="88" p="147.9707 147.7125" />
+      <n id="89" p="171.9092 147.7125" />
+      <n id="90" p="171.5905 162.1091" />
+      <n id="91" p="135.9955 125.3286" />
+      <n id="92" p="135.9955 139.7311" />
+      <n id="93" p="135.9955 81.0882" />
+      <n id="94" p="135.9955 95.4797" />
+      <n id="95" p="147.6312 72.6266" />
+      <n id="96" p="143.2071 206.1380" />
+      <n id="97" p="152.7230 216.9623" />
+      <n id="98" p="143.2031 227.7797" />
+      <n id="99" p="143.2030 37.2800" />
+      <n id="100" p="152.7230 48.0974" />
+      <n id="101" p="143.2070 58.9216" />
+      <n id="102" p="159.9399 80.0904" />
+      <n id="103" p="159.9399 94.4989" />
+      <n id="104" p="171.5905 102.9506" />
+      <n id="105" p="172.2486 72.6266" />
+      <n id="106" p="148.2893 102.9506" />
+      <n id="107" p="147.9707 117.3471" />
+      <n id="108" p="159.9399 125.3311" />
+      <n id="109" p="171.9092 117.3471" />
+      <n id="110" p="172.2487 192.4331" />
+      <n id="111" p="159.9399 139.7286" />
+      <n id="112" p="176.6727 58.9216" />
+      <n id="113" p="176.6768 37.2800" />
+      <n id="114" p="167.1568 48.0974" />
+      <n id="115" p="176.6728 206.1380" />
+      <n id="116" p="167.1569 216.9623" />
+      <n id="117" p="176.6769 227.7797" />
+      <b id="118" B="10" E="12" Order="2" />
+      <b id="119" B="10" E="11" />
+      <b id="120" B="11" E="15" Order="2" />
+      <b id="121" B="12" E="16" />
+      <b id="122" B="12" E="13" />
+      <b id="123" B="13" E="14" />
+      <b id="124" B="13" E="18" Order="2" />
+      <b id="125" B="14" E="38" Order="2" />
+      <b id="126" B="14" E="15" />
+      <b id="127" B="15" E="24" />
+      <b id="128" B="16" E="20" Order="2" />
+      <b id="129" B="16" E="39" />
+      <b id="130" B="17" E="56" />
+      <b id="131" B="17" E="39" Order="2" />
+      <b id="132" B="17" E="18" />
+      <b id="133" B="19" E="35" Order="2" />
+      <b id="134" B="19" E="20" />
+      <b id="135" B="21" E="23" Order="2" />
+      <b id="136" B="21" E="22" />
+      <b id="137" B="22" E="34" Order="2" />
+      <b id="138" B="23" E="30" />
+      <b id="139" B="23" E="29" />
+      <b id="140" B="24" E="25" Order="2" />
+      <b id="141" B="25" E="26" />
+      <b id="142" B="27" E="28" Order="2" />
+      <b id="143" B="28" E="29" />
+      <b id="144" B="30" E="31" />
+      <b id="145" B="30" E="33" Order="2" />
+      <b id="146" B="31" E="32" Order="2" />
+      <b id="147" B="31" E="34" />
+      <b id="148" B="32" E="37" />
+      <b id="149" B="33" E="40" />
+      <b id="150" B="34" E="35" />
+      <b id="151" B="35" E="36" />
+      <b id="152" B="36" E="37" Order="2" />
+      <b id="153" B="36" E="39" />
+      <b id="154" B="38" E="43" />
+      <b id="155" B="40" E="42" />
+      <b id="156" B="41" E="42" Order="2" />
+      <b id="157" B="43" E="44" Order="2" />
+      <b id="158" B="44" E="45" />
+      <b id="159" B="25" E="44" />
+      <b id="160" B="28" E="42" />
+      <b id="161" B="46" E="48" Order="2" />
+      <b id="162" B="46" E="47" />
+      <b id="163" B="46" E="18" />
+      <b id="164" B="47" E="38" />
+      <b id="165" B="47" E="51" Order="2" />
+      <b id="166" B="48" E="52" />
+      <b id="167" B="48" E="49" />
+      <b id="168" B="49" E="50" />
+      <b id="169" B="49" E="54" Order="2" />
+      <b id="170" B="50" E="74" Order="2" />
+      <b id="171" B="50" E="51" />
+      <b id="172" B="51" E="60" />
+      <b id="173" B="52" E="56" Order="2" />
+      <b id="174" B="52" E="75" />
+      <b id="175" B="53" E="92" />
+      <b id="176" B="53" E="75" Order="2" />
+      <b id="177" B="53" E="54" />
+      <b id="178" B="55" E="71" Order="2" />
+      <b id="179" B="55" E="37" />
+      <b id="180" B="55" E="56" />
+      <b id="181" B="57" E="33" />
+      <b id="182" B="57" E="59" Order="2" />
+      <b id="183" B="57" E="58" />
+      <b id="184" B="58" E="70" Order="2" />
+      <b id="185" B="58" E="32" />
+      <b id="186" B="59" E="66" />
+      <b id="187" B="59" E="65" />
+      <b id="188" B="60" E="43" />
+      <b id="189" B="60" E="61" Order="2" />
+      <b id="190" B="61" E="62" />
+      <b id="191" B="62" E="45" Order="2" />
+      <b id="192" B="63" E="64" Order="2" />
+      <b id="193" B="63" E="41" />
+      <b id="194" B="64" E="65" />
+      <b id="195" B="65" E="40" Order="2" />
+      <b id="196" B="66" E="67" />
+      <b id="197" B="66" E="69" Order="2" />
+      <b id="198" B="67" E="68" Order="2" />
+      <b id="199" B="67" E="70" />
+      <b id="200" B="68" E="73" />
+      <b id="201" B="69" E="76" />
+      <b id="202" B="70" E="71" />
+      <b id="203" B="71" E="72" />
+      <b id="204" B="72" E="73" Order="2" />
+      <b id="205" B="72" E="75" />
+      <b id="206" B="74" E="79" />
+      <b id="207" B="76" E="78" />
+      <b id="208" B="77" E="78" Order="2" />
+      <b id="209" B="79" E="80" Order="2" />
+      <b id="210" B="80" E="81" />
+      <b id="211" B="61" E="80" />
+      <b id="212" B="64" E="78" />
+      <b id="213" B="82" E="84" Order="2" />
+      <b id="214" B="82" E="83" />
+      <b id="215" B="82" E="54" />
+      <b id="216" B="83" E="74" />
+      <b id="217" B="83" E="87" Order="2" />
+      <b id="218" B="84" E="88" />
+      <b id="219" B="84" E="85" />
+      <b id="220" B="85" E="86" />
+      <b id="221" B="85" E="90" Order="2" />
+      <b id="222" B="86" E="110" Order="2" />
+      <b id="223" B="86" E="87" />
+      <b id="224" B="87" E="96" />
+      <b id="225" B="88" E="92" Order="2" />
+      <b id="226" B="88" E="111" />
+      <b id="227" B="89" E="111" Order="2" />
+      <b id="228" B="89" E="90" />
+      <b id="229" B="91" E="107" Order="2" />
+      <b id="230" B="91" E="73" />
+      <b id="231" B="91" E="92" />
+      <b id="232" B="93" E="69" />
+      <b id="233" B="93" E="95" Order="2" />
+      <b id="234" B="93" E="94" />
+      <b id="235" B="94" E="106" Order="2" />
+      <b id="236" B="94" E="68" />
+      <b id="237" B="95" E="102" />
+      <b id="238" B="95" E="101" />
+      <b id="239" B="96" E="79" />
+      <b id="240" B="96" E="97" Order="2" />
+      <b id="241" B="97" E="98" />
+      <b id="242" B="98" E="81" Order="2" />
+      <b id="243" B="99" E="100" Order="2" />
+      <b id="244" B="99" E="77" />
+      <b id="245" B="100" E="101" />
+      <b id="246" B="101" E="76" Order="2" />
+      <b id="247" B="102" E="103" />
+      <b id="248" B="102" E="105" Order="2" />
+      <b id="249" B="103" E="104" Order="2" />
+      <b id="250" B="103" E="106" />
+      <b id="251" B="104" E="109" />
+      <b id="252" B="105" E="112" />
+      <b id="253" B="106" E="107" />
+      <b id="254" B="107" E="108" />
+      <b id="255" B="108" E="109" Order="2" />
+      <b id="256" B="108" E="111" />
+      <b id="257" B="110" E="115" />
+      <b id="258" B="112" E="114" />
+      <b id="259" B="113" E="114" Order="2" />
+      <b id="260" B="115" E="116" Order="2" />
+      <b id="261" B="116" E="117" />
+      <b id="262" B="97" E="116" />
+      <b id="263" B="100" E="114" />
+    </fragment>
+    <graphic id="264" BoundingBox="84.5029 241.4597 84.5029 23.6000" GraphicType="Bracket" BracketType="Square" LipSize="12" />
+    <graphic id="265" BoundingBox="132.3918 23.6000 132.3918 241.4597" GraphicType="Bracket" BracketType="Square" LipSize="12" />
+    <bracketedgroup id="266" BracketedObjectIDs="46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81">
+      <bracketattachment id="267" GraphicID="264">
+        <crossingbond id="268" BondID="164" InnerAtomID="47" />
+        <crossingbond id="269" BondID="163" InnerAtomID="46" />
+        <crossingbond id="270" BondID="130" InnerAtomID="56" />
+        <crossingbond id="271" BondID="179" InnerAtomID="55" />
+        <crossingbond id="272" BondID="181" InnerAtomID="57" />
+        <crossingbond id="273" BondID="185" InnerAtomID="58" />
+        <crossingbond id="274" BondID="188" InnerAtomID="60" />
+        <crossingbond id="275" BondID="191" InnerAtomID="62" />
+        <crossingbond id="276" BondID="193" InnerAtomID="63" />
+        <crossingbond id="277" BondID="195" InnerAtomID="65" />
+      </bracketattachment>
+      <bracketattachment id="278" GraphicID="265">
+        <crossingbond id="279" BondID="216" InnerAtomID="74" />
+        <crossingbond id="280" BondID="215" InnerAtomID="54" />
+        <crossingbond id="281" BondID="175" InnerAtomID="53" />
+        <crossingbond id="282" BondID="230" InnerAtomID="73" />
+        <crossingbond id="283" BondID="232" InnerAtomID="69" />
+        <crossingbond id="284" BondID="236" InnerAtomID="68" />
+        <crossingbond id="285" BondID="239" InnerAtomID="79" />
+        <crossingbond id="286" BondID="242" InnerAtomID="81" />
+        <crossingbond id="287" BondID="244" InnerAtomID="77" />
+        <crossingbond id="288" BondID="246" InnerAtomID="76" />
+      </bracketattachment>
+    </bracketedgroup>
+  </page>
+</CDXML>

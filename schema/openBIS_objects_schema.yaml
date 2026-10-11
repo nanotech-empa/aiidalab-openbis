@@ -144,7 +144,6 @@ classes:
             - crystal_concepts
             - geometry_optimisation
             - molecules
-            - reaction_product_concepts
 
     BandStructure:
         title: Band Structure
@@ -783,7 +782,9 @@ classes:
             openbis_code: MOLE
             openbis_label: Molecule
         slots:
+            - molecules
             - smiles
+            - cxsmiles
             - sum_formula
             - cas_number
             - iupac_name
@@ -1026,19 +1027,6 @@ classes:
             - reaction_product_concept
             - sample
 
-    ReactionProductConcept:
-        title: Reaction Product Concept
-        is_a: Thing
-        class_uri:
-        description: Reaction product concept
-        annotations:
-            openbis_object: true
-            openbis_code: RPCO
-            openbis_label: Reaction Product Concept
-        slots:
-            - sum_formula
-            - molecules
-            - crystal_concepts
 
     ResistanceObservable:
         title: Resistance Observable
@@ -2141,11 +2129,6 @@ classes:
                 range: ReactionProduct
                 description: reaction products container
 
-            reaction_product_concepts:
-                multivalued: true
-                inlined_as_list: true
-                range: ReactionProductConcept
-                description: reaction product concepts container
 
             results:
                 multivalued: true
@@ -4229,6 +4212,16 @@ slots:
             openbis_type: VARCHAR
             openbis_label: Smiles
 
+    cxsmiles:
+        title: CXSMILES
+        range: string
+        description: Round-trip validated CXSMILES representation of a periodic repeat unit
+        slot_uri: schema:cxsmiles
+        multivalued: false
+        annotations:
+            openbis_type: VARCHAR
+            openbis_label: CXSMILES
+
     special_storage_conditions:
         title: Special storage conditions
         range: SpecialStorageConditionsEnum
@@ -5142,15 +5135,15 @@ slots:
     molecules:
         title: Molecules
         range: Molecule
-        description: molecules
+        description: Molecule objects linked as parents
         multivalued: true
         annotations:
-            openbis_type: OBJECT
+            openbis_type: OBJECT (PARENT)
             openbis_label: Molecules
 
     molecules_parent:
         title: Molecules
-        range: MoleculeConcept
+        range: Molecule
         description: molecules parent
         multivalued: true
         annotations:
@@ -5213,31 +5206,13 @@ slots:
             openbis_label: Protocol
 
     reaction_product_concept:
-        title: Reaction Product Concept
-        range: ReactionProductConcept
-        description: reaction product concept
+        title: Product Molecule
+        range: Molecule
+        description: Product molecule concept
         multivalued: false
         annotations:
-            openbis_type: OBJECT
-            openbis_label: Reaction Product Concept
-
-    reaction_product_concepts:
-        title: Reaction Product Concepts
-        range: ReactionProductConcept
-        description: reaction product concepts
-        multivalued: true
-        annotations:
-            openbis_type: OBJECT
-            openbis_label: Reaction Product Concepts
-
-    reaction_product_concepts_parent:
-        title: Reaction Product Concepts
-        range: ReactionProductConcept
-        description: reaction product concepts parent
-        multivalued: true
-        annotations:
             openbis_type: OBJECT (PARENT)
-            openbis_label: Reaction Product Concepts
+            openbis_label: Product Molecule
 
     results:
         title: Results

@@ -3,6 +3,7 @@ from . import openbis_utils
 from pydantic import BaseModel, Field, model_validator
 from typing import List, Dict, Optional
 from datetime import datetime
+from pathlib import Path
 from enum import Enum
 import subprocess
 import shutil
@@ -145,8 +146,32 @@ def read_json(filename: str) -> dict:
         return json.load(file)
 
 
+OPENBIS_CONFIG = read_json(
+    Path(__file__).resolve().parents[1] / "config" / "openbis_config.json"
+)
+PRODUCT_MOLECULE_COLLECTION = OPENBIS_CONFIG["Collections"]["Paths"][
+    "Product Molecule"
+]
+
+
 def auto_label(type_str: str) -> str:
     return type_str.replace("_", " ").title()
+
+
+def molecule_parents(obj):
+    """Return MOLECULE parents for either precursor or product concepts."""
+    result = []
+    for parent_ref in getattr(obj, "parents", []) or []:
+        parent = (
+            parent_ref
+            if getattr(parent_ref, "props", None) is not None
+            else openbis_utils.get_openbis_object(parent_ref)
+        )
+        raw_type = getattr(parent, "type", None)
+        parent_type = getattr(raw_type, "code", raw_type)
+        if parent is not None and parent_type == "MOLECULE":
+            result.append(parent)
+    return result
 
 
 def crystal_found(obj, crystal):
@@ -234,7 +259,7 @@ def reacprod_concept_found(obj, reacprod_concept):
 
     obj_props = obj.props.all()
     obj_name = obj_props.get("name")
-    obj_molecules = obj_props.get("molecules") or []
+    obj_molecules = molecule_parents(obj)
 
     if reacprod_concept.name and obj_name != reacprod_concept.name:
         return False
@@ -245,8 +270,7 @@ def reacprod_concept_found(obj, reacprod_concept):
 
         for prompt_molecule in reacprod_concept.molecules:
             matched = False
-            for molecule_permId in obj_molecules:
-                molecule_obj = openbis_utils.get_openbis_object(molecule_permId)
+            for molecule_obj in obj_molecules:
                 molecule_props = molecule_obj.props.all()
 
                 if (
@@ -280,61 +304,15 @@ def reacprod_found(obj, reac_prod):
 
     obj_props = obj.props.all()
     obj_name = obj_props.get("name")
-    obj_concept_id = obj_props.get("reaction_product_concept")
 
     if reac_prod.name and obj_name != reac_prod.name:
         return False
 
-    if reac_prod.reacprod_concept:
-        if not obj_concept_id:
-            return False
-
-        reacprod_concept = openbis_utils.get_openbis_object(obj_concept_id)
-        reacprod_props = reacprod_concept.props.all()
-
-        if reac_prod.reacprod_concept.sum_formula:
-            if (
-                reacprod_props.get("sum_formula")
-                != reac_prod.reacprod_concept.sum_formula
-            ):
-                return False
-
-        if reac_prod.reacprod_concept.molecules:
-            reacprod_concept_molecules = reacprod_props.get("molecules") or []
-            if not reacprod_concept_molecules:
-                return False
-
-            for prompt_mol in reac_prod.reacprod_concept.molecules:
-                matched = False
-                for mol_id in reacprod_concept_molecules:
-                    molecule_obj = openbis_utils.get_openbis_object(mol_id)
-                    mol_props = molecule_obj.props.all()
-                    mol_empa_number = int(mol_props.get("empa_number") or 0)
-
-                    if (
-                        prompt_mol.empa_number
-                        and prompt_mol.empa_number != mol_empa_number
-                    ):
-                        continue
-                    if prompt_mol.smiles and prompt_mol.smiles != mol_props.get(
-                        "smiles"
-                    ):
-                        continue
-                    if (
-                        prompt_mol.sum_formula
-                        and prompt_mol.sum_formula != mol_props.get("sum_formula")
-                    ):
-                        continue
-                    if prompt_mol.iupac_name and prompt_mol.iupac_name != mol_props.get(
-                        "iupac_name"
-                    ):
-                        continue
-
-                    matched = True
-                    break
-
-                if not matched:
-                    return False
+    if reac_prod.reacprod_concept and not any(
+        reacprod_concept_found(product_molecule, reac_prod.reacprod_concept)
+        for product_molecule in molecule_parents(obj)
+    ):
+        return False
 
     return True
 
@@ -870,33 +848,34 @@ def get_simulations_by_reacprod_concept(
     reacprod_concept: ReacProdConceptArgs,
 ) -> List[str]:
     """
-    Get all the simulations that were done using the reaction product chosen by the user. Pay attention that
-    reaction product are derived from molecules. The user may call them molecules. So if you dont find anything the user asked,
-    ask the user if it is a molecule or a reaction product.
+    Get simulations linked to a product molecule from the product collection.
 
     Args:
-        reacprod_concept (ReacProdConceptArgs): A data object describing the reaction product concept to search for. It may include:
+        reacprod_concept (ReacProdConceptArgs): A data object describing the product molecule to search for. It may include:
             - permId(optional, str): PermID, e.g., 20250922145817954-468
             - name (optional, str): Name, e.g. 7AGNR
-            - molecules (List[MoleculeArgs], optional): A list of one or more molecules used to create the reaction product concept.
+            - molecules (List[MoleculeArgs], optional): A list of one or more molecule parents used to define the product molecule.
               Each molecule may include:
                 - smiles (str, optional): SMILES string, e.g. "CCO"
                 - sum_formula (str, optional): Molecular sum formula, e.g. "CH4"
                 - iupac_name (str, optional): IUPAC name, e.g. "benzene"
     Return:
-        List[str]: Summary of simulations performed using the input reaction product concept. In case there are more than one
-        possible reaction product concepts, the function returns the names and permIDs with the reaction product concepts
+        List[str]: Summary of simulations linked to the input product molecule. If more than one
+        product molecule matches, the function returns their names and permIDs
         in order for the user to pick the one that the user wants to search about.
     """
     objects_data = []
-    obj_type = "REACTION_PRODUCT_CONCEPT"
+    obj_type = "MOLECULE"
     if reacprod_concept.permId:
         obj = openbis_utils.get_openbis_object(reacprod_concept.permId)
         if obj is None:
-            return ["No reaction product concept was found."]
+            return ["No product molecule was found."]
     else:
         objects = openbis_utils.get_openbis_objects(
-            type=obj_type, props=["name"], attrs=["children"]
+            type=obj_type,
+            collection=PRODUCT_MOLECULE_COLLECTION,
+            props=["name"],
+            attrs=["children"],
         )
         reacprod_concept_objects = []
         for obj in objects:
@@ -905,13 +884,13 @@ def get_simulations_by_reacprod_concept(
                 reacprod_concept_objects.append(obj)
 
         if len(reacprod_concept_objects) == 0:
-            return ["No reaction product concept was found."]
+            return ["No product molecule was found."]
         elif len(reacprod_concept_objects) == 1:
             obj = reacprod_concept_objects[0]
         else:
             for obj in reacprod_concept_objects:
                 objects_data.append(
-                    f"Reaction product concept {obj.props['name']} ({obj.permId})."
+                    f"Product molecule {obj.props['name']} ({obj.permId})."
                 )
             return objects_data
 

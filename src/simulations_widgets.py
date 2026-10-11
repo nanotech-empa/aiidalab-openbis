@@ -124,7 +124,7 @@ class ImportSimulationsWidget(ipw.VBox):
         )
 
         self.select_reacprod_concepts_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 20px;'>Select reaction product concepts</span>"
+            value="<span style='font-weight: bold; font-size: 20px;'>Select product molecules</span>"
         )
 
         self.select_slab_title = ipw.HTML(
@@ -151,21 +151,22 @@ class ImportSimulationsWidget(ipw.VBox):
         )
 
         self.reacprod_concepts_accordion = ipw.Accordion()
-        reaction_products_available = (
-            "Reaction Product Concept" in widgets.OPENBIS_OBJECT_TYPES
+        product_molecules_available = (
+            "Molecule" in widgets.OPENBIS_OBJECT_TYPES
+            and "Product Molecule" in widgets.OPENBIS_COLLECTIONS_PATHS
         )
         self.add_reacprod_concept_button = ipw.Button(
             description=(
-                "Add reaction product concept"
-                if reaction_products_available
-                else "Reaction products unavailable"
+                "Add product molecule"
+                if product_molecules_available
+                else "Product molecules unavailable"
             ),
-            disabled=not reaction_products_available,
+            disabled=not product_molecules_available,
             button_style="success",
             tooltip=(
-                "Add reaction product concept"
-                if reaction_products_available
-                else "The connected openBIS schema has no REACTION_PRODUCT_CONCEPT type"
+                "Add product molecule"
+                if product_molecules_available
+                else "The configured openBIS product molecule collection is unavailable"
             ),
             layout=ipw.Layout(width="230px", height="25px"),
         )
@@ -1278,10 +1279,12 @@ class ImportSimulationsWidget(ipw.VBox):
             self.reacprod_concepts_accordion.children
         )
         reacprod_concept_index = len(reacprod_concepts_accordion_children)
-        reacprod_concept_widget = widgets.ReacProdConceptWidget(
+        reacprod_concept_widget = widgets.MoleculeWidget(
             self.openbis_session,
             self.reacprod_concepts_accordion,
             reacprod_concept_index,
+            collection_key="Product Molecule",
+            role="product molecule",
         )
         reacprod_concept_widget.dropdown.observe(
             self._update_material_match_controls,
@@ -2012,7 +2015,7 @@ class ExportSimulationsWidget(ipw.VBox):
                 else:
                     selected_molecules_ids.append(mol_id)
 
-            # Get reaction products concepts
+            # Get product molecules
             selected_reac_prods_ids = []
             for reac_prod_widget in selected_reac_prods_widgets:
                 reac_prod_id = reac_prod_widget.dropdown.value
@@ -2290,6 +2293,7 @@ class SimulationDetailsWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.used_aiida = used_aiida
         self.target_experiment_id = "-1"
+        self._checked_workchain = None
 
         self.related_objects_title = ipw.HTML(
             value=(
@@ -2310,7 +2314,7 @@ class SimulationDetailsWidget(ipw.VBox):
         )
 
         self.select_reacprod_concepts_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 18px;'>Select reaction product concepts</span>"
+            value="<span style='font-weight: bold; font-size: 18px;'>Select product molecules</span>"
         )
 
         self.select_slab_title = ipw.HTML(
@@ -2331,21 +2335,22 @@ class SimulationDetailsWidget(ipw.VBox):
         )
 
         self.reacprod_concepts_accordion = ipw.Accordion()
-        self.reaction_products_available = (
-            "Reaction Product Concept" in widgets.OPENBIS_OBJECT_TYPES
+        self.product_molecules_available = (
+            "Molecule" in widgets.OPENBIS_OBJECT_TYPES
+            and "Product Molecule" in widgets.OPENBIS_COLLECTIONS_PATHS
         )
         self.add_reacprod_concept_button = ipw.Button(
             description=(
-                "Add reaction product concept"
-                if self.reaction_products_available
-                else "Reaction products unavailable"
+                "Add product molecule"
+                if self.product_molecules_available
+                else "Product molecules unavailable"
             ),
-            disabled=not self.reaction_products_available,
+            disabled=not self.product_molecules_available,
             button_style="success",
             tooltip=(
-                "Add reaction product concept"
-                if self.reaction_products_available
-                else "The connected openBIS schema has no REACTION_PRODUCT_CONCEPT type"
+                "Add product molecule"
+                if self.product_molecules_available
+                else "The configured openBIS product molecule collection is unavailable"
             ),
             layout=ipw.Layout(width="230px", height="25px"),
         )
@@ -2683,6 +2688,7 @@ class SimulationDetailsWidget(ipw.VBox):
     def check_aiida_simulation(self, _button=None):
         """Validate a PK and prepare previews only for supported WorkChains."""
         self._clear_inferred_molecules()
+        self._checked_workchain = None
         self.simulation_check_status.value = ""
         self._clear_preview_suggestions()
         self.preview_suggestions_status.value = ""
@@ -2717,6 +2723,7 @@ class SimulationDetailsWidget(ipw.VBox):
             )
             return
 
+        self._checked_workchain = workchain
         description = aiida_utils._workchain_description(workchain)
         suffix = f": {html.escape(description)}" if description else ""
         if workchain.pk != pk:
@@ -3031,7 +3038,7 @@ class SimulationDetailsWidget(ipw.VBox):
                 self.material_type_dropdown,
                 self.material_details_vbox,
             ]
-            if self.reaction_products_available:
+            if self.product_molecules_available:
                 children.extend(
                     [
                         self.select_reacprod_concepts_title,
@@ -3174,11 +3181,23 @@ class SimulationDetailsWidget(ipw.VBox):
             registration_date_checkbox.observe(sort_material_dropdown, names="value")
             material_dropdown.observe(load_material_details, names="value")
 
+    def _checked_structure(self):
+        workchain = getattr(self, "_checked_workchain", None)
+        inputs = getattr(workchain, "inputs", None)
+        return getattr(inputs, "structure", None)
+
     def add_molecule(self, b):
         molecules_accordion_children = list(self.molecules_accordion.children)
         molecule_index = len(molecules_accordion_children)
+        kwargs = {}
+        structure = SimulationDetailsWidget._checked_structure(self)
+        if structure is not None:
+            kwargs["structure"] = structure
         molecule_widget = widgets.MoleculeWidget(
-            self.openbis_session, self.molecules_accordion, molecule_index
+            self.openbis_session,
+            self.molecules_accordion,
+            molecule_index,
+            **kwargs,
         )
         molecules_accordion_children.append(molecule_widget)
         self.molecules_accordion.children = molecules_accordion_children
@@ -3188,10 +3207,18 @@ class SimulationDetailsWidget(ipw.VBox):
             self.reacprod_concepts_accordion.children
         )
         reacprod_concept_index = len(reacprod_concepts_accordion_children)
-        reacprod_concept_widget = widgets.ReacProdConceptWidget(
+        kwargs = {
+            "collection_key": "Product Molecule",
+            "role": "product molecule",
+        }
+        structure = SimulationDetailsWidget._checked_structure(self)
+        if structure is not None:
+            kwargs["structure"] = structure
+        reacprod_concept_widget = widgets.MoleculeWidget(
             self.openbis_session,
             self.reacprod_concepts_accordion,
             reacprod_concept_index,
+            **kwargs,
         )
         reacprod_concepts_accordion_children.append(reacprod_concept_widget)
         self.reacprod_concepts_accordion.children = reacprod_concepts_accordion_children
