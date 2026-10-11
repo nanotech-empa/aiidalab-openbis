@@ -23,12 +23,13 @@ from src.chemical_structures import (
     periodic_graph_from_cxsmiles,
     periodic_graph_key,
     periodic_graphs_from_cdxml,
+    periodic_search_molecule,
     representation_from_cdxml,
 )
 
 MOLECULE_TYPE = "MOLECULE"
 DATASET_TYPES = {"ATTACHMENT", "RAW_DATA"}
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 _MORGAN = GetMorganGenerator(radius=2, fpSize=2048)
 
 
@@ -107,17 +108,8 @@ def _parent_smiles(molecule: Chem.Mol) -> str:
     return Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=False)
 
 
-def _periodic_parent_key(periodic_key: str) -> str:
-    covers = periodic_key.split("|")
-    if len(covers) != 2:
-        raise ValueError("Periodic graph key does not contain its 3- and 5-cell covers")
-    parents = []
-    for cover in covers:
-        molecule = Chem.MolFromSmiles(cover)
-        if molecule is None:
-            raise ValueError("Periodic graph key contains an invalid cover SMILES")
-        parents.append(_parent_smiles(molecule))
-    return "periodic:" + "|".join(parents)
+def _periodic_parent_key(graph) -> str:
+    return "periodic:" + _parent_smiles(periodic_search_molecule(graph, 1))
 
 
 def search_representation_from_mol(
@@ -160,20 +152,40 @@ def _periodic_search_representation(
     source: str,
     source_id: str,
     warning: str = "",
+    graph=None,
 ) -> SearchRepresentation:
-    search_smiles = periodic_key.split("|", maxsplit=1)[0]
-    if not search_smiles or Chem.MolFromSmiles(search_smiles) is None:
-        raise ValueError("The periodic graph has no valid search cover")
+    warnings = [warning] if warning else []
+    for repeats in (3, 1):
+        try:
+            search_smiles = _strict_smiles(periodic_search_molecule(graph, repeats))
+            if Chem.MolFromSmiles(search_smiles) is None:
+                raise ValueError("The periodic graph has no valid search cover")
+        except ValueError:
+            if repeats == 1:
+                raise
+        else:
+            if repeats == 1:
+                warnings.append(
+                    "Fingerprint uses one capped repeat because RDKit cannot re-kekulize the larger cover; exact identity still uses both periodic graph covers"
+                )
+            break
+    try:
+        parent_key = _periodic_parent_key(graph)
+    except ValueError:
+        parent_key = f"periodic:{periodic_key}"
+        warnings.append(
+            "Normalized-parent equivalence unavailable for this periodic graph"
+        )
     return SearchRepresentation(
         source=source,
         source_id=source_id,
         strict_key=f"periodic:{periodic_key}",
-        parent_key=_periodic_parent_key(periodic_key),
+        parent_key=parent_key,
         search_smiles=search_smiles,
         formula=formula,
         periodic=True,
         periodic_key=periodic_key,
-        warning=warning,
+        warning="; ".join(warnings),
     )
 
 
@@ -190,10 +202,11 @@ def search_representation_from_cxsmiles(
         formula,
         source="CXSMILES",
         source_id=source_id,
+        graph=graph,
     )
 
 
-def search_representations_from_cdxml(
+def _search_representations_from_selected_cdxml(
     content: bytes | str,
     source_id: str = "query.cdxml",
 ) -> tuple[SearchRepresentation, ...]:
@@ -209,6 +222,7 @@ def search_representations_from_cdxml(
                 source_id=(
                     source_id if count == 1 else f"{source_id}#repeat-{index + 1}"
                 ),
+                graph=graph,
             )
             for index, graph in enumerate(periodic_graphs)
         )
@@ -225,6 +239,24 @@ def search_representations_from_cdxml(
             warning=representation.warning,
         ),
     )
+
+
+def search_representations_from_cdxml(content: bytes | str, source_id="query.cdxml"):
+    """Index each drawing separately, using the importer's structure selection."""
+    from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
+
+    options = CdxmlUploadWidget._cdxml_structure_options(content)
+    if len(options) <= 1:
+        return _search_representations_from_selected_cdxml(content, source_id)
+    representations = []
+    for label, index in options:
+        selected = CdxmlUploadWidget._select_cdxml_structure(content, index)
+        representations.extend(
+            _search_representations_from_selected_cdxml(
+                selected, f"{source_id}#structure-{index + 1}:{label}"
+            )
+        )
+    return tuple(representations)
 
 
 def search_representation_from_cdxml(
@@ -784,6 +816,10 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             description="Upload CDXML",
         )
         self.cdxml.layout.display = "none"
+        self.structure_selector = ipw.Dropdown(
+            description="Structure", layout={"display": "none"}
+        )
+        self._updating_structure_selector = False
         self.active_source = ipw.HTML()
         self.query_preview = ipw.Image(format="png", layout={"display": "none"})
         self.preview_message = ipw.HTML()
@@ -832,6 +868,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.input_kind.observe(self._switch_input, names="value")
         self.smiles.observe(self._smiles_changed, names="value")
         self.cdxml.observe(self._uploaded_cdxml_changed, names="value")
+        self.structure_selector.observe(self._selected_structure_changed, names="value")
         self.update_button.on_click(self._update)
         self.search_button.on_click(self._search)
         self.results.observe(self._select, names="value")
@@ -845,6 +882,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 self.input_kind,
                 self.smiles,
                 self.cdxml,
+                self.structure_selector,
                 self.active_source,
                 self.query_preview,
                 self.preview_message,
@@ -874,6 +912,11 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         use_smiles = change["new"] == "smiles"
         self.smiles.layout.display = "" if use_smiles else "none"
         self.cdxml.layout.display = "none" if use_smiles else ""
+        self.structure_selector.layout.display = (
+            ""
+            if not use_smiles and len(self.structure_selector.options) > 1
+            else "none"
+        )
         if use_smiles:
             self.active_source.value = ""
         elif self._generated_cdxml is not None:
@@ -897,7 +940,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.preview_message.value = ""
         if self.input_kind.value != "cdxml":
             return
-        _filename, content = self._generated_cdxml or _upload_content(self.cdxml)
+        _filename, content = self._active_cdxml_query()
         if not content:
             return
         try:
@@ -916,6 +959,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         if change.get("new"):
             self._generated_cdxml = None
             filename, _content = _upload_content(self.cdxml)
+            self._configure_structure_selector(_content)
             self.active_source.value = (
                 "<b>Active CDXML:</b> browser upload "
                 f"{html.escape(filename or 'query.cdxml')}"
@@ -935,6 +979,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
     def set_cdxml_query(self, content: bytes, filename="generated.cdxml"):
         """Load generated CDXML without emulating a browser file upload."""
         self._generated_cdxml = (str(filename), bytes(content))
+        self._configure_structure_selector(content)
         self.input_kind.value = "cdxml"
         self.active_source.value = (
             "<b>Active CDXML:</b> generated and reviewed in this form · "
@@ -946,6 +991,40 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             f"Generated CDXML ready for search: {filename}.",
             "ok",
         )
+
+    def _configure_structure_selector(self, content):
+        from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
+
+        self._updating_structure_selector = True
+        try:
+            options = (
+                CdxmlUploadWidget._cdxml_structure_options(content) if content else []
+            )
+            self.structure_selector.options = options
+            self.structure_selector.value = options[0][1] if options else None
+            self.structure_selector.layout.display = (
+                "" if len(options) > 1 and self.input_kind.value == "cdxml" else "none"
+            )
+        except ValueError as exc:
+            self.structure_selector.options = []
+            self._set_status(str(exc), "error")
+        finally:
+            self._updating_structure_selector = False
+
+    def _selected_structure_changed(self, change):
+        if not self._updating_structure_selector:
+            self._clear_search_state()
+            self._refresh_query_preview()
+
+    def _active_cdxml_query(self):
+        from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
+
+        filename, content = self._generated_cdxml or _upload_content(self.cdxml)
+        if content and len(self.structure_selector.options) > 1:
+            index = self.structure_selector.value
+            content = CdxmlUploadWidget._select_cdxml_structure(content, index)
+            filename = f"{filename}#structure-{index + 1}"
+        return filename, content
 
     def _update(self, _=None):
         self.update_button.disabled = True
@@ -971,10 +1050,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 source="SMILES query",
                 source_id="query:SMILES",
             )
-        if self._generated_cdxml is not None:
-            filename, content = self._generated_cdxml
-        else:
-            filename, content = _upload_content(self.cdxml)
+        filename, content = self._active_cdxml_query()
         if content is None:
             raise ValueError("Upload or generate a CDXML query")
         return search_representation_from_cdxml(content, filename or "query.cdxml")
@@ -1022,7 +1098,8 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             }.get(synchronization, " Inactive cached records removed.")
             self._set_status(
                 f"Found {len(hits)} {periodic} matches in this collection."
-                f"{sync_message}",
+                f"{sync_message}"
+                + (f" Warning: {query.warning}." if query.warning else ""),
                 "ok" if hits else "info",
             )
             if self.on_search_complete is not None:

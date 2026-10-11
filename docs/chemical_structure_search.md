@@ -28,6 +28,25 @@ with several bracketed units can contribute several read-only search
 representations, but it is not converted automatically into one CXSMILES
 property.
 
+The parser shares atom types, H/charge/isotope/radical validation and repeat
+identification with the EMPA CDXML importer. Bracket placement is graphical;
+membership and period follow annotated atoms and all crossing bonds. An
+ambiguous source is diagnosed rather than silently dropping H. Single N/O-metal
+lines are interpreted as coordination with a warning, retaining the source.
+Multiple drawings use the same nearby-caption selector as the importer; the
+query preview and search use the selected drawing. Read-only indexing retains
+separate representations for different drawings.
+
+Periodic identity uses two canonical chemical graph encodings (three and five
+cyclic repeats). These are opaque keys, not molecules to render or parse as
+search SMILES. This avoids repeating RDKit's kekulization search on artificial
+closed covers of fused 5/7-membered systems. Fingerprints instead use an open
+capped three-repeat fragment. If that larger fragment cannot be re-kekulized,
+one capped repeat is used with a warning; exact identity still checks both graph
+covers. Normalized-parent equivalence uses a capped repeat and is diagnosed
+when unavailable. The chemical index format is version 3; older caches are
+rebuilt from openBIS. Stored CDXML/CXSMILES and concept relationships are unchanged.
+
 After an AiiDA workflow has been checked in the simulation export form, each
 new precursor or product molecule selector receives a **Generate CDXML from
 AiiDA structure** option. The current generator accepts planar C/H structures

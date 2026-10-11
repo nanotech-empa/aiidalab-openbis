@@ -31,7 +31,7 @@ class PeriodicGraph:
     """One-dimensional quotient graph for a bracketed repeat unit."""
 
     atoms: tuple[AtomSpec, ...]
-    bonds: tuple[tuple[int, int, int, float], ...]
+    bonds: tuple[tuple[int, int, int, float | str], ...]
 
 
 @dataclass(frozen=True)
@@ -72,22 +72,9 @@ def _xy(value: str) -> tuple[float, float]:
     return float(parts[0]), float(parts[1])
 
 
-def _bond_order(value: str | None) -> float:
-    if not value:
-        return 1.0
-    aliases = {"1 1/2": 1.5, "aromatic": 1.5, "dative": 1.0}
-    text = str(value).strip().lower()
-    if text in aliases:
-        return aliases[text]
-    try:
-        return float(text)
-    except ValueError as exc:
-        raise PeriodicStructureError(
-            f"Unsupported CDXML bond order {value!r}"
-        ) from exc
-
-
-def _rdkit_bond_type(order: float):
+def _rdkit_bond_type(order: float | str):
+    if order == "dative":
+        return Chem.BondType.DATIVE
     if math.isclose(order, 1.0):
         return Chem.BondType.SINGLE
     if math.isclose(order, 1.5):
@@ -99,13 +86,17 @@ def _rdkit_bond_type(order: float):
     raise PeriodicStructureError(f"Unsupported bond order {order}")
 
 
-def _order_from_rdkit(bond) -> float:
+def _order_from_rdkit(bond) -> float | str:
+    if bond.GetBondType() == Chem.BondType.DATIVE:
+        return "dative"
     if bond.GetIsAromatic():
         return 1.5
     return float(bond.GetBondTypeAsDouble())
 
 
-def _canonical_edge(begin: int, end: int, shift: int):
+def _canonical_edge(begin: int, end: int, shift: int, order=None):
+    if order == "dative":
+        return begin, end, shift
     if begin > end:
         return end, begin, -shift
     if begin == end and shift < 0:
@@ -143,288 +134,80 @@ def periodic_graph_from_cdxml(
     content: bytes | str,
     group_index: int | None = None,
 ) -> PeriodicGraph | None:
-    """Parse one bracketed one-dimensional repeat unit in CDXML."""
-    if isinstance(content, bytes):
-        content = content.decode("utf-8-sig")
-    try:
-        root = ET.fromstring(content)
-    except ET.ParseError as exc:
-        raise PeriodicStructureError(f"Invalid CDXML: {exc}") from exc
+    """Use the same validated repeat topology as the atomistic CDXML importer."""
+    from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
+    from aiidalab_widgets_empa.cdxml_graph import cdxml_root, read_cdxml_graph
+    from aiidalab_widgets_empa.cdxml_periodic import identify_repeat
 
-    groups = _elements(root, "bracketedgroup")
-    if not groups:
-        return None
-    if group_index is None:
-        if len(groups) != 1:
+    try:
+        root = cdxml_root(content)
+        groups = _elements(root, "bracketedgroup")
+        if group_index is not None:
+            if not 0 <= int(group_index) < len(groups):
+                raise PeriodicStructureError(
+                    "Bracketed repeat-unit index is out of range"
+                )
+            selected = groups[int(group_index)]
+            selected_ids = set(selected.get("BracketedObjectIDs", "").split())
+            options = CdxmlUploadWidget._cdxml_structure_options(content)
+            for _, index in options:
+                candidate = CdxmlUploadWidget._select_cdxml_structure(content, index)
+                candidate_root = cdxml_root(candidate)
+                if selected_ids.intersection(
+                    node.get("id") for node in candidate_root.iter("n")
+                ):
+                    root = candidate_root
+                    break
+            parents = {child: parent for parent in root.iter() for child in parent}
+            for group in list(root.iter("bracketedgroup")):
+                if group.get("id") != selected.get("id"):
+                    parents[group].remove(group)
+            content = ET.tostring(root)
+        elif len(groups) > 1:
             raise PeriodicStructureError(
                 "Exactly one bracketed repeat unit is required for conversion"
             )
-        group = groups[0]
-    else:
-        try:
-            group = groups[int(group_index)]
-        except (IndexError, ValueError) as exc:
+        graph = read_cdxml_graph(content)
+        repeat = identify_repeat(content, graph)
+        if repeat is None:
+            return None
+        if graph.stereochemistry:
             raise PeriodicStructureError(
-                f"Bracketed repeat-unit index {group_index!r} is out of range"
-            ) from exc
-    central_ids = tuple(group.attrib.get("BracketedObjectIDs", "").split())
-    if not central_ids:
-        raise PeriodicStructureError("The bracketed group contains no atom IDs")
-    if len(central_ids) != len(set(central_ids)):
-        raise PeriodicStructureError("The bracketed group contains duplicate atom IDs")
-    central_set = set(central_ids)
-
-    nodes = {
-        node.attrib["id"]: node
-        for node in _elements(root, "n")
-        if "id" in node.attrib
-    }
-    missing = central_set.difference(nodes)
-    if missing:
-        raise PeriodicStructureError(
-            f"BracketedObjectIDs refer to missing nodes: {sorted(missing)}"
+                "Encoded periodic stereochemistry is not supported by the SRU graph decoder"
+            )
+        local = {identifier: index for index, identifier in enumerate(repeat.atom_ids)}
+        molecule = graph.rdkit_molecule()
+        atoms = tuple(
+            _atom_spec(molecule.GetAtomWithIdx(graph.index[identifier]))
+            for identifier in repeat.atom_ids
         )
-    try:
-        positions = {
-            node_id: _xy(node.attrib["p"])
-            for node_id, node in nodes.items()
-        }
-    except KeyError as exc:
-        raise PeriodicStructureError(
-            f"CDXML node {exc.args[0]!r} has no position"
-        ) from exc
-
-    graphics = {
-        graphic.attrib["id"]: graphic
-        for graphic in _elements(root, "graphic")
-        if "id" in graphic.attrib
-    }
-    attachment_centres = []
-    crossing = []
-    attachments = [
-        item
-        for item in group.iter()
-        if _local_name(item.tag) == "bracketattachment"
-    ]
-    for attachment in attachments:
-        graphic = graphics.get(attachment.attrib.get("GraphicID", ""))
-        if graphic is not None and graphic.attrib.get("BoundingBox"):
-            values = [
-                float(value) for value in graphic.attrib["BoundingBox"].split()
-            ]
-            if len(values) == 4:
-                attachment_centres.append(
-                    ((values[0] + values[2]) / 2, (values[1] + values[3]) / 2)
-                )
-        crossing.extend(
-            item
-            for item in attachment.iter()
-            if _local_name(item.tag) == "crossingbond"
-        )
-    if len(attachment_centres) < 2 or not crossing:
-        raise PeriodicStructureError(
-            "The periodic bracket needs two attachments and crossing bonds"
-        )
-
-    pair = max(
-        (
-            (first, second)
-            for index, first in enumerate(attachment_centres)
-            for second in attachment_centres[index + 1 :]
-        ),
-        key=lambda item: (item[1][0] - item[0][0]) ** 2
-        + (item[1][1] - item[0][1]) ** 2,
-    )
-    period = (pair[1][0] - pair[0][0], pair[1][1] - pair[0][1])
-    period_length = math.hypot(*period)
-    if period_length <= 1e-8:
-        raise PeriodicStructureError("The two periodic brackets are coincident")
-
-    def numeric_id(value):
-        try:
-            return (0, int(value))
-        except ValueError:
-            return (1, value)
-
-    ordered_ids = tuple(sorted(central_ids, key=numeric_id))
-    local_index = {node_id: index for index, node_id in enumerate(ordered_ids)}
-    atom_specs = []
-    for node_id in ordered_ids:
-        attributes = nodes[node_id].attrib
-        radical = str(attributes.get("Radical", "")).lower()
-        radical_electrons = 1 if radical in {"doublet", "1"} else 0
-        atom_specs.append(
-            AtomSpec(
-                atomic_number=int(attributes.get("Element", 6)),
-                charge=int(attributes.get("Charge", 0)),
-                isotope=int(attributes.get("Isotope", 0)),
-                radical_electrons=radical_electrons,
-                explicit_hydrogens=(
-                    int(attributes["NumHydrogens"])
-                    if "NumHydrogens" in attributes
-                    else None
+        bonds = tuple(
+            (
+                *_canonical_edge(
+                    local[edge.begin], local[edge.end], edge.shift, edge.type
                 ),
+                "dative" if edge.type == "dative" else float(edge.type),
             )
+            for edge in repeat.edges
         )
-
-    bonds_by_id = {
-        bond.attrib["id"]: bond
-        for bond in _elements(root, "b")
-        if "id" in bond.attrib
-    }
-    edge_orders: dict[tuple[int, int, int], float] = {}
-
-    def add_edge(begin_id, end_id, shift, order):
-        begin = local_index[begin_id]
-        end = local_index[end_id]
-        key = _canonical_edge(begin, end, int(shift))
-        previous = edge_orders.get(key)
-        if previous is not None and not math.isclose(previous, order):
-            raise PeriodicStructureError(
-                f"Conflicting orders for periodic edge {key}"
-            )
-        edge_orders[key] = order
-
-    for bond in bonds_by_id.values():
-        begin_id = bond.attrib.get("B")
-        end_id = bond.attrib.get("E")
-        if begin_id in central_set and end_id in central_set:
-            add_edge(begin_id, end_id, 0, _bond_order(bond.attrib.get("Order")))
-
-    central_positions = {node_id: positions[node_id] for node_id in ordered_ids}
-    period_unit = (period[0] / period_length, period[1] / period_length)
-
-    def chemical_signature(node_id):
-        attributes = nodes[node_id].attrib
-        return (
-            int(attributes.get("Element", 6)),
-            int(attributes.get("Charge", 0)),
-            int(attributes.get("Isotope", 0)),
-        )
-
-    crossing_data = []
-    for item in crossing:
-        bond = bonds_by_id.get(item.attrib.get("BondID", ""))
-        inner_id = item.attrib.get("InnerAtomID")
-        if bond is None or inner_id not in central_set:
-            raise PeriodicStructureError("Invalid crossing-bond reference")
-        endpoints = (bond.attrib.get("B"), bond.attrib.get("E"))
-        if inner_id not in endpoints:
-            raise PeriodicStructureError(
-                "InnerAtomID is not an endpoint of its crossing bond"
-            )
-        outer_id = endpoints[1] if endpoints[0] == inner_id else endpoints[0]
-        if outer_id not in positions or outer_id not in nodes:
-            raise PeriodicStructureError(f"Missing outer node {outer_id}")
-
-        outer = positions[outer_id]
-        candidates = []
-        for shift in (-1, 1):
-            for candidate_id, candidate in central_positions.items():
-                if chemical_signature(candidate_id) != chemical_signature(outer_id):
-                    continue
-                implied = (
-                    (outer[0] - candidate[0]) / shift,
-                    (outer[1] - candidate[1]) / shift,
-                )
-                longitudinal = (
-                    implied[0] * period_unit[0]
-                    + implied[1] * period_unit[1]
-                )
-                perpendicular = abs(
-                    implied[0] * period_unit[1]
-                    - implied[1] * period_unit[0]
-                )
-                if not 0.5 * period_length <= longitudinal <= 1.5 * period_length:
-                    continue
-                if perpendicular > max(1.0, 0.15 * period_length):
-                    continue
-                annotation_error = math.hypot(
-                    implied[0] - period[0], implied[1] - period[1]
-                )
-                candidates.append(
-                    (annotation_error, candidate_id, shift, implied[0], implied[1])
-                )
-        if not candidates:
-            raise PeriodicStructureError(
-                f"Cannot map outer node {outer_id} into the bracketed repeat unit"
-            )
-        crossing_data.append((bond, inner_id, outer_id, candidates))
-
-    # Bracket graphics are movable annotations, so their separation is only an
-    # approximate period. Each copied outer atom implies an exact translation;
-    # choose the mappings that agree on one common translation vector.
-    hypotheses = {
-        (round(candidate[3], 8), round(candidate[4], 8))
-        for _bond, _inner, _outer, candidates in crossing_data
-        for candidate in candidates
-    }
-    solutions = []
-    for hypothesis in hypotheses:
-        selected = []
-        consistency = 0.0
-        for _bond, _inner, _outer, candidates in crossing_data:
-            candidate = min(
-                candidates,
-                key=lambda value: math.hypot(
-                    value[3] - hypothesis[0], value[4] - hypothesis[1]
-                ),
-            )
-            residual = math.hypot(
-                candidate[3] - hypothesis[0], candidate[4] - hypothesis[1]
-            )
-            consistency += residual**2
-            selected.append(candidate)
-        annotation_error = math.hypot(
-            hypothesis[0] - period[0], hypothesis[1] - period[1]
-        )
-        score = consistency + 1e-4 * annotation_error**2
-        solutions.append((score, consistency, annotation_error, hypothesis, selected))
-    solutions.sort(key=lambda value: value[:3])
-    _score, consistency, annotation_error, inferred_period, selected = solutions[0]
-    inferred_length = math.hypot(*inferred_period)
-    consistency_tolerance = max(0.25, 0.03 * inferred_length)
-    if len(crossing_data) == 1:
-        if annotation_error > max(0.25, 0.08 * period_length):
-            raise PeriodicStructureError(
-                "A single crossing bond does not determine a reliable period"
-            )
-    elif math.sqrt(consistency / len(crossing_data)) > consistency_tolerance:
-        raise PeriodicStructureError(
-            "Crossing bonds do not imply one consistent translation vector"
-        )
-
-    for (bond, inner_id, _outer_id, _candidates), candidate in zip(
-        crossing_data, selected, strict=True
-    ):
-        _error, target_id, shift, _period_x, _period_y = candidate
-        add_edge(
-            inner_id,
-            target_id,
-            shift,
-            _bond_order(bond.attrib.get("Order")),
-        )
-
-    bonds = tuple(
-        (begin, end, shift, order)
-        for (begin, end, shift), order in sorted(edge_orders.items())
-    )
-    if not any(shift for _, _, shift, _ in bonds):
-        raise PeriodicStructureError("The bracket has no periodic graph edge")
-    return PeriodicGraph(tuple(atom_specs), bonds)
+        return PeriodicGraph(atoms, bonds)
+    except ValueError as exc:
+        raise PeriodicStructureError(str(exc)) from exc
 
 
 def periodic_graphs_from_cdxml(content: bytes | str) -> tuple[PeriodicGraph, ...]:
-    """Parse every bracketed repeat unit for read-only search indexing."""
-    decoded = content.decode("utf-8-sig") if isinstance(content, bytes) else content
-    try:
-        root = ET.fromstring(decoded)
-    except ET.ParseError as exc:
-        raise PeriodicStructureError(f"Invalid CDXML: {exc}") from exc
-    count = len(_elements(root, "bracketedgroup"))
+    """Parse each annotated repeat with shared chemical and crossing validation."""
+    from aiidalab_widgets_empa.cdxml_graph import cdxml_root
+
+    root = cdxml_root(content)
+    groups = _elements(root, "bracketedgroup")
+    if not groups:
+        graph = periodic_graph_from_cdxml(content)
+        return (graph,) if graph is not None else ()
     return tuple(
-        periodic_graph_from_cdxml(decoded, group_index=index)
-        for index in range(count)
+        graph
+        for index in range(len(groups))
+        if (graph := periodic_graph_from_cdxml(content, index)) is not None
     )
 
 
@@ -455,7 +238,12 @@ def _periodic_cover(graph: PeriodicGraph, repeats: int):
 
     molecule = rw_mol.GetMol()
     try:
-        Chem.SanitizeMol(molecule)
+        Chem.SanitizeMol(
+            molecule,
+            sanitizeOps=Chem.SanitizeFlags.SANITIZE_ALL
+            & ~Chem.SanitizeFlags.SANITIZE_CLEANUP
+            & ~getattr(Chem.SanitizeFlags, "SANITIZE_CLEANUP_ORGANOMETALLICS", 0),
+        )
     except Exception as exc:
         raise PeriodicStructureError(
             f"The periodic graph has invalid valence: {exc}"
@@ -472,10 +260,55 @@ def _strict_smiles(molecule) -> str:
 
 
 def periodic_graph_key(graph: PeriodicGraph) -> str:
-    """Return an atom-order and repeat-origin independent periodic key."""
-    key3 = _strict_smiles(_periodic_cover(graph, 3))
-    key5 = _strict_smiles(_periodic_cover(graph, 5))
-    return f"{key3}|{key5}"
+    """Canonical chemical graph keys for two covers, without re-kekulization.
+
+    These are opaque graph encodings, not molecular SMILES for rendering or
+    fingerprinting. Aromatic edges remain graph labels; explicit H,
+    charge, isotope, radicals and directed coordination remain atom/bond labels.
+    A cyclic cover can pass valence validation yet exceed RDKit's aromatic
+    kekulization search on a second sanitization (fused 5/7-membered systems).
+    """
+    keys = []
+    for repeats in (3, 5):
+        molecule = _periodic_cover(graph, repeats)
+        encoding = Chem.RWMol()
+        for source in molecule.GetAtoms():
+            atom = Chem.Atom(source.GetAtomicNum())
+            atom.SetFormalCharge(source.GetFormalCharge())
+            atom.SetIsotope(source.GetIsotope())
+            atom.SetNumRadicalElectrons(source.GetNumRadicalElectrons())
+            atom.SetAtomMapNum(source.GetNumRadicalElectrons() + 1)
+            atom.SetNumExplicitHs(source.GetNumImplicitHs() + source.GetNumExplicitHs())
+            atom.SetNoImplicit(True)
+            atom.SetIsAromatic(source.GetIsAromatic())
+            encoding.AddAtom(atom)
+        for bond in molecule.GetBonds():
+            encoding.AddBond(
+                bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), bond.GetBondType()
+            )
+        keys.append(
+            Chem.MolToSmiles(encoding.GetMol(), canonical=True, isomericSmiles=True)
+        )
+    return "graph-v2:" + "|".join(keys)
+
+
+def periodic_search_molecule(graph: PeriodicGraph, repeats=3):
+    """An open, capped cover for fingerprints; never draw a cyclic cover."""
+    size = len(graph.atoms)
+    expanded = PeriodicGraph(
+        graph.atoms * repeats,
+        tuple(
+            (
+                cell * size + begin,
+                ((cell + shift) % repeats) * size + end,
+                (cell + shift) // repeats,
+                order,
+            )
+            for cell in range(repeats)
+            for begin, end, shift, order in graph.bonds
+        ),
+    )
+    return _capped_repeat_fragment(expanded)[0]
 
 
 def _formula_per_repeat(graph: PeriodicGraph) -> str:
@@ -512,6 +345,10 @@ def _capped_repeat_fragment(graph: PeriodicGraph):
     for begin, end, shift, order in graph.bonds:
         if shift == 0:
             continue
+        if order == "dative":
+            raise PeriodicStructureError(
+                "CXSMILES encoding of dative bonds across a repeat boundary is not supported"
+            )
         if shift not in {-1, 1}:
             raise PeriodicStructureError(
                 "Only nearest-neighbour one-dimensional repeats are supported"
@@ -532,7 +369,12 @@ def _capped_repeat_fragment(graph: PeriodicGraph):
 
     molecule = rw_mol.GetMol()
     try:
-        Chem.SanitizeMol(molecule)
+        Chem.SanitizeMol(
+            molecule,
+            sanitizeOps=Chem.SanitizeFlags.SANITIZE_ALL
+            & ~Chem.SanitizeFlags.SANITIZE_CLEANUP
+            & ~getattr(Chem.SanitizeFlags, "SANITIZE_CLEANUP_ORGANOMETALLICS", 0),
+        )
     except Exception as exc:
         raise PeriodicStructureError(
             f"The capped repeat unit has invalid valence: {exc}"
@@ -550,9 +392,7 @@ def _smiles_parser_params():
 
 def _encode_cxsmiles(graph: PeriodicGraph) -> str:
     molecule, crossing_pairs = _capped_repeat_fragment(graph)
-    base_smiles = Chem.MolToSmiles(
-        molecule, canonical=False, isomericSmiles=True
-    )
+    base_smiles = Chem.MolToSmiles(molecule, canonical=False, isomericSmiles=True)
     output_properties = molecule.GetPropsAsDict(
         includePrivate=True, includeComputed=True
     )
@@ -635,9 +475,16 @@ def periodic_graph_from_cxsmiles(cxsmiles: str) -> PeriodicGraph:
     molecule = Chem.MolFromSmiles(base_smiles, _smiles_parser_params())
     if molecule is None:
         raise PeriodicStructureError("Invalid CXSMILES molecular graph")
-    rewritten = Chem.MolToSmiles(
-        molecule, canonical=False, isomericSmiles=True
-    )
+    if any(
+        atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
+        for atom in molecule.GetAtoms()
+    ) or any(
+        bond.GetStereo() != Chem.BondStereo.STEREONONE for bond in molecule.GetBonds()
+    ):
+        raise PeriodicStructureError(
+            "Encoded periodic stereochemistry is not supported by the SRU graph decoder"
+        )
+    rewritten = Chem.MolToSmiles(molecule, canonical=False, isomericSmiles=True)
     if rewritten != base_smiles:
         raise PeriodicStructureError(
             "The CXSMILES base graph is not stable in the installed RDKit"
@@ -648,14 +495,15 @@ def periodic_graph_from_cxsmiles(cxsmiles: str) -> PeriodicGraph:
     bond_output_order = tuple(
         int(index) for index in output_properties["_smilesBondOutputOrder"]
     )
+    # The finite capped fragment's aromatic subset is not the bulk aromatic
+    # subset. Recover its explicit valid orders before building periodic covers.
+    Chem.Kekulize(molecule, clearAromaticFlags=True)
 
     ordered_atoms = tuple(sorted(_csv_indices(repeat_field, "repeat atom")))
     if ordered_atoms[-1] >= molecule.GetNumAtoms() or ordered_atoms[0] < 0:
         raise PeriodicStructureError("The SRU refers to an out-of-range atom")
     repeat_atoms = set(ordered_atoms)
-    local_index = {
-        atom_index: index for index, atom_index in enumerate(ordered_atoms)
-    }
+    local_index = {atom_index: index for index, atom_index in enumerate(ordered_atoms)}
     atom_specs = tuple(
         _atom_spec(molecule.GetAtomWithIdx(index)) for index in ordered_atoms
     )
@@ -677,9 +525,9 @@ def periodic_graph_from_cxsmiles(cxsmiles: str) -> PeriodicGraph:
     edge_orders: dict[tuple[int, int, int], float] = {}
 
     def add_edge(begin, end, shift, order):
-        key = _canonical_edge(begin, end, shift)
+        key = _canonical_edge(begin, end, shift, order)
         previous = edge_orders.get(key)
-        if previous is not None and not math.isclose(previous, order):
+        if previous is not None and previous != order:
             raise PeriodicStructureError(f"Conflicting orders for periodic edge {key}")
         edge_orders[key] = order
 
@@ -705,7 +553,7 @@ def periodic_graph_from_cxsmiles(cxsmiles: str) -> PeriodicGraph:
         tail_atom, tail_order = _crossing_internal_atom(
             molecule, tail_bond, repeat_atoms
         )
-        if not math.isclose(head_order, tail_order):
+        if head_order != tail_order:
             raise PeriodicStructureError(
                 "The two caps of a periodic bond have different bond orders"
             )
@@ -746,7 +594,10 @@ def generate_periodic_cxsmiles(content: bytes | str) -> PeriodicCxsmiles:
     # Normalize the atom list and head/tail pair order in the generated SRU.
     cxsmiles = _encode_cxsmiles(first_decoded)
     decoded = periodic_graph_from_cxsmiles(cxsmiles)
-    if periodic_graph_key(decoded) != expected_key or _encode_cxsmiles(decoded) != cxsmiles:
+    if (
+        periodic_graph_key(decoded) != expected_key
+        or _encode_cxsmiles(decoded) != cxsmiles
+    ):
         raise PeriodicStructureError(
             "Generated CXSMILES is not stable after validated SRU round trip"
         )
@@ -766,9 +617,7 @@ def representation_from_smiles(smiles: str) -> ChemicalRepresentation:
     if molecule is None:
         raise ValueError("Invalid SMILES")
     molecule = Chem.RemoveHs(molecule)
-    canonical = Chem.MolToSmiles(
-        molecule, canonical=True, isomericSmiles=True
-    )
+    canonical = Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True)
     return ChemicalRepresentation(
         formula=rdMolDescriptors.CalcMolFormula(molecule),
         smiles=canonical,
@@ -787,25 +636,38 @@ def representation_from_cdxml(content: bytes | str) -> ChemicalRepresentation:
             periodic_key=generated.periodic_key,
         )
 
-    if isinstance(content, bytes):
-        content = content.decode("utf-8-sig")
-    try:
-        molecules = tuple(
-            Chem.MolsFromCDXML(content, sanitize=True, removeHs=False)
+    from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
+    from aiidalab_widgets_empa.cdxml_graph import read_cdxml_graph
+
+    options = CdxmlUploadWidget._cdxml_structure_options(content)
+    if len(options) > 1:
+        raise ValueError(
+            "The CDXML contains multiple structures; select one drawing first"
         )
-    except Exception as exc:
-        raise ValueError(f"Invalid molecular CDXML: {exc}") from exc
-    if not molecules:
-        raise ValueError("RDKit found no molecule in the CDXML")
-    molecule = max(molecules, key=lambda item: item.GetNumHeavyAtoms())
+    graph = read_cdxml_graph(content)
+    molecule = graph.rdkit_molecule()
+    # Native CDXML stereochemistry is useful for search, although the atomistic
+    # importer deliberately does not reconstruct a stereospecific 3D conformer.
+    if graph.stereochemistry:
+        decoded = content.decode("utf-8-sig") if isinstance(content, bytes) else content
+        native = tuple(Chem.MolsFromCDXML(decoded, sanitize=True, removeHs=False))
+        if len(native) != 1:
+            raise ValueError(
+                "The encoded CDXML stereochemistry cannot be read unambiguously"
+            )
+        if rdMolDescriptors.CalcMolFormula(
+            native[0]
+        ) != rdMolDescriptors.CalcMolFormula(molecule):
+            raise ValueError(
+                "Native stereochemistry reader disagrees with the validated atom/H graph"
+            )
+        molecule = native[0]
     warning = ""
-    if len(molecules) > 1:
-        warning = f"Selected the largest of {len(molecules)} CDXML fragments"
+    if graph.coordination_interpretations():
+        warning = "Single N/O-metal lines interpreted as coordination; original drawing and declared H retained"
     finite = representation_from_smiles(
         Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True)
     )
     return ChemicalRepresentation(
-        formula=finite.formula,
-        smiles=finite.smiles,
-        warning=warning,
+        formula=finite.formula, smiles=finite.smiles, warning=warning
     )

@@ -415,3 +415,36 @@ def test_uploaded_cdxml_preview_clears_when_replaced_by_malformed_xml(tmp_path):
     )
     assert not widget.query_preview.value
     assert "unavailable" in widget.preview_message.value
+
+
+def test_multiple_finite_drawings_are_indexed_and_the_selected_one_is_searched(
+    tmp_path,
+):
+    from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
+    from aiidalab_widgets_empa.cdxml_rendering import render_cdxml_png
+
+    content = b'<CDXML BondLength="30"><page><fragment><n id="a" p="0 0"/></fragment><t p="0 -10"><s>Methane</s></t><fragment><n id="b" p="150 0" Element="8"/></fragment><t p="150 -10"><s>Water</s></t></page></CDXML>'
+    representations = search_representations_from_cdxml(content)
+    assert [item.formula for item in representations] == ["CH4", "H2O"]
+    widget = MoleculeStructureSearchWidget(
+        FakeSession([]), "collection", cache_path=tmp_path / "multi.json"
+    )
+    widget.set_cdxml_query(content, "multiple.cdxml")
+    assert widget._query().formula == "CH4"
+    widget.last_query = widget._query()
+    widget.structure_selector.value = 1
+    assert widget.last_query is None
+    assert widget._query().formula == "H2O"
+    selected = CdxmlUploadWidget._select_cdxml_structure(content, 1)
+    assert bytes(widget.query_preview.value) == render_cdxml_png(selected)
+
+
+def test_graph_attributes_are_shared_with_the_atomistic_importer():
+    from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
+
+    content = b'<CDXML><page><fragment><n id="n" p="0 0" Element="7" NumHydrogens="3"/><n id="zn" p="30 0" Element="30" Charge="2"/><b id="b" B="zn" E="n"/></fragment></page></CDXML>'
+    query = search_representation_from_cdxml(content)
+    _, _, atoms = CdxmlUploadWidget.cdxml_to_ase_from_string(content)
+    assert query.formula == atoms.get_chemical_formula() + "+2"
+    assert "coordination" in query.warning
+    assert "->" in query.strict_key or "<-" in query.strict_key

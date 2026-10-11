@@ -14,6 +14,9 @@ from src.chemical_structures import (
     periodic_graphs_from_cdxml,
     representation_from_cdxml,
     representation_from_smiles,
+    AtomSpec,
+    PeriodicGraph,
+    _encode_cxsmiles,
 )
 
 
@@ -37,9 +40,10 @@ def test_periodic_gnr_cxsmiles_round_trip(periodic_gnr):
     assert periodic_gnr.atoms_per_repeat == 36
     assert periodic_gnr.crossing_bond_pairs == 10
     assert " |Sg:n:" in periodic_gnr.cxsmiles
-    assert periodic_graph_key(
-        periodic_graph_from_cxsmiles(periodic_gnr.cxsmiles)
-    ) == periodic_gnr.periodic_key
+    assert (
+        periodic_graph_key(periodic_graph_from_cxsmiles(periodic_gnr.cxsmiles))
+        == periodic_gnr.periodic_key
+    )
 
 
 def test_periodic_gnr_cxsmiles_is_stable(periodic_gnr):
@@ -80,9 +84,7 @@ def test_invalid_crossing_pair_order_is_rejected(periodic_gnr):
 def test_multiple_repeat_units_are_searchable_but_not_convertible():
     root = ET.fromstring(GNR_CDXML.read_bytes().decode("utf-8-sig"))
     page = next(
-        element
-        for element in root.iter()
-        if element.tag.rsplit("}", 1)[-1] == "page"
+        element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "page"
     )
     group = next(
         element
@@ -132,3 +134,70 @@ def test_smiles_input_is_canonicalized():
     assert representation.smiles == "CCO"
     assert representation.cxsmiles == ""
     assert representation.formula == "C2H6O"
+
+
+def test_synthetic_fused_five_seven_repeat_keys_ignore_atom_order_and_kekule_phase():
+    from dataclasses import replace
+    from src.chemical_structures import periodic_formula
+
+    # Two four-site rails with offset rungs: adjacent bounded faces have 5 and 7 edges.
+    graph = PeriodicGraph(
+        (AtomSpec(6),) * 8,
+        (
+            (0, 1, 0, 2.0),
+            (1, 2, 0, 1.0),
+            (2, 3, 0, 2.0),
+            (3, 0, 1, 1.0),
+            (4, 5, 0, 2.0),
+            (5, 6, 0, 1.0),
+            (6, 7, 0, 2.0),
+            (7, 4, 1, 1.0),
+            (0, 4, 0, 1.0),
+            (1, 6, 0, 1.0),
+        ),
+    )
+    assert periodic_formula(graph) == "C8H4"
+    original = periodic_graph_key(graph)
+    order = (4, 7, 1, 5, 0, 6, 3, 2)
+    inverse = {old: new for new, old in enumerate(order)}
+    changed = replace(
+        graph,
+        atoms=tuple(graph.atoms[index] for index in order),
+        bonds=tuple(
+            (inverse[b], inverse[e], shift, kind)
+            for b, e, shift, kind in reversed(graph.bonds)
+        ),
+    )
+    assert periodic_graph_key(changed) == original
+    assert (
+        periodic_graph_key(periodic_graph_from_cxsmiles(_encode_cxsmiles(graph)))
+        == original
+    )
+
+
+def test_periodic_key_retains_isotopes_charges_and_radicals():
+    from dataclasses import replace
+
+    graph = PeriodicGraph((AtomSpec(6, explicit_hydrogens=2),), ((0, 0, 1, 1.0),))
+    base = periodic_graph_key(graph)
+    assert (
+        periodic_graph_key(
+            replace(graph, atoms=(AtomSpec(6, isotope=13, explicit_hydrogens=2),))
+        )
+        != base
+    )
+    radical = replace(
+        graph, atoms=(AtomSpec(6, radical_electrons=1, explicit_hydrogens=1),)
+    )
+    assert periodic_graph_key(radical) != base
+    charged = replace(graph, atoms=(AtomSpec(6, charge=-1, explicit_hydrogens=1),))
+    assert periodic_graph_key(charged) != base
+
+
+def test_periodic_stereochemistry_is_reported_instead_of_discarded():
+    root = ET.fromstring(GNR_CDXML.read_bytes().decode("utf-8-sig"))
+    next(
+        element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "b"
+    ).set("BS", "C")
+    with pytest.raises(PeriodicStructureError, match="stereochemistry"):
+        generate_periodic_cxsmiles(ET.tostring(root))
