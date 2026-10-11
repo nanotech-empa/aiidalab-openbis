@@ -223,6 +223,7 @@ def _search_representations_from_selected_cdxml(
                     source_id if count == 1 else f"{source_id}#repeat-{index + 1}"
                 ),
                 graph=graph,
+                warning=graph.warning,
             )
             for index, graph in enumerate(periodic_graphs)
         )

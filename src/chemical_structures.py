@@ -32,6 +32,7 @@ class PeriodicGraph:
 
     atoms: tuple[AtomSpec, ...]
     bonds: tuple[tuple[int, int, int, float | str], ...]
+    warning: str = ""
 
 
 @dataclass(frozen=True)
@@ -190,7 +191,7 @@ def periodic_graph_from_cdxml(
             )
             for edge in repeat.edges
         )
-        return PeriodicGraph(atoms, bonds)
+        return PeriodicGraph(atoms, bonds, "; ".join(graph.annotation_warnings))
     except ValueError as exc:
         raise PeriodicStructureError(str(exc)) from exc
 
@@ -634,6 +635,7 @@ def representation_from_cdxml(content: bytes | str) -> ChemicalRepresentation:
             cxsmiles=generated.cxsmiles,
             periodic=True,
             periodic_key=generated.periodic_key,
+            warning=periodic_graph.warning,
         )
 
     from aiidalab_widgets_empa.cdxml import CdxmlUploadWidget
@@ -655,6 +657,16 @@ def representation_from_cdxml(content: bytes | str) -> ChemicalRepresentation:
             raise ValueError(
                 "The encoded CDXML stereochemistry cannot be read unambiguously"
             )
+        if not any(
+            atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
+            for atom in native[0].GetAtoms()
+        ) and not any(
+            bond.GetStereo() != Chem.BondStereo.STEREONONE
+            for bond in native[0].GetBonds()
+        ):
+            raise ValueError(
+                "The encoded CDXML stereochemistry cannot be verified by RDKit; review CIP labels and wedge/hash bonds"
+            )
         if rdMolDescriptors.CalcMolFormula(
             native[0]
         ) != rdMolDescriptors.CalcMolFormula(molecule):
@@ -665,6 +677,8 @@ def representation_from_cdxml(content: bytes | str) -> ChemicalRepresentation:
     warning = ""
     if graph.coordination_interpretations():
         warning = "Single N/O-metal lines interpreted as coordination; original drawing and declared H retained"
+    if graph.annotation_warnings:
+        warning += ("; " if warning else "") + "; ".join(graph.annotation_warnings)
     finite = representation_from_smiles(
         Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True)
     )

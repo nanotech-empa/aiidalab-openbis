@@ -198,6 +198,12 @@ def test_periodic_stereochemistry_is_reported_instead_of_discarded():
     root = ET.fromstring(GNR_CDXML.read_bytes().decode("utf-8-sig"))
     next(
         element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "b"
-    ).set("BS", "C")
+    ).set("BS", "E")
     with pytest.raises(PeriodicStructureError, match="stereochemistry"):
         generate_periodic_cxsmiles(ET.tostring(root))
+
+
+def test_unreadable_finite_CIP_assignment_does_not_become_an_achiral_exact_key():
+    content = b'<CDXML><page><fragment><n id="1" p="0 0" AS="R"/><n id="2" p="30 0" Element="9"/><n id="3" p="0 30" Element="17"/><n id="4" p="-30 0" Element="35"/><b B="1" E="2"/><b B="1" E="3"/><b B="1" E="4"/></fragment></page></CDXML>'
+    with pytest.raises(ValueError, match="cannot be verified"):
+        representation_from_cdxml(content)
