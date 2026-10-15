@@ -37,3 +37,24 @@ This repository contains all the files needed for setting up and interact with t
 The [PREMISE](https://ord-premise.github.io/) project is supported by the [Open Research Data Program](https://ethrat.ch/en/eth-domain/open-research-data/) of the ETH Board.
 
 ![image](https://github.com/ord-premise/metadata-batteries/assets/45081142/74640b5c-ee94-41e1-9acd-fa47da866fe8)
+
+## Software attribution and scientific acknowledgements
+
+Please credit [aiidalab-openbis](https://github.com/nanotech-empa/aiidalab-openbis) and its
+[contributors](https://github.com/nanotech-empa/aiidalab-openbis/graphs/contributors),
+and identify the release or immutable commit used. Existing author,
+contributor and funding acknowledgements remain authoritative.
+
+Package metadata declares MIT, but this revision has no top-level licence
+file. Confirm the applicable notices with the maintainers before copying
+or distributing code; this citation guidance does not supply a licence.
+
+For research using this app, acknowledge the [AiiDA team](https://github.com/nanotech-empa/.github/blob/main/CITATION_GUIDANCE.md#aiida)
+and [AiiDAlab team](https://github.com/nanotech-empa/.github/blob/main/CITATION_GUIDANCE.md#aiidalab), and cite the three AiiDA papers
+and both AiiDAlab platform papers listed in that guide.
+
+Preserve the Authors and PREMISE acknowledgements above. Also credit openBIS, pyBIS and the ELN integrations actually used.
+
+The [shared credit guide](https://github.com/nanotech-empa/.github/blob/main/CITATION_GUIDANCE.md) keeps software attribution, licence
+compliance and scientific citation requests separate. Scientific citation
+requests are not additional MIT licence conditions.
