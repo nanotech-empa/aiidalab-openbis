@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from src import sync_registry
+from src import sync_registry, synchronisation_widgets
 from src.sync_afs_worker import compute_relative_path, sync_once
 
 
@@ -114,3 +114,33 @@ def test_sync_once_incremental_and_deletion(tmp_path):
     assert stats2["skipped"] == 1
     assert stats2["deleted"] == 0
     mock_client.read.assert_not_called()
+
+
+def test_setup_sync_widget_conflict_detection(tmp_path):
+    reg_file = tmp_path / "active_synchronisations.json"
+    job = {
+        "job_id": "job-test",
+        "pid": 1111,
+        "owner": "SMP_1",
+        "afs_path": "/run1",
+        "local_path": "/local/run1",
+        "status": "RUNNING",
+    }
+    sync_registry.register_job(job, reg_file)
+
+    mock_session = MagicMock()
+    widget = synchronisation_widgets.SetupSyncWidget(
+        openbis_session=mock_session,
+        registry_path=reg_file,
+    )
+
+    # Check conflict detection method
+    conflict = widget.check_conflict("SMP_1", "/run1", "/other/path")
+    assert conflict is not None
+    assert "already being synchronized" in widget.conflict_html.value
+    assert widget.start_button.disabled is True
+
+    # Check valid path
+    widget.check_conflict("SMP_1", "/run2", "/local/run2")
+    assert widget.conflict_html.value == ""
+    assert widget.start_button.disabled is False
