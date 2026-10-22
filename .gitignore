@@ -23,3 +23,7 @@ images/
 logs/
 chroma_db/
 temp_dataset_download/
+
+# Agent planning artifacts
+.superpowers/
+docs/superpowers/
