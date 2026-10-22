@@ -8,15 +8,14 @@ DEFAULT_REGISTRY_PATH = Path("logs/active_synchronisations.json")
 
 
 def normalize_path(p: str) -> str:
-    """Normalize POSIX-like paths by removing redundant slashes and trailing slashes."""
+    """Normalize POSIX-like paths by removing redundant slashes and ensuring a consistent leading slash."""
     if not p:
         return "/"
     p = str(p).strip().replace("\\", "/")
     parts = [part for part in p.split("/") if part and part != "."]
     if not parts:
         return "/"
-    prefix = "/" if p.startswith("/") else ""
-    return prefix + "/".join(parts)
+    return "/" + "/".join(parts)
 
 
 def load_registry(registry_path: Union[str, Path] = DEFAULT_REGISTRY_PATH) -> dict:
@@ -38,7 +37,7 @@ def save_registry(
 ) -> None:
     path = Path(registry_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(".tmp")
+    temp_path = path.with_suffix(f".tmp.{os.getpid()}")
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     temp_path.replace(path)
@@ -123,6 +122,9 @@ def dismiss_job(
 
 
 def sync_liveness(registry_path: Union[str, Path] = DEFAULT_REGISTRY_PATH) -> None:
+    path = Path(registry_path)
+    if not path.exists():
+        return
     registry = load_registry(registry_path)
     changed = False
 

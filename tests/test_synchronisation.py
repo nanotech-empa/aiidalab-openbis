@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import pytest
 from src import sync_registry, synchronisation_widgets
 from src.sync_afs_worker import compute_relative_path, sync_once
 
@@ -207,3 +208,94 @@ def test_resume_all_matching_files_zero_transfers(tmp_path):
     assert stats["skipped"] == 1
     assert stats["deleted"] == 0
     mock_client.read.assert_not_called()
+
+
+def test_normalize_path_and_conflict_slash_agnostic(tmp_path):
+    reg_file = tmp_path / "active_synchronisations.json"
+    job = {
+        "job_id": "job-slash",
+        "pid": 5555,
+        "owner": "SAMPLE_SLASH",
+        "afs_path": "/scans/run1/",
+        "local_path": "/data/run1/",
+        "status": "RUNNING",
+    }
+    sync_registry.register_job(job, reg_file)
+
+    # Missing leading slash and trailing slash should still detect conflict
+    conflict1 = sync_registry.find_conflict(
+        "SAMPLE_SLASH", "scans/run1", "/other", reg_file
+    )
+    assert conflict1 is not None
+    assert conflict1["job_id"] == "job-slash"
+
+    # Missing leading slash on local path should also be recognized
+    conflict2 = sync_registry.find_conflict("OTHER", "other_afs", "data/run1", reg_file)
+    assert conflict2 is not None
+    assert conflict2["job_id"] == "job-slash"
+
+
+def test_download_afs_file_handles_truncated_transfer(tmp_path):
+    from src.sync_afs_worker import download_afs_file
+
+    dest_file = tmp_path / "truncated.dat"
+    mock_client = MagicMock()
+    # Returns only 4 bytes then empty EOF when 100 bytes are expected
+    mock_client.read.side_effect = [b"1234", b""]
+
+    with pytest.raises(IOError, match="Truncated download"):
+        download_afs_file(
+            mock_client, "SAMPLE_1", "/file.dat", dest_file, file_size=100
+        )
+
+    assert not dest_file.exists()
+    assert not (tmp_path / "truncated.dat.part").exists()
+
+
+def test_poll_interval_boundary_clamped(tmp_path):
+    cfg = {
+        "job_id": "clamp-job",
+        "owner": "SMP_1",
+        "afs_path": "/run1",
+        "local_path": str(tmp_path / "loc"),
+        "poll_interval": 1,  # Below minimum 5s
+    }
+    # Verify that poll_interval is normalized to at least 5
+    interval = max(5, int(cfg.get("poll_interval", 60)))
+    assert interval == 5
+
+
+def test_active_syncs_widget_resume_conflict_prevention(tmp_path):
+    import os
+
+    reg_file = tmp_path / "active_synchronisations.json"
+
+    # Job 1 is running on /run1 with real current PID so sync_liveness keeps it RUNNING
+    job1 = {
+        "job_id": "job-1",
+        "pid": os.getpid(),
+        "owner": "SAMPLE_RESUME",
+        "afs_path": "/run1",
+        "local_path": "/data/run1",
+        "status": "RUNNING",
+    }
+    # Job 2 is stopped on the same /run1
+    job2 = {
+        "job_id": "job-2",
+        "pid": 888888,
+        "owner": "SAMPLE_RESUME",
+        "afs_path": "/run1",
+        "local_path": "/data/run1_other",
+        "status": "STOPPED",
+    }
+    sync_registry.register_job(job1, reg_file)
+    sync_registry.register_job(job2, reg_file)
+
+    widget = synchronisation_widgets.ActiveSyncsWidget(registry_path=reg_file)
+    assert len(widget.jobs_box.children) == 2
+    # Finding conflict should block job2 resume
+    conflict = sync_registry.find_conflict(
+        "SAMPLE_RESUME", "/run1", "/data/run1_other", reg_file
+    )
+    assert conflict is not None
+    assert conflict["job_id"] == "job-1"

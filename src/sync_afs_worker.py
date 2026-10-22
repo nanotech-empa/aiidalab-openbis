@@ -69,6 +69,13 @@ def download_afs_file(
             f_out.write(chunk)
             offset += len(chunk)
 
+    if offset < file_size:
+        if temp_file.exists():
+            temp_file.unlink()
+        raise IOError(
+            f"Truncated download for {file_path}: received {offset}/{file_size} bytes"
+        )
+
     temp_file.replace(local_dest)
 
 
@@ -95,12 +102,17 @@ def sync_once(
             continue
         target = dest / rel
 
+        # Track directory hierarchy
+        for parent in target.parents:
+            expected_dirs.add(parent.resolve())
+            if parent.resolve() == dest.resolve():
+                break
+
         if getattr(f, "directory", False):
             target.mkdir(parents=True, exist_ok=True)
             expected_dirs.add(target.resolve())
         else:
             expected_files.add(target.resolve())
-            expected_dirs.add(target.parent.resolve())
             if target.exists() and target.is_file() and target.stat().st_size == f.size:
                 stats["skipped"] += 1
                 continue

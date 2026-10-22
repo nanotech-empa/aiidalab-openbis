@@ -370,7 +370,9 @@ class ActiveSyncsWidget(ipw.VBox):
         </div>
         """)
 
-        btn_box = ipw.HBox(layout=ipw.Layout(gap="6px"))
+        card_status = ipw.HTML(value="")
+
+        btn_box = ipw.HBox()
         if is_running:
             stop_btn = ipw.Button(
                 description="Stop Sync",
@@ -396,6 +398,20 @@ class ActiveSyncsWidget(ipw.VBox):
             )
 
             def _on_resume(b, j_info=job):
+                conflict = sync_registry.find_conflict(
+                    j_info["owner"],
+                    j_info["afs_path"],
+                    j_info["local_path"],
+                    self.registry_path,
+                )
+                if conflict and conflict.get("job_id") != j_info.get("job_id"):
+                    card_status.value = (
+                        f"<div style='color: red; font-size: 11px; margin-top: 4px;'>"
+                        f"⚠️ Cannot resume: folder is already actively being synchronized by job {conflict.get('job_id')} (PID {conflict.get('pid')})."
+                        f"</div>"
+                    )
+                    return
+
                 config_dir = Path("logs/configs")
                 config_dir.mkdir(parents=True, exist_ok=True)
                 config_file = config_dir / f"{j_info['job_id']}.json"
@@ -443,13 +459,11 @@ class ActiveSyncsWidget(ipw.VBox):
             btn_box.children = [resume_btn, dismiss_btn]
 
         card = ipw.VBox(
-            [header_html, details_html, btn_box],
+            [header_html, details_html, btn_box, card_status],
             layout=ipw.Layout(
                 border="1px solid #e5e7eb",
                 padding="12px",
                 margin="0 0 10px 0",
-                border_radius="6px",
-                background_color="#ffffff",
             ),
         )
         return card
