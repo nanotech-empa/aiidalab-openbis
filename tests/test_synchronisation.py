@@ -1,4 +1,7 @@
+from unittest.mock import MagicMock
+
 from src import sync_registry
+from src.sync_afs_worker import compute_relative_path, sync_once
 
 
 def test_registry_lifecycle_and_conflict(tmp_path):
@@ -67,3 +70,47 @@ def test_sync_liveness_marks_dead_pid_stopped(tmp_path):
     sync_registry.sync_liveness(reg_file)
     data = sync_registry.load_registry(reg_file)
     assert data["jobs"]["job-dead"]["status"] == "STOPPED"
+
+
+def test_compute_relative_path():
+    assert compute_relative_path("/raw/run1/scan.dat", "/raw/run1") == "scan.dat"
+    assert (
+        compute_relative_path("/raw/run1/sub/scan.dat", "/raw/run1/") == "sub/scan.dat"
+    )
+    assert compute_relative_path("/scan.dat", "/") == "scan.dat"
+    assert compute_relative_path("scan.dat", "") == "scan.dat"
+
+
+def test_sync_once_incremental_and_deletion(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    # Pre-existing local file that will be deleted because it is not on AFS
+    stale_file = dest / "stale.dat"
+    stale_file.write_text("old data")
+
+    # Mock remote AFS files
+    mock_file1 = MagicMock()
+    mock_file1.directory = False
+    mock_file1.path = "/scans/run1/scan1.dat"
+    mock_file1.size = 12
+    mock_file1.name = "scan1.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_file1]
+    mock_client.read.return_value = b"hello remote"
+
+    # First sync: downloads scan1.dat, deletes stale.dat
+    stats1 = sync_once(mock_client, "SAMPLE_1", "/scans/run1", str(dest))
+    assert stats1["downloaded"] == 1
+    assert stats1["deleted"] == 1
+    assert not stale_file.exists()
+    assert (dest / "scan1.dat").read_bytes() == b"hello remote"
+
+    # Second sync: scan1.dat already exists with matching size -> skipped!
+    mock_client.read.reset_mock()
+    stats2 = sync_once(mock_client, "SAMPLE_1", "/scans/run1", str(dest))
+    assert stats2["downloaded"] == 0
+    assert stats2["skipped"] == 1
+    assert stats2["deleted"] == 0
+    mock_client.read.assert_not_called()
