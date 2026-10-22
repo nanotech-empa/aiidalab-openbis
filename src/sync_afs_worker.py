@@ -172,8 +172,7 @@ def run_worker(config: dict, registry_path: Optional[Path] = None) -> None:
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    openbis_url = config.get("openbis_url")
-    openbis_session, _ = utils.connect_openbis_aiida(openbis_url)
+    openbis_session, _ = utils.connect_openbis_aiida()
     if not openbis_session:
         logger.error("Could not establish openBIS session. Worker exiting.")
         sync_registry.update_job(
