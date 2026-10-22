@@ -25,9 +25,11 @@ This feature provides a dedicated graphical interface within the AiiDAlab-openBI
 - Allow user to configure poll interval down to 5 seconds (default: 60s).
 - Run synchronization as an independent, detached background process that continues running even if the user closes the notebook.
 - **Mirroring semantics**: Modifications, creations, and deletions on the openBIS AFS side are mirrored to AiiDAlab (deleting a file in AFS deletes the local file in AiiDAlab).
+- **Differential / Incremental Sync (No Redundant Downloads)**: When a sync starts, resumes after being stopped, or polls periodically, it verifies whether files already exist on the AiiDAlab local side with matching size and timestamp. Identical files are skipped without re-downloading or replicating.
+- **Resume Stopped Jobs**: Allow stopped sync jobs to be resumed directly from Tab 2 without re-entering the parameters.
 - Prevent duplicate or conflicting synchronizations: if an AFS folder is already being synchronized, clearly notify the user where it is already synced (including target path and PID) and disallow duplicating the sync.
 - Track active synchronization jobs in a JSON registry in `logs/active_synchronisations.json`.
-- Provide an "Active Synchronisations" tab allowing users to inspect running sync jobs, check sync status/timestamps, and terminate/stop sync jobs cleanly.
+- Provide an "Active Synchronisations" tab allowing users to inspect running and stopped sync jobs, check sync status/timestamps, stop running syncs, resume stopped syncs, and dismiss stopped records cleanly.
 
 ### Non-Goals
 - Two-way synchronization: Modifications in AiiDAlab are **not** pushed back to openBIS AFS. It is strictly one-way (openBIS AFS $\rightarrow$ AiiDAlab).
@@ -35,6 +37,7 @@ This feature provides a dedicated graphical interface within the AiiDAlab-openBI
 
 ### Anti-Goals
 - Blocking the Jupyter kernel: The synchronization loop must never execute directly in the notebook's interactive thread.
+- Redundant re-transfers: Never re-download existing, unchanged files upon sync start, restart, or resumption.
 - Silent file overwriting or conflicts across jobs: Never permit two simultaneous background processes to sync the same AFS folder or target the same destination folder.
 
 ---
@@ -91,6 +94,7 @@ The notebook follows the layout pattern of `1_sample_preparation.ipynb`:
   - Started timestamp & Last synced timestamp
   - Action buttons:
     - **Stop Sync**: (Visible for running jobs) Sends `SIGTERM` to the worker PID and updates registry status to `STOPPED`.
+    - **Resume Sync**: (Visible for stopped jobs) Re-launches the background process for the stored job configuration. Skips unchanged files and continues syncing.
     - **Dismiss**: (Visible for stopped jobs) Removes the stopped record from `logs/active_synchronisations.json`.
 - **Refresh Button**: Scans running PIDs (via `os.kill(pid, 0)`), cleans up dead processes by marking them `STOPPED`, and refreshes the view.
 
@@ -114,9 +118,13 @@ The notebook follows the layout pattern of `1_sample_preparation.ipynb`:
   1. Verify openBIS / AFS connectivity.
   2. Query remote files: `remote_files = afs_client.list(owner, source_path, recursively=True)`.
   3. Map remote file paths to relative local paths and set of expected relative files.
-  4. **Download / Update**: For each remote file:
+  4. **Incremental Download / Update**: For each remote file:
      - If directory, `os.makedirs(local_dir, exist_ok=True)`.
-     - If regular file: compare local file existence, size, and timestamp. If missing or different, download the file content via `afs_client.read()` chunks.
+     - If regular file:
+       - Check if local file exists.
+       - If local file exists, check `os.path.getsize(local_path) == remote_file.size`.
+       - If size matches and local file is intact, skip download.
+       - If file is missing or size/modified timestamp differs, download the file content via `afs_client.read()` chunks.
   5. **Mirror Deletions**: Walk the local `destination_path`. If a local file or directory does not exist in `remote_files`, delete it locally (`os.remove()` / `os.rmdir()`).
   6. Update `last_synced` timestamp and file count in `logs/active_synchronisations.json`.
   7. Sleep for `poll_interval` seconds.
@@ -147,9 +155,11 @@ Structure:
 ---
 
 ## 5. Builder Calls & Technical Decisions
+- **Differential Sync**: Skip downloads if local file exists and file size matches remote file. Ensures resuming a stopped sync does not re-download existing files.
+- **Resume Support**: Tab 2 provides a "Resume" button for `STOPPED` jobs to relaunch the background worker seamlessly.
 - **Mirroring Deletions**: Remotely deleted files and directories are deleted locally to keep AiiDAlab in exact sync with openBIS AFS.
 - **Source of Truth**: openBIS AFS is the authoritative source. If an AFS file changes, it overwrites the local copy.
 - **Path Mapping**: Relative paths under the selected `source_path` are mapped directly to `destination_path` to avoid redundant nested folders.
 - **Stopped Job Lifecycle**: Stopping a job sets its status to `STOPPED`. A `STOPPED` job immediately frees the folder so it can be re-synced if needed. A "Dismiss" button in Tab 2 allows clearing stopped jobs from view.
 - **SSL Verification**: Uses `verify=False` for local openBIS instances where certificates might be self-signed.
-- **Testing**: Tests in `tests/test_synchronisation.py` verify registry CRUD operations, PID liveness checks, conflict detection, and path mapping logic.
+- **Testing**: Tests in `tests/test_synchronisation.py` verify registry CRUD operations, PID liveness checks, conflict detection, path mapping logic, and incremental skip logic.
