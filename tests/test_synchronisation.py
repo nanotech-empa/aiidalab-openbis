@@ -168,3 +168,42 @@ def test_notebook_valid_json():
     cell_sources = "".join("".join(c["source"]) for c in nb["cells"])
     assert "SynchronisationMainWidget" in cell_sources
     assert "connect_openbis_aiida" in cell_sources
+
+
+def test_mirror_nested_directory_deletion(tmp_path):
+    dest = tmp_path / "dest"
+    sub_dir = dest / "subfolder"
+    sub_dir.mkdir(parents=True)
+    stale_nested_file = sub_dir / "stale_nested.dat"
+    stale_nested_file.write_text("old nested content")
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = []
+
+    # Remote has zero files: the entire nested directory and file must be mirrored/deleted
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans/run1", str(dest))
+    assert stats["deleted"] >= 1
+    assert not stale_nested_file.exists()
+    assert not sub_dir.exists()
+
+
+def test_resume_all_matching_files_zero_transfers(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    f1 = dest / "file1.txt"
+    f1.write_bytes(b"content123")
+
+    mock_f = MagicMock()
+    mock_f.directory = False
+    mock_f.path = "/scans/file1.txt"
+    mock_f.size = len(b"content123")
+    mock_f.name = "file1.txt"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_f]
+
+    stats = sync_once(mock_client, "SAMPLE_RESUME", "/scans", str(dest))
+    assert stats["downloaded"] == 0
+    assert stats["skipped"] == 1
+    assert stats["deleted"] == 0
+    mock_client.read.assert_not_called()
