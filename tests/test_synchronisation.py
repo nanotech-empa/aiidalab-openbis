@@ -144,3 +144,27 @@ def test_setup_sync_widget_conflict_detection(tmp_path):
     widget.check_conflict("SMP_1", "/run2", "/local/run2")
     assert widget.conflict_html.value == ""
     assert widget.start_button.disabled is False
+
+
+def test_config_json_contains_synchronisation_link():
+    import json
+
+    with open("config/config.json", "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    enable_exp = "".join(cfg["home_page"]["enable_links"]["Experiments"])
+    assert "6_synchronisation.ipynb" in enable_exp
+    assert "Folder synchronisation (AFS)" in enable_exp
+
+    disable_exp = "".join(cfg["home_page"]["disable_links"]["Experiments"])
+    assert "6_synchronisation.ipynb" in disable_exp
+
+
+def test_notebook_valid_json():
+    import json
+
+    with open("6_synchronisation.ipynb", "r", encoding="utf-8") as f:
+        nb = json.load(f)
+    assert nb["nbformat"] == 4
+    cell_sources = "".join("".join(c["source"]) for c in nb["cells"])
+    assert "SynchronisationMainWidget" in cell_sources
+    assert "connect_openbis_aiida" in cell_sources
