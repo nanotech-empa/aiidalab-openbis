@@ -14,7 +14,7 @@
         "aiida-core",
         "ase",
         "scikit-learn",
-        "pybis",
+        "pybis==7.0.0rc6",
         "rdkit",
         "SPIEPy",
         "ipyfilechooser",
