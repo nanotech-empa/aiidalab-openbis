@@ -6,9 +6,10 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+import ipyfilechooser
 import ipywidgets as ipw
 from pybis import AfsClient
-from src import sync_registry
+from src import sync_registry, utils
 
 
 class SetupSyncWidget(ipw.VBox):
@@ -27,6 +28,20 @@ class SetupSyncWidget(ipw.VBox):
 
         self._build_ui()
 
+    def _get_available_eln_instances(self):
+        try:
+            config = utils.read_json(utils.ELN_CONFIG)
+            instances = [
+                k
+                for k in config.keys()
+                if k != "default"
+                and isinstance(config[k], dict)
+                and "token" in config[k]
+            ]
+            return instances, config.get("default")
+        except Exception:
+            return [], None
+
     def _build_ui(self):
         # Explanation box
         info_html = ipw.HTML(
@@ -37,6 +52,43 @@ class SetupSyncWidget(ipw.VBox):
                 Deletions, modifications, and new files on openBIS are mirrored locally. Unchanged files are not re-downloaded.
             </div>
             """
+        )
+
+        # 0. openBIS Instance Selector
+        eln_instances, default_eln = self._get_available_eln_instances()
+        current_url = getattr(self.openbis_session, "url", default_eln or "")
+
+        current_matched = None
+        for inst in eln_instances:
+            if inst.rstrip("/") == current_url.rstrip("/"):
+                current_matched = inst
+                break
+        if not current_matched and eln_instances:
+            current_matched = eln_instances[0]
+
+        if len(eln_instances) > 1:
+            self.instance_dropdown = ipw.Dropdown(
+                options=eln_instances,
+                value=current_matched,
+                description="openBIS URL:",
+                style={"description_width": "initial"},
+                layout=ipw.Layout(width="450px"),
+            )
+            self.instance_dropdown.observe(self._on_instance_change, names="value")
+            instance_widget = self.instance_dropdown
+        else:
+            instance_widget = ipw.HTML(
+                f"<div style='font-size: 12px; color: #4b5563; margin-bottom: 6px;'>"
+                f"<strong>Connected openBIS Instance:</strong> <code>{current_url}</code>"
+                f"</div>"
+            )
+
+        instance_box = ipw.VBox(
+            [
+                ipw.HTML("<strong>0. Connected openBIS Instance</strong>"),
+                instance_widget,
+            ],
+            layout=ipw.Layout(margin="0 0 15px 0"),
         )
 
         # 1. Object Search
@@ -67,6 +119,7 @@ class SetupSyncWidget(ipw.VBox):
             description="AFS Folder:",
             options=["/"],
             value="/",
+            style={"description_width": "initial"},
             layout=ipw.Layout(width="95%"),
         )
         self.afs_dropdown.observe(self._on_folder_change, names="value")
@@ -83,26 +136,64 @@ class SetupSyncWidget(ipw.VBox):
         self.local_input = ipw.Text(
             description="Local Path:",
             placeholder="/home/jovyan/data/...",
-            layout=ipw.Layout(width="95%"),
+            style={"description_width": "initial"},
+            layout=ipw.Layout(flex="1 1 auto"),
         )
         self.local_input.observe(self._on_folder_change, names="value")
 
+        self.browse_btn = ipw.Button(
+            description="Browse Folder",
+            button_style="info",
+            icon="folder-open",
+            layout=ipw.Layout(width="150px"),
+        )
+        self.browse_btn.on_click(self._on_toggle_file_chooser)
+
+        self.file_chooser = ipyfilechooser.FileChooser(
+            path="/home/jovyan",
+            show_only_dirs=True,
+            select_default=False,
+            title="Select Destination Directory:",
+        )
+        self.file_chooser.use_dir_icons = True
+        self.file_chooser.register_callback(self._on_local_folder_selected)
+
+        self.file_chooser_box = ipw.VBox(
+            [self.file_chooser],
+            layout=ipw.Layout(
+                display="none",
+                margin="6px 0",
+                padding="8px",
+                border="1px dashed #cbd5e1",
+            ),
+        )
+
+        local_row = ipw.HBox([self.local_input, self.browse_btn])
         local_box = ipw.VBox(
             [
                 ipw.HTML("<strong>3. Destination Folder in AiiDAlab</strong>"),
-                self.local_input,
+                local_row,
+                self.file_chooser_box,
             ],
             layout=ipw.Layout(margin="0 0 15px 0"),
         )
 
-        # 4. Poll Interval
-        self.poll_interval = ipw.BoundedIntText(
+        # 4. Poll Interval Dropdown
+        self.poll_interval = ipw.Dropdown(
+            options=[
+                ("5 seconds", 5),
+                ("10 seconds", 10),
+                ("30 seconds", 30),
+                ("1 minute", 60),
+                ("5 minutes", 300),
+                ("15 minutes", 900),
+                ("30 minutes", 1800),
+                ("1 hour", 3600),
+            ],
             value=60,
-            min=5,
-            max=3600,
-            step=5,
-            description="Poll Interval (s):",
-            layout=ipw.Layout(width="240px"),
+            description="Poll Interval:",
+            style={"description_width": "initial"},
+            layout=ipw.Layout(width="280px"),
         )
 
         interval_box = ipw.VBox(
@@ -129,6 +220,7 @@ class SetupSyncWidget(ipw.VBox):
 
         self.children = [
             info_html,
+            instance_box,
             search_box,
             afs_box,
             local_box,
@@ -137,6 +229,50 @@ class SetupSyncWidget(ipw.VBox):
             self.start_button,
             self.launch_status,
         ]
+
+    def _on_instance_change(self, change):
+        new_url = change["new"]
+        try:
+            sess, _ = utils.connect_openbis_aiida(new_url)
+            if sess and sess.is_session_active():
+                self.openbis_session = sess
+                self.search_status.value = (
+                    f"<span style='color: green;'>✓ Connected to {new_url}</span>"
+                )
+                self.afs_dropdown.options = ["/"]
+                self.current_owner = None
+                self.current_object_id = None
+            else:
+                self.search_status.value = f"<span style='color: red;'>Failed to establish active session with {new_url}.</span>"
+        except Exception as e:
+            self.search_status.value = (
+                f"<span style='color: red;'>Error connecting to {new_url}: {e}</span>"
+            )
+
+    def _on_toggle_file_chooser(self, b):
+        if self.file_chooser_box.layout.display == "none":
+            self.file_chooser_box.layout.display = "block"
+            self.browse_btn.description = "Close Browser"
+            self.browse_btn.icon = "times"
+            current_path = Path(self.local_input.value.strip() or "/home/jovyan")
+            target = current_path if current_path.is_dir() else current_path.parent
+            if target.is_dir():
+                try:
+                    self.file_chooser.reset(path=str(target))
+                except Exception:
+                    pass
+        else:
+            self.file_chooser_box.layout.display = "none"
+            self.browse_btn.description = "Browse Folder"
+            self.browse_btn.icon = "folder-open"
+
+    def _on_local_folder_selected(self, chooser):
+        chosen = chooser.selected_path or chooser.selected
+        if chosen:
+            self.local_input.value = str(chosen)
+            self.file_chooser_box.layout.display = "none"
+            self.browse_btn.description = "Browse Folder"
+            self.browse_btn.icon = "folder-open"
 
     def check_conflict(
         self, owner: str, afs_path: str, local_path: str
@@ -206,21 +342,30 @@ class SetupSyncWidget(ipw.VBox):
             self.current_object_id = str(getattr(sample, "identifier", query))
 
             # Query AFS folders
-            afs_url = getattr(self.openbis_session, "url", "") + "/afs-server"
+            afs_url = (
+                getattr(self.openbis_session, "url", "").rstrip("/") + "/afs-server"
+            )
             token = getattr(self.openbis_session, "token", "")
             afs_client = AfsClient(afs_url, token, verify=False)
 
             folders = ["/"]
+            flist = []
             try:
                 flist = afs_client.list(self.current_owner, "/", recursively=True)
-                for f in flist or []:
-                    if getattr(f, "directory", False):
-                        p = "/" + f.path.lstrip("/")
-                        if p not in folders:
-                            folders.append(p)
             except Exception as afs_err:
                 self.search_status.value = f"<span style='color: orange;'>Found object '{self.current_object_id}', but could not load AFS files: {afs_err}</span>"
                 return
+
+            folders_set = set(["/"])
+            for f in flist or []:
+                p = "/" + f.path.strip("/")
+                if getattr(f, "directory", False):
+                    folders_set.add(p)
+                else:
+                    parts = p.strip("/").split("/")
+                    for i in range(1, len(parts)):
+                        folders_set.add("/" + "/".join(parts[:i]))
+            folders = sorted(list(folders_set))
 
             self.afs_dropdown.options = folders
             self.afs_dropdown.value = folders[0]
@@ -228,7 +373,16 @@ class SetupSyncWidget(ipw.VBox):
             code_clean = str(getattr(sample, "code", "data")).lower()
             self.local_input.value = f"/home/jovyan/data/openbis_raw_scans/{code_clean}"
 
-            self.search_status.value = f"<span style='color: green;'>✓ Found {self.current_object_id} (PermID: {self.current_owner}). Loaded {len(folders)} AFS folder(s).</span>"
+            if not flist:
+                self.search_status.value = (
+                    f"<span style='color: orange;'>⚠️ Found {self.current_object_id} "
+                    f"(PermID: {self.current_owner}), but no files or folders were found in AFS for this object.</span>"
+                )
+            else:
+                self.search_status.value = (
+                    f"<span style='color: green;'>✓ Found {self.current_object_id} "
+                    f"(PermID: {self.current_owner}). Loaded {len(folders)} AFS folder(s).</span>"
+                )
             self.check_conflict(
                 self.current_owner, self.afs_dropdown.value, self.local_input.value
             )
@@ -263,6 +417,7 @@ class SetupSyncWidget(ipw.VBox):
             "job_id": job_id,
             "owner": self.current_owner,
             "object_identifier": self.current_object_id or self.current_owner,
+            "openbis_url": getattr(self.openbis_session, "url", "").rstrip("/"),
             "afs_path": afs_path,
             "local_path": local_path,
             "poll_interval": interval,
@@ -361,8 +516,14 @@ class ActiveSyncsWidget(ipw.VBox):
         </div>
         """)
 
+        ob_url_line = (
+            f"<div><strong>openBIS Instance:</strong> <code>{job.get('openbis_url')}</code></div>"
+            if job.get("openbis_url")
+            else ""
+        )
         details_html = ipw.HTML(f"""
         <div style="font-size: 12px; color: #374151; margin: 8px 0;">
+            {ob_url_line}
             <div><strong>AFS Source:</strong> <code>{job.get("afs_path")}</code></div>
             <div><strong>AiiDAlab Target:</strong> <code>{job.get("local_path")}</code></div>
             <div><strong>Poll Interval:</strong> Every {job.get("poll_interval")} seconds</div>

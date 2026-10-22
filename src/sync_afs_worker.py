@@ -172,7 +172,8 @@ def run_worker(config: dict, registry_path: Optional[Path] = None) -> None:
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    openbis_session, _ = utils.connect_openbis_aiida()
+    openbis_url = config.get("openbis_url")
+    openbis_session, _ = utils.connect_openbis_aiida(openbis_url)
     if not openbis_session:
         logger.error("Could not establish openBIS session. Worker exiting.")
         sync_registry.update_job(
@@ -182,7 +183,7 @@ def run_worker(config: dict, registry_path: Optional[Path] = None) -> None:
         )
         return
 
-    afs_url = openbis_session.url + "/afs-server"
+    afs_url = openbis_session.url.rstrip("/") + "/afs-server"
     afs_client = AfsClient(afs_url, openbis_session.token, verify=False)
 
     logger.info("Starting sync loop for job %s (interval: %ds)", job_id, interval)

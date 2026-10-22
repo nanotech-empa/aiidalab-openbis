@@ -299,3 +299,84 @@ def test_active_syncs_widget_resume_conflict_prevention(tmp_path):
     )
     assert conflict is not None
     assert conflict["job_id"] == "job-1"
+
+
+def test_setup_sync_widget_poll_interval_dropdown(tmp_path):
+    import ipywidgets as ipw
+
+    mock_session = MagicMock()
+    mock_session.url = "https://openbis.example.com"
+    widget = synchronisation_widgets.SetupSyncWidget(
+        openbis_session=mock_session,
+        registry_path=tmp_path / "reg.json",
+    )
+    assert isinstance(widget.poll_interval, ipw.Dropdown)
+    assert widget.poll_interval.value == 60
+    assert widget.poll_interval.style.description_width == "initial"
+    option_values = [v for _, v in widget.poll_interval.options]
+    assert 5 in option_values
+    assert 10 in option_values
+    assert 30 in option_values
+    assert 60 in option_values
+    assert 300 in option_values
+
+
+def test_setup_sync_widget_browse_button_and_file_chooser(tmp_path):
+    mock_session = MagicMock()
+    widget = synchronisation_widgets.SetupSyncWidget(
+        openbis_session=mock_session,
+        registry_path=tmp_path / "reg.json",
+    )
+    assert widget.browse_btn is not None
+    assert widget.file_chooser_box.layout.display == "none"
+
+    # Toggle open
+    widget._on_toggle_file_chooser(None)
+    assert widget.file_chooser_box.layout.display == "block"
+    assert widget.browse_btn.description == "Close Browser"
+
+    # Selecting folder updates local_input and collapses
+    mock_chooser = MagicMock()
+    mock_chooser.selected_path = str(tmp_path / "chosen_dir")
+    mock_chooser.selected = str(tmp_path / "chosen_dir")
+    widget._on_local_folder_selected(mock_chooser)
+
+    assert widget.local_input.value == str(tmp_path / "chosen_dir")
+    assert widget.file_chooser_box.layout.display == "none"
+    assert widget.browse_btn.description == "Browse Folder"
+
+
+def test_setup_sync_widget_extracts_nested_folders(tmp_path, monkeypatch):
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.permId = "SAMPLE_NESTED"
+    mock_sample.code = "NESTED_CODE"
+    mock_sample.identifier = "/SPACE/PROJ/NESTED_CODE"
+    mock_session.get_sample.return_value = mock_sample
+
+    f1 = MagicMock()
+    f1.path = "/folderA/subfolderB/file1.dat"
+    f1.directory = False
+
+    f2 = MagicMock()
+    f2.path = "/folderC"
+    f2.directory = True
+
+    mock_afs = MagicMock()
+    mock_afs.list.return_value = [f1, f2]
+    monkeypatch.setattr(
+        synchronisation_widgets, "AfsClient", lambda *args, **kwargs: mock_afs
+    )
+
+    widget = synchronisation_widgets.SetupSyncWidget(
+        openbis_session=mock_session,
+        registry_path=tmp_path / "reg.json",
+    )
+    widget.object_input.value = "SAMPLE_NESTED"
+    widget._on_search(None)
+
+    options = list(widget.afs_dropdown.options)
+    assert "/" in options
+    assert "/folderA" in options
+    assert "/folderA/subfolderB" in options
+    assert "/folderC" in options
