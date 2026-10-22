@@ -444,12 +444,27 @@ class ActiveSyncsWidget(ipw.VBox):
         </div>
         """)
 
+        current_action = job.get("current_action", "")
+        last_synced = job.get("last_synced")
+        files_synced = job.get("files_synced", 0)
+
+        if is_running and current_action and "Downloading" in current_action:
+            progress_line = f"<div><strong>Status:</strong> <span style='color: #2563eb;'>⏳ {current_action}</span></div>"
+            if last_synced:
+                progress_line += (
+                    f"<div><strong>Last Completed Cycle:</strong> {last_synced}</div>"
+                )
+        elif last_synced:
+            progress_line = f"<div><strong>Last Synced:</strong> {last_synced} ({files_synced} files)</div>"
+        else:
+            progress_line = f"<div><strong>Last Synced:</strong> Pending initial cycle ({files_synced} files)</div>"
+
         details_html = ipw.HTML(f"""
         <div style="font-size: 12px; color: #374151; margin: 8px 0;">
             <div><strong>AFS Source:</strong> <code>{job.get("afs_path")}</code></div>
             <div><strong>AiiDAlab Target:</strong> <code>{job.get("local_path")}</code></div>
             <div><strong>Poll Interval:</strong> Every {job.get("poll_interval")} seconds</div>
-            <div><strong>Last Synced:</strong> {job.get("last_synced") or "Pending initial cycle"} ({job.get("files_synced", 0)} files)</div>
+            {progress_line}
         </div>
         """)
 

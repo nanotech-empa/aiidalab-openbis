@@ -6,7 +6,7 @@ import os
 import signal
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from pybis import AfsClient
 from src import sync_registry, utils
@@ -84,6 +84,7 @@ def sync_once(
     owner: str,
     source_path: str,
     destination_path: str,
+    on_progress: Optional[Callable[[int, int, int], None]] = None,
 ) -> dict:
     dest = Path(destination_path)
     dest.mkdir(parents=True, exist_ok=True)
@@ -95,6 +96,9 @@ def sync_once(
     expected_files = set()
     expected_dirs = {dest.resolve()}
     stats = {"downloaded": 0, "skipped": 0, "deleted": 0}
+
+    total_files = sum(1 for f in file_list if not getattr(f, "directory", False))
+    last_progress_time = time.time()
 
     for f in file_list:
         rel = compute_relative_path(f.path, source_path)
@@ -115,10 +119,26 @@ def sync_once(
             expected_files.add(target.resolve())
             if target.exists() and target.is_file() and target.stat().st_size == f.size:
                 stats["skipped"] += 1
-                continue
+            else:
+                try:
+                    download_afs_file(afs_client, owner, f.path, target, f.size)
+                    stats["downloaded"] += 1
+                except Exception as dl_err:
+                    logger.warning("Could not download %s: %s", f.path, dl_err)
+                    part_file = target.with_suffix(target.suffix + ".part")
+                    if part_file.exists():
+                        try:
+                            part_file.unlink()
+                        except OSError:
+                            pass
 
-            download_afs_file(afs_client, owner, f.path, target, f.size)
-            stats["downloaded"] += 1
+            now = time.time()
+            if on_progress and (now - last_progress_time >= 2.0):
+                last_progress_time = now
+                on_progress(stats["downloaded"], stats["skipped"], total_files)
+
+    if on_progress:
+        on_progress(stats["downloaded"], stats["skipped"], total_files)
 
     # Mirror deletions: bottom-up cleanup of untracked files and directories
     for root, dirs, files in os.walk(dest, topdown=False):
@@ -187,15 +207,39 @@ def run_worker(config: dict, registry_path: Optional[Path] = None) -> None:
 
     logger.info("Starting sync loop for job %s (interval: %ds)", job_id, interval)
 
+    def handle_progress(downloaded: int, skipped: int, total: int):
+        sync_registry.update_job(
+            job_id,
+            {
+                "downloaded": downloaded,
+                "skipped": skipped,
+                "total_files": total,
+                "files_synced": downloaded + skipped,
+                "current_action": f"Downloading ({downloaded} new, {skipped} up to date of {total})",
+                "status": "RUNNING",
+            },
+            registry_path or sync_registry.DEFAULT_REGISTRY_PATH,
+        )
+
     while running:
         try:
-            stats = sync_once(afs_client, owner, source_path, destination_path)
+            stats = sync_once(
+                afs_client,
+                owner,
+                source_path,
+                destination_path,
+                on_progress=handle_progress,
+            )
             now_iso = datetime.datetime.now().isoformat()
             sync_registry.update_job(
                 job_id,
                 {
                     "last_synced": now_iso,
                     "files_synced": stats["downloaded"] + stats["skipped"],
+                    "downloaded": stats["downloaded"],
+                    "skipped": stats["skipped"],
+                    "total_files": stats["downloaded"] + stats["skipped"],
+                    "current_action": "Idle (up to date)",
                     "status": "RUNNING",
                 },
                 registry_path or sync_registry.DEFAULT_REGISTRY_PATH,

@@ -380,3 +380,94 @@ def test_setup_sync_widget_extracts_nested_folders(tmp_path, monkeypatch):
     assert "/folderA" in options
     assert "/folderA/subfolderB" in options
     assert "/folderC" in options
+
+
+def test_sync_once_live_progress_callback(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    f1 = MagicMock()
+    f1.directory = False
+    f1.path = "/run1/file1.dat"
+    f1.size = 10
+    f1.name = "file1.dat"
+
+    f2 = MagicMock()
+    f2.directory = False
+    f2.path = "/run1/file2.dat"
+    f2.size = 20
+    f2.name = "file2.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [f1, f2]
+    mock_client.read.return_value = b"0123456789"
+
+    progress_calls = []
+
+    def on_prog(dl, sk, tot):
+        progress_calls.append((dl, sk, tot))
+
+    stats = sync_once(mock_client, "SMP", "/run1", str(dest), on_progress=on_prog)
+    assert stats["downloaded"] == 2
+    assert len(progress_calls) >= 1
+    assert progress_calls[-1] == (2, 0, 2)
+
+
+def test_sync_once_handles_failing_file_gracefully(tmp_path, monkeypatch):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    good_file = MagicMock()
+    good_file.directory = False
+    good_file.path = "/run1/good.dat"
+    good_file.size = 4
+    good_file.name = "good.dat"
+
+    bad_file = MagicMock()
+    bad_file.directory = False
+    bad_file.path = "/run1/bad.dat"
+    bad_file.size = 10
+    bad_file.name = "bad.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [bad_file, good_file]
+
+    # bad_file raises NoSuchFileException, good_file succeeds
+    def mock_download(client, owner, remote_path, target_path, file_size):
+        if "bad.dat" in remote_path:
+            # create dummy part file to test cleanup
+            part = target_path.with_suffix(target_path.suffix + ".part")
+            part.write_bytes(b"temp")
+            raise IOError("NoSuchFileException: file missing")
+        target_path.write_bytes(b"good")
+
+    monkeypatch.setattr("src.sync_afs_worker.download_afs_file", mock_download)
+
+    stats = sync_once(mock_client, "SMP", "/run1", str(dest))
+    assert stats["downloaded"] == 1
+    assert (dest / "good.dat").exists()
+    assert not (dest / "bad.dat").exists()
+    assert not (dest / "bad.dat.part").exists()
+
+
+def test_active_syncs_widget_displays_downloading_progress(tmp_path):
+    import os
+
+    reg_file = tmp_path / "reg.json"
+    job = {
+        "job_id": "job-prog",
+        "pid": os.getpid(),
+        "owner": "SMP_P",
+        "afs_path": "/run1",
+        "local_path": "/local/run1",
+        "status": "RUNNING",
+        "current_action": "Downloading (50 new, 10 up to date of 100)",
+        "last_synced": "2026-10-22T12:00:00",
+        "files_synced": 60,
+    }
+    sync_registry.register_job(job, reg_file)
+
+    widget = synchronisation_widgets.ActiveSyncsWidget(registry_path=reg_file)
+    card_html = str(widget.jobs_box.children[0].children[1].value)
+    assert "Downloading (50 new, 10 up to date of 100)" in card_html
+    assert "Last Completed Cycle" in card_html
