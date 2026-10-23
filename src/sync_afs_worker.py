@@ -79,6 +79,34 @@ def download_afs_file(
     temp_file.replace(local_dest)
 
 
+IGNORE_REMOTE_SUFFIXES = (
+    ".openbis-drive-part",
+    ".part",
+)
+
+PROTECTED_LOCAL_FILENAMES = {
+    "logging.json",
+    ".gitignore",
+}
+
+PROTECTED_LOCAL_DIRNAMES = {
+    ".ipynb_checkpoints",
+    ".git",
+}
+
+
+def is_protected_local_path(path: Path) -> bool:
+    """Check if a local file or directory should be protected from deletion mirroring."""
+    if path.name in PROTECTED_LOCAL_FILENAMES:
+        return True
+    if path.name.endswith(".part"):
+        return True
+    for part in path.parts:
+        if part in PROTECTED_LOCAL_DIRNAMES:
+            return True
+    return False
+
+
 def sync_once(
     afs_client: AfsClient,
     owner: str,
@@ -89,18 +117,56 @@ def sync_once(
     dest = Path(destination_path)
     dest.mkdir(parents=True, exist_ok=True)
 
-    file_list = afs_client.list(owner, source_path, recursively=True)
+    # Query remote files with retry on empty list to guard against transient pybis/server hiccups
+    file_list = None
+    for attempt in range(2):
+        file_list = afs_client.list(owner, source_path, recursively=True)
+        if file_list:
+            break
+        if attempt == 0:
+            time.sleep(1.0)
+
     if file_list is None:
         file_list = []
+
+    # Circuit breaker: if remote file list is empty, but local directory contains files,
+    # do NOT proceed with deletion mirror (this protects against transient NoSuchFileException / timeouts).
+    has_local_files = False
+    if dest.exists():
+        has_local_files = any(
+            p
+            for p in dest.iterdir()
+            if not is_protected_local_path(p)
+            and p.name not in ("active_synchronisations.json",)
+        )
+
+    if not file_list and has_local_files:
+        logger.warning(
+            "Remote file list for %s is empty, but local directory %s has files. "
+            "Skipping deletion mirror as safety precaution.",
+            source_path,
+            dest,
+        )
+        return {"downloaded": 0, "skipped": 0, "deleted": 0}
 
     expected_files = set()
     expected_dirs = {dest.resolve()}
     stats = {"downloaded": 0, "skipped": 0, "deleted": 0}
 
-    total_files = sum(1 for f in file_list if not getattr(f, "directory", False))
+    # Filter out temporary in-flight upload files (e.g. openbis-drive-part)
+    valid_remote_files = []
+    for f in file_list:
+        path_str = getattr(f, "path", "")
+        if any(path_str.endswith(sfx) for sfx in IGNORE_REMOTE_SUFFIXES):
+            continue
+        valid_remote_files.append(f)
+
+    total_files = sum(
+        1 for f in valid_remote_files if not getattr(f, "directory", False)
+    )
     last_progress_time = time.time()
 
-    for f in file_list:
+    for f in valid_remote_files:
         rel = compute_relative_path(f.path, source_path)
         if not rel:
             continue
@@ -145,6 +211,8 @@ def sync_once(
         root_path = Path(root).resolve()
         for file in files:
             p = root_path / file
+            if is_protected_local_path(p):
+                continue
             if p not in expected_files:
                 try:
                     p.unlink()
@@ -154,6 +222,8 @@ def sync_once(
 
         for d in dirs:
             p = root_path / d
+            if is_protected_local_path(p):
+                continue
             if p not in expected_dirs:
                 try:
                     p.rmdir()

@@ -178,14 +178,101 @@ def test_mirror_nested_directory_deletion(tmp_path):
     stale_nested_file = sub_dir / "stale_nested.dat"
     stale_nested_file.write_text("old nested content")
 
-    mock_client = MagicMock()
-    mock_client.list.return_value = []
+    # Remote still has a valid active file elsewhere, but subfolder was removed
+    mock_active_file = MagicMock()
+    mock_active_file.directory = False
+    mock_active_file.path = "/scans/run1/active.dat"
+    mock_active_file.size = 11
+    mock_active_file.name = "active.dat"
 
-    # Remote has zero files: the entire nested directory and file must be mirrored/deleted
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_active_file]
+    mock_client.read.return_value = b"active data"
+
     stats = sync_once(mock_client, "SAMPLE_1", "/scans/run1", str(dest))
+    assert stats["downloaded"] == 1
     assert stats["deleted"] >= 1
     assert not stale_nested_file.exists()
     assert not sub_dir.exists()
+    assert (dest / "active.dat").read_bytes() == b"active data"
+
+
+def test_empty_remote_list_circuit_breaker(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    f1 = dest / "important.dat"
+    f1.write_bytes(b"do not delete me")
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = []
+
+    # When remote list returns empty, circuit breaker protects existing local files
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans/run1", str(dest))
+    assert stats["deleted"] == 0
+    assert f1.exists()
+
+
+def test_protected_metadata_files_not_deleted(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    # Protected local files
+    logging_file = dest / "logging.json"
+    logging_file.write_text('{"processed_files": []}')
+
+    chk_dir = dest / ".ipynb_checkpoints"
+    chk_dir.mkdir()
+    chk_file = chk_dir / "notebook-checkpoint.ipynb"
+    chk_file.write_text("{}")
+
+    # Unprotected stale file
+    stale = dest / "stale.dat"
+    stale.write_text("old")
+
+    mock_active = MagicMock()
+    mock_active.directory = False
+    mock_active.path = "/scans/active.dat"
+    mock_active.size = 5
+    mock_active.name = "active.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_active]
+    mock_client.read.return_value = b"hello"
+
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans", str(dest))
+    assert stats["downloaded"] == 1
+    assert stats["deleted"] == 1  # Only stale.dat deleted
+    assert not stale.exists()
+    assert logging_file.exists()
+    assert chk_file.exists()
+    assert chk_dir.exists()
+
+
+def test_ignore_openbis_drive_part_files(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    mock_part = MagicMock()
+    mock_part.directory = False
+    mock_part.path = "/scans/upload.dat.openbis-drive-part"
+    mock_part.size = 100
+    mock_part.name = "upload.dat.openbis-drive-part"
+
+    mock_real = MagicMock()
+    mock_real.directory = False
+    mock_real.path = "/scans/real.dat"
+    mock_real.size = 4
+    mock_real.name = "real.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_part, mock_real]
+    mock_client.read.return_value = b"real"
+
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans", str(dest))
+    # Only real.dat is downloaded, part file is ignored
+    assert stats["downloaded"] == 1
+    assert (dest / "real.dat").exists()
+    assert not (dest / "upload.dat.openbis-drive-part").exists()
 
 
 def test_resume_all_matching_files_zero_transfers(tmp_path):
