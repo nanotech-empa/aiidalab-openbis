@@ -349,7 +349,7 @@ class SetupSyncWidget(ipw.VBox):
             "afs_path": afs_path,
             "local_path": local_path,
             "poll_interval": interval,
-            "log_file": f"logs/sync_{job_id}.log",
+            "log_file": f"logs/sync/{job_id}.log",
             "status": "RUNNING",
             "started_at": datetime.datetime.now().isoformat(),
             "last_synced": None,
@@ -512,6 +512,10 @@ class ActiveSyncsWidget(ipw.VBox):
 
                 config_dir = Path("logs/configs")
                 config_dir.mkdir(parents=True, exist_ok=True)
+                if "log_file" not in j_info or not j_info["log_file"].startswith(
+                    "logs/sync/"
+                ):
+                    j_info["log_file"] = f"logs/sync/{j_info['job_id']}.log"
                 config_file = config_dir / f"{j_info['job_id']}.json"
                 with open(config_file, "w", encoding="utf-8") as f:
                     json.dump(j_info, f, indent=2)
