@@ -10,7 +10,7 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
 # Ensure logs folder exists where sample_preparation_widgets expects it
-(pathlib.Path.cwd().parent / "logs").mkdir(parents=True, exist_ok=True)
+(pathlib.Path(repo_root) / "logs").mkdir(parents=True, exist_ok=True)
 (pathlib.Path.cwd() / "logs").mkdir(parents=True, exist_ok=True)
 
 # Mock external packages that might not be installed or configured in test environment
@@ -34,7 +34,7 @@ for mod in [
         sys.modules[mod] = MagicMock()
 
 # Mock get_interface_config_info before widgets import it
-from src import utils
+from src import utils  # noqa: E402
 
 utils.get_interface_config_info = MagicMock(
     return_value={
@@ -52,7 +52,7 @@ utils.get_interface_config_info = MagicMock(
     }
 )
 
-from src.sample_preparation_widgets import (
+from src.sample_preparation_widgets import (  # noqa: E402
     format_process_step_name,
     split_icons_and_name,
     strip_step_number,

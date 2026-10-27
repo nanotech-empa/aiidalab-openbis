@@ -349,7 +349,7 @@ class SetupSyncWidget(ipw.VBox):
             "afs_path": afs_path,
             "local_path": local_path,
             "poll_interval": interval,
-            "log_file": f"logs/sync_{job_id}.log",
+            "log_file": f"logs/sync/{job_id}.log",
             "status": "RUNNING",
             "started_at": datetime.datetime.now().isoformat(),
             "last_synced": None,
@@ -402,7 +402,70 @@ class ActiveSyncsWidget(ipw.VBox):
             self.jobs_box,
         ]
 
+        self.auto_resume_interrupted_jobs()
         self.render_jobs()
+
+    def auto_resume_interrupted_jobs(self) -> list:
+        """Auto-restart any jobs that were RUNNING but whose process died without explicit user action."""
+        registry = sync_registry.load_registry(self.registry_path)
+        resumed_jobs = []
+
+        for jid, job in list(registry.get("jobs", {}).items()):
+            status = job.get("status")
+            pid = job.get("pid")
+            user_stopped = job.get("user_stopped", False)
+
+            if (
+                status == "RUNNING"
+                and not user_stopped
+                and (pid is None or not sync_registry.is_pid_alive(pid))
+            ):
+                config_dir = Path("logs/configs")
+                config_dir.mkdir(parents=True, exist_ok=True)
+                if "log_file" not in job or not job["log_file"].startswith(
+                    "logs/sync/"
+                ):
+                    job["log_file"] = f"logs/sync/{job['job_id']}.log"
+
+                config_file = config_dir / f"{jid}.json"
+                with open(config_file, "w", encoding="utf-8") as f:
+                    json.dump(job, f, indent=2)
+
+                try:
+                    proc = subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-m",
+                            "src.sync_afs_worker",
+                            "--config",
+                            str(config_file),
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    sync_registry.update_job(
+                        jid,
+                        {
+                            "status": "RUNNING",
+                            "pid": proc.pid,
+                            "user_stopped": False,
+                            "current_action": "Auto-resumed after system restart",
+                        },
+                        self.registry_path,
+                    )
+                    resumed_jobs.append(jid)
+                except Exception as e:
+                    sync_registry.update_job(
+                        jid,
+                        {
+                            "status": "STOPPED",
+                            "current_action": f"Auto-resume failed: {e}",
+                        },
+                        self.registry_path,
+                    )
+
+        return resumed_jobs
 
     def render_jobs(self):
         sync_registry.sync_liveness(self.registry_path)
@@ -479,11 +542,71 @@ class ActiveSyncsWidget(ipw.VBox):
                 layout=ipw.Layout(width="110px"),
             )
 
-            def _on_stop(b, jid=job_id):
-                sync_registry.stop_job(jid, self.registry_path)
-                self.render_jobs()
-                if self.on_change:
-                    self.on_change()
+            def _on_stop(b, jid=job_id, local_p=job.get("local_path")):
+                prompt = ipw.HTML(
+                    f"<div style='font-size: 12px; margin-bottom: 6px; color: #991b1b;'>"
+                    f"<strong>Stop Synchronization?</strong> Maintain downloaded data at <code>{local_p}</code>?</div>"
+                )
+                stop_delete = ipw.Button(
+                    description="Stop & Delete Local Data",
+                    button_style="danger",
+                    icon="trash",
+                    tooltip="Stop sync and delete downloaded local files to free space",
+                    layout=ipw.Layout(width="210px"),
+                )
+                stop_keep = ipw.Button(
+                    description="Stop & Keep Data",
+                    button_style="warning",
+                    icon="pause",
+                    tooltip="Stop sync but keep downloaded files on disk",
+                    layout=ipw.Layout(width="150px"),
+                )
+                cancel_b = ipw.Button(
+                    description="Cancel",
+                    button_style="",
+                    layout=ipw.Layout(width="80px"),
+                )
+
+                def _do_stop_delete(_):
+                    sync_registry.stop_job(jid, self.registry_path)
+                    if local_p:
+                        sync_registry.cleanup_local_data(
+                            local_p, preserve_metadata=True
+                        )
+                    sync_registry.update_job(
+                        jid,
+                        {
+                            "files_synced": 0,
+                            "current_action": "Stopped (local data cleaned up)",
+                        },
+                        self.registry_path,
+                    )
+                    self.render_jobs()
+                    if self.on_change:
+                        self.on_change()
+
+                def _do_stop_keep(_):
+                    sync_registry.stop_job(jid, self.registry_path)
+                    sync_registry.update_job(
+                        jid,
+                        {"current_action": "Stopped (local data kept)"},
+                        self.registry_path,
+                    )
+                    self.render_jobs()
+                    if self.on_change:
+                        self.on_change()
+
+                def _do_cancel(_):
+                    self.render_jobs()
+
+                stop_delete.on_click(_do_stop_delete)
+                stop_keep.on_click(_do_stop_keep)
+                cancel_b.on_click(_do_cancel)
+
+                confirm_box = ipw.VBox(
+                    [prompt, ipw.HBox([stop_delete, stop_keep, cancel_b])]
+                )
+                btn_box.children = [confirm_box]
 
             stop_btn.on_click(_on_stop)
             btn_box.children = [stop_btn]
@@ -512,6 +635,10 @@ class ActiveSyncsWidget(ipw.VBox):
 
                 config_dir = Path("logs/configs")
                 config_dir.mkdir(parents=True, exist_ok=True)
+                if "log_file" not in j_info or not j_info["log_file"].startswith(
+                    "logs/sync/"
+                ):
+                    j_info["log_file"] = f"logs/sync/{j_info['job_id']}.log"
                 config_file = config_dir / f"{j_info['job_id']}.json"
                 with open(config_file, "w", encoding="utf-8") as f:
                     json.dump(j_info, f, indent=2)
@@ -530,7 +657,7 @@ class ActiveSyncsWidget(ipw.VBox):
                 )
                 sync_registry.update_job(
                     j_info["job_id"],
-                    {"status": "RUNNING", "pid": proc.pid},
+                    {"status": "RUNNING", "pid": proc.pid, "user_stopped": False},
                     self.registry_path,
                 )
                 self.render_jobs()
@@ -546,11 +673,72 @@ class ActiveSyncsWidget(ipw.VBox):
                 layout=ipw.Layout(width="90px"),
             )
 
-            def _on_dismiss(b, jid=job_id):
-                sync_registry.dismiss_job(jid, self.registry_path)
-                self.render_jobs()
-                if self.on_change:
-                    self.on_change()
+            def _on_dismiss(b, jid=job_id, local_p=job.get("local_path")):
+                has_files = False
+                if local_p and Path(local_p).exists():
+                    try:
+                        has_files = any(
+                            f
+                            for f in Path(local_p).iterdir()
+                            if f.name not in ("logging.json", ".gitignore")
+                        )
+                    except OSError:
+                        pass
+
+                if not has_files:
+                    sync_registry.dismiss_job(jid, self.registry_path)
+                    self.render_jobs()
+                    if self.on_change:
+                        self.on_change()
+                    return
+
+                prompt = ipw.HTML(
+                    f"<div style='font-size: 12px; margin-bottom: 6px; color: #374151;'>"
+                    f"<strong>Dismiss job?</strong> Clean up files at <code>{local_p}</code>?</div>"
+                )
+                d_delete = ipw.Button(
+                    description="Dismiss & Delete Data",
+                    button_style="danger",
+                    icon="trash",
+                    layout=ipw.Layout(width="180px"),
+                )
+                d_keep = ipw.Button(
+                    description="Dismiss & Keep Data",
+                    button_style="",
+                    layout=ipw.Layout(width="150px"),
+                )
+                d_cancel = ipw.Button(
+                    description="Cancel",
+                    button_style="",
+                    layout=ipw.Layout(width="80px"),
+                )
+
+                def _do_dismiss_delete(_):
+                    if local_p:
+                        sync_registry.cleanup_local_data(
+                            local_p, preserve_metadata=True
+                        )
+                    sync_registry.dismiss_job(jid, self.registry_path)
+                    self.render_jobs()
+                    if self.on_change:
+                        self.on_change()
+
+                def _do_dismiss_keep(_):
+                    sync_registry.dismiss_job(jid, self.registry_path)
+                    self.render_jobs()
+                    if self.on_change:
+                        self.on_change()
+
+                def _do_dismiss_cancel(_):
+                    self.render_jobs()
+
+                d_delete.on_click(_do_dismiss_delete)
+                d_keep.on_click(_do_dismiss_keep)
+                d_cancel.on_click(_do_dismiss_cancel)
+
+                btn_box.children = [
+                    ipw.VBox([prompt, ipw.HBox([d_delete, d_keep, d_cancel])])
+                ]
 
             dismiss_btn.on_click(_on_dismiss)
 

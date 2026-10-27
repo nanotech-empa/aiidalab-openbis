@@ -178,14 +178,101 @@ def test_mirror_nested_directory_deletion(tmp_path):
     stale_nested_file = sub_dir / "stale_nested.dat"
     stale_nested_file.write_text("old nested content")
 
-    mock_client = MagicMock()
-    mock_client.list.return_value = []
+    # Remote still has a valid active file elsewhere, but subfolder was removed
+    mock_active_file = MagicMock()
+    mock_active_file.directory = False
+    mock_active_file.path = "/scans/run1/active.dat"
+    mock_active_file.size = 11
+    mock_active_file.name = "active.dat"
 
-    # Remote has zero files: the entire nested directory and file must be mirrored/deleted
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_active_file]
+    mock_client.read.return_value = b"active data"
+
     stats = sync_once(mock_client, "SAMPLE_1", "/scans/run1", str(dest))
+    assert stats["downloaded"] == 1
     assert stats["deleted"] >= 1
     assert not stale_nested_file.exists()
     assert not sub_dir.exists()
+    assert (dest / "active.dat").read_bytes() == b"active data"
+
+
+def test_empty_remote_list_circuit_breaker(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    f1 = dest / "important.dat"
+    f1.write_bytes(b"do not delete me")
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = []
+
+    # When remote list returns empty, circuit breaker protects existing local files
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans/run1", str(dest))
+    assert stats["deleted"] == 0
+    assert f1.exists()
+
+
+def test_protected_metadata_files_not_deleted(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    # Protected local files
+    logging_file = dest / "logging.json"
+    logging_file.write_text('{"processed_files": []}')
+
+    chk_dir = dest / ".ipynb_checkpoints"
+    chk_dir.mkdir()
+    chk_file = chk_dir / "notebook-checkpoint.ipynb"
+    chk_file.write_text("{}")
+
+    # Unprotected stale file
+    stale = dest / "stale.dat"
+    stale.write_text("old")
+
+    mock_active = MagicMock()
+    mock_active.directory = False
+    mock_active.path = "/scans/active.dat"
+    mock_active.size = 5
+    mock_active.name = "active.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_active]
+    mock_client.read.return_value = b"hello"
+
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans", str(dest))
+    assert stats["downloaded"] == 1
+    assert stats["deleted"] == 1  # Only stale.dat deleted
+    assert not stale.exists()
+    assert logging_file.exists()
+    assert chk_file.exists()
+    assert chk_dir.exists()
+
+
+def test_ignore_openbis_drive_part_files(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    mock_part = MagicMock()
+    mock_part.directory = False
+    mock_part.path = "/scans/upload.dat.openbis-drive-part"
+    mock_part.size = 100
+    mock_part.name = "upload.dat.openbis-drive-part"
+
+    mock_real = MagicMock()
+    mock_real.directory = False
+    mock_real.path = "/scans/real.dat"
+    mock_real.size = 4
+    mock_real.name = "real.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_part, mock_real]
+    mock_client.read.return_value = b"real"
+
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans", str(dest))
+    # Only real.dat is downloaded, part file is ignored
+    assert stats["downloaded"] == 1
+    assert (dest / "real.dat").exists()
+    assert not (dest / "upload.dat.openbis-drive-part").exists()
 
 
 def test_resume_all_matching_files_zero_transfers(tmp_path):
@@ -471,3 +558,135 @@ def test_active_syncs_widget_displays_downloading_progress(tmp_path):
     card_html = str(widget.jobs_box.children[0].children[1].value)
     assert "Downloading (50 new, 10 up to date of 100)" in card_html
     assert "Last Completed Cycle" in card_html
+
+
+def test_cleanup_local_data(tmp_path):
+    data_dir = tmp_path / "sync_data"
+    data_dir.mkdir()
+    sub = data_dir / "sub"
+    sub.mkdir()
+
+    f1 = data_dir / "scan1.dat"
+    f1.write_text("data1")
+    f2 = sub / "scan2.dat"
+    f2.write_text("data2")
+    log = data_dir / "logging.json"
+    log.write_text('{"processed": []}')
+
+    # With preserve_metadata=True (default)
+    deleted = sync_registry.cleanup_local_data(str(data_dir), preserve_metadata=True)
+    assert deleted == 2
+    assert not f1.exists()
+    assert not f2.exists()
+    assert not sub.exists()
+    assert log.exists()
+
+    # With preserve_metadata=False
+    sync_registry.cleanup_local_data(str(data_dir), preserve_metadata=False)
+    assert not log.exists()
+    assert not data_dir.exists()
+
+
+def test_stop_job_records_user_stopped(tmp_path):
+    reg_file = tmp_path / "reg.json"
+    job = {
+        "job_id": "job-user-stop",
+        "pid": 999999,
+        "owner": "SMP_S",
+        "afs_path": "/run1",
+        "local_path": "/local/run1",
+        "status": "RUNNING",
+    }
+    sync_registry.register_job(job, reg_file)
+
+    stopped = sync_registry.stop_job("job-user-stop", reg_file)
+    assert stopped["user_stopped"] is True
+    assert stopped["status"] == "STOPPED"
+
+
+def test_auto_resume_interrupted_jobs(tmp_path, monkeypatch):
+    reg_file = tmp_path / "reg.json"
+    job_interrupted = {
+        "job_id": "job-interrupted",
+        "pid": 9999999,  # Dead PID
+        "owner": "SMP_I",
+        "afs_path": "/run1",
+        "local_path": str(tmp_path / "data1"),
+        "status": "RUNNING",
+        "user_stopped": False,
+        "poll_interval": 10,
+    }
+    job_stopped_by_user = {
+        "job_id": "job-user-stopped",
+        "pid": 9999998,  # Dead PID
+        "owner": "SMP_U",
+        "afs_path": "/run2",
+        "local_path": str(tmp_path / "data2"),
+        "status": "STOPPED",
+        "user_stopped": True,
+        "poll_interval": 10,
+    }
+    sync_registry.register_job(job_interrupted, reg_file)
+    sync_registry.register_job(job_stopped_by_user, reg_file)
+
+    mock_popen = MagicMock()
+    mock_popen.pid = 4321
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: mock_popen)
+    monkeypatch.setattr(sync_registry, "is_pid_alive", lambda pid: pid == 4321)
+
+    synchronisation_widgets.ActiveSyncsWidget(registry_path=reg_file)
+
+    reg = sync_registry.load_registry(reg_file)
+    assert reg["jobs"]["job-interrupted"]["status"] == "RUNNING"
+    assert reg["jobs"]["job-interrupted"]["pid"] == 4321
+    assert "Auto-resumed" in reg["jobs"]["job-interrupted"]["current_action"]
+
+    assert reg["jobs"]["job-user-stopped"]["status"] == "STOPPED"
+    assert reg["jobs"]["job-user-stopped"]["user_stopped"] is True
+
+
+def test_stop_button_shows_cleanup_options(tmp_path, monkeypatch):
+    import ipywidgets as ipw
+
+    reg_file = tmp_path / "reg.json"
+    local_dir = tmp_path / "local_run"
+    local_dir.mkdir()
+    test_file = local_dir / "scan.dat"
+    test_file.write_text("scan")
+
+    monkeypatch.setattr(sync_registry, "is_pid_alive", lambda pid: True)
+
+    job = {
+        "job_id": "job-stop-ui",
+        "pid": 999999,
+        "owner": "SMP_UI",
+        "afs_path": "/run1",
+        "local_path": str(local_dir),
+        "status": "RUNNING",
+    }
+    sync_registry.register_job(job, reg_file)
+
+    widget = synchronisation_widgets.ActiveSyncsWidget(registry_path=reg_file)
+    card = widget.jobs_box.children[0]
+    btn_box = card.children[2]
+    stop_btn = btn_box.children[0]
+    assert stop_btn.description == "Stop Sync"
+
+    # Clicking Stop reveals confirmation options
+    stop_btn.click()
+
+    confirm_vbox = btn_box.children[0]
+    hbox = [c for c in confirm_vbox.children if isinstance(c, ipw.HBox)][0]
+    descriptions = [b.description for b in hbox.children]
+    assert "Stop & Delete Local Data" in descriptions
+    assert "Stop & Keep Data" in descriptions
+    assert "Cancel" in descriptions
+
+    # Clicking "Stop & Delete Local Data" stops the job and removes the local file
+    delete_btn = [b for b in hbox.children if "Delete" in b.description][0]
+    delete_btn.click()
+
+    assert not test_file.exists()
+    reg = sync_registry.load_registry(reg_file)
+    assert reg["jobs"]["job-stop-ui"]["status"] == "STOPPED"
+    assert reg["jobs"]["job-stop-ui"]["user_stopped"] is True
