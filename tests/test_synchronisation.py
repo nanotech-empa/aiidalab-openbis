@@ -248,6 +248,38 @@ def test_protected_metadata_files_not_deleted(tmp_path):
     assert chk_dir.exists()
 
 
+def test_protected_dat_files_directory_not_deleted(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    # Local dat_files directory
+    dat_dir = dest / "dat_files"
+    dat_dir.mkdir()
+    dat_file = dat_dir / "temp_spec.dat"
+    dat_file.write_text("spec data")
+
+    # Stale file outside dat_files
+    stale = dest / "stale.dat"
+    stale.write_text("old")
+
+    mock_active = MagicMock()
+    mock_active.directory = False
+    mock_active.path = "/scans/active.dat"
+    mock_active.size = 5
+    mock_active.name = "active.dat"
+
+    mock_client = MagicMock()
+    mock_client.list.return_value = [mock_active]
+    mock_client.read.return_value = b"hello"
+
+    stats = sync_once(mock_client, "SAMPLE_1", "/scans", str(dest))
+    assert stats["downloaded"] == 1
+    assert stats["deleted"] == 1  # Only stale.dat deleted, dat_files preserved
+    assert not stale.exists()
+    assert dat_dir.exists()
+    assert dat_file.exists()
+
+
 def test_ignore_openbis_drive_part_files(tmp_path):
     dest = tmp_path / "dest"
     dest.mkdir()

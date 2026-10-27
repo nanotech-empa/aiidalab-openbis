@@ -92,6 +92,7 @@ PROTECTED_LOCAL_FILENAMES = {
 PROTECTED_LOCAL_DIRNAMES = {
     ".ipynb_checkpoints",
     ".git",
+    "dat_files",
 }
 
 
