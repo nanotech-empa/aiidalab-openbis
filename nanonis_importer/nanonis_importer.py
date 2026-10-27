@@ -32,6 +32,7 @@ import numpy as np
 from nanonis_importer.spmpy import Spm as spm
 from datetime import datetime
 import shutil
+import tempfile
 from collections import defaultdict
 from src import utils
 import logging
@@ -745,44 +746,64 @@ def process_measurement_files(
 
                 # Save dat files
                 for dat_files_group in dat_files_grouped_by_type:
-                    dat_files_directory = os.path.join(data_folder, "dat_files")
-                    shutil.rmtree(dat_files_directory, ignore_errors=True)
-                    os.mkdir(dat_files_directory)
+                    dat_files_directory = tempfile.mkdtemp(prefix="nanonis_dat_files_")
+                    try:
+                        delete_original_openBIS_dataset = False
+                        group_in_openbis = False
+                        for dat_file in dat_files_group:
+                            original_dat_path = os.path.join(data_folder, dat_file)
+                            temporary_dat_path = os.path.join(
+                                dat_files_directory, dat_file
+                            )
+                            shutil.copy(original_dat_path, temporary_dat_path)
 
-                    delete_original_openBIS_dataset = False
-                    group_in_openbis = False
-                    for dat_file in dat_files_group:
-                        original_dat_path = os.path.join(data_folder, dat_file)
-                        temporary_dat_path = os.path.join(dat_files_directory, dat_file)
-                        shutil.copy(original_dat_path, temporary_dat_path)
+                            if original_dat_path in logging_file["processed_files"]:
+                                group_in_openbis = True
+                            else:
+                                delete_original_openBIS_dataset = True
+                                logging_file["processed_files"].append(
+                                    original_dat_path
+                                )
 
-                        if original_dat_path in logging_file["processed_files"]:
-                            group_in_openbis = True
+                        if group_in_openbis:
+                            if delete_original_openBIS_dataset:
+                                try:
+                                    measurements_object = session.get_sample(
+                                        measurements_id
+                                    )
+                                    experiment = measurements_object.experiment
+
+                                    # Delete old dataset in order to update it
+                                    measurements_datasets = measurements_object.get_datasets().df.sort_values(
+                                        "registrationDate", ascending=False
+                                    )
+                                    dataset_to_remove = measurements_datasets.iloc[0][
+                                        "permId"
+                                    ]
+                                    session.get_dataset(dataset_to_remove).delete(
+                                        "update dataset group"
+                                    )
+
+                                    # Upload dat files
+                                    demo_dat_flow(
+                                        session,
+                                        dat_files_directory,
+                                        sample=measurements_id,
+                                        experiment=experiment,
+                                    )
+                                    utils.write_json(logging_file, logging_filepath)
+
+                                except Exception as e:
+                                    logger.info(
+                                        f"Cannot upload {dat_files_directory}. Reason: {e}"
+                                    )
+
                         else:
-                            delete_original_openBIS_dataset = True
-                            logging_file["processed_files"].append(original_dat_path)
-
-                    if group_in_openbis:
-                        if delete_original_openBIS_dataset:
                             try:
                                 measurements_object = session.get_sample(
                                     measurements_id
                                 )
                                 experiment = measurements_object.experiment
-
-                                # Delete old dataset in order to update it
-                                measurements_datasets = (
-                                    measurements_object.get_datasets().df.sort_values(
-                                        "registrationDate", ascending=False
-                                    )
-                                )
-                                dataset_to_remove = measurements_datasets.iloc[0][
-                                    "permId"
-                                ]
-                                session.get_dataset(dataset_to_remove).delete(
-                                    "update dataset group"
-                                )
-
                                 # Upload dat files
                                 demo_dat_flow(
                                     session,
@@ -791,30 +812,12 @@ def process_measurement_files(
                                     experiment=experiment,
                                 )
                                 utils.write_json(logging_file, logging_filepath)
-
                             except Exception as e:
                                 logger.info(
                                     f"Cannot upload {dat_files_directory}. Reason: {e}"
                                 )
-
-                    else:
-                        try:
-                            measurements_object = session.get_sample(measurements_id)
-                            experiment = measurements_object.experiment
-                            # Upload dat files
-                            demo_dat_flow(
-                                session,
-                                dat_files_directory,
-                                sample=measurements_id,
-                                experiment=experiment,
-                            )
-                            utils.write_json(logging_file, logging_filepath)
-                        except Exception as e:
-                            logger.info(
-                                f"Cannot upload {dat_files_directory}. Reason: {e}"
-                            )
-
-                    shutil.rmtree(dat_files_directory)
+                    finally:
+                        shutil.rmtree(dat_files_directory, ignore_errors=True)
 
     except Exception as e:
         logger.info(f"Error processing measurement files: {e}")
