@@ -15,17 +15,48 @@ OPENBIS_OBJECT_TYPES, _ = (
     INTERFACE_CONFIG_INFO["object_types_codes"],
 )
 
-if not os.path.exists("logs"):
-    os.mkdir("logs")
-
 logger = logging.getLogger(__name__)
-APP_FOLDER = pathlib.Path().resolve()
+APP_FOLDER = pathlib.Path(__file__).resolve().parent.parent
+LOGS_FOLDER = APP_FOLDER / "logs"
+MEASUREMENT_LOGS_FOLDER = LOGS_FOLDER / "measurements"
+LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
+MEASUREMENT_LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
-    filename=APP_FOLDER / "logs" / "aiidalab_openbis_interface.log",
+    filename=LOGS_FOLDER / "aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
+
+
+def get_measurement_log_filepath(
+    measurement_session_id, logs_dir=MEASUREMENT_LOGS_FOLDER
+):
+    logs_path = pathlib.Path(logs_dir)
+    logs_path.mkdir(parents=True, exist_ok=True)
+    return logs_path / f"{measurement_session_id}.json"
+
+
+def find_measurement_logs_for_folder(data_folder, logs_dir=MEASUREMENT_LOGS_FOLDER):
+    logs_path = pathlib.Path(logs_dir)
+    if not logs_path.exists():
+        return []
+    norm_target = os.path.normpath(data_folder)
+    matches = []
+    json_files = sorted(
+        logs_path.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for log_file in json_files:
+        try:
+            data = utils.read_json(str(log_file))
+            if isinstance(data, dict) and data.get("data_folder"):
+                if os.path.normpath(data["data_folder"]) == norm_target:
+                    matches.append((log_file, data))
+        except (FileNotFoundError, ValueError, OSError):
+            continue
+    return matches
 
 
 class RunningMeasurementWatchdogsWidget(ipw.VBox):
@@ -82,7 +113,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         ]
 
     def refresh_watchdog_list(self):
-        json_file = "logs/active_watchdogs.json"
+        json_file = LOGS_FOLDER / "active_watchdogs.json"
 
         folder_options = []
         valid_entries = []  # We will store only the alive processes here
@@ -157,7 +188,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             ]
 
             # 3. Remove them from the JSON log file
-            json_file = "logs/active_watchdogs.json"
+            json_file = LOGS_FOLDER / "active_watchdogs.json"
             try:
                 # Read the current file
                 with open(json_file, "r") as f:
@@ -188,6 +219,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.session_data = session_data
         self.running_watchdogs_widget = running_watchdogs_widget
         self.watchdog_processes = []
+        self.measurement_logs_folder = MEASUREMENT_LOGS_FOLDER
 
         # Keep __init__ clean by delegating UI creation
         self._setup_ui()
@@ -249,14 +281,14 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.select_project_widget.project_dropdown.observe(
             self.load_experiment_data, names="value"
         )
-        
+
         self.select_experiment_title = ipw.HTML(
             value=f"<div style='{header_style}'>Select experiment</div>"
         )
         self.select_experiment_widget = widgets.SelectExperimentWidget(
             self.openbis_session
         )
-        
+
         self.select_experiment_widget.create_experiment_button.on_click(
             self.show_create_experiment_ui
         )
@@ -314,21 +346,21 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             self.select_measurements_folder_widget,
             self.generate_watchdog_button,
         ]
-    
+
     def load_experiment_data(self, change):
         project_identifier = self.select_project_widget.project_dropdown.value
         self.select_experiment_widget.load_experiments(project_identifier)
-        
+
         if self.select_project_widget.project_dropdown.value == "-1":
             self.select_experiment_widget.create_experiment_button.disabled = True
             return
-        
+
         else:
             self.select_experiment_widget.create_experiment_button.disabled = False
             self.select_experiment_widget.create_experiment_button.on_click(
                 self.show_create_experiment_ui
             )
-    
+
     def show_create_experiment_ui(self, b):
         self.select_experiment_widget.show_create_panel()
         self.select_project_widget.project_dropdown.disabled = True
@@ -337,11 +369,15 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.select_project_widget.sort_name_cb.disabled = True
         self.select_experiment_widget.save_btn.on_click(self.save_new_experiment)
         self.select_experiment_widget.cancel_btn.on_click(self.cancel_new_experiment)
-        
+
     def save_new_experiment(self, b):
         project_identifier = self.select_project_widget.project_dropdown.value
-        new_experiment_name = self.select_experiment_widget.new_exp_name_textbox.value.strip()
-        new_experiment_description = self.select_experiment_widget.new_exp_description_textbox.value.strip()
+        new_experiment_name = (
+            self.select_experiment_widget.new_exp_name_textbox.value.strip()
+        )
+        new_experiment_description = (
+            self.select_experiment_widget.new_exp_description_textbox.value.strip()
+        )
 
         if project_identifier == "-1":
             display(Javascript(data="alert('Select a project.')"))
@@ -363,8 +399,12 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             )
             self.select_experiment_widget.hide_create_panel()
             project_identifier = self.select_project_widget.project_dropdown.value
-            self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
-            self.select_experiment_widget.experiment_dropdown.value = new_experiment.permId
+            self.select_experiment_widget.load_experiments(
+                project_identifier
+            )  # Reload the main DataFrame
+            self.select_experiment_widget.experiment_dropdown.value = (
+                new_experiment.permId
+            )
             display(Javascript(data="alert('Experiment successfully created!')"))
 
         except ValueError:
@@ -380,12 +420,13 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
     def cancel_new_experiment(self, b):
         self.select_experiment_widget.hide_create_panel()
         project_identifier = self.select_project_widget.project_dropdown.value
-        self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
+        self.select_experiment_widget.load_experiments(
+            project_identifier
+        )  # Reload the main DataFrame
         self.select_project_widget.project_dropdown.disabled = False
         self.select_project_widget.filter_my_projects_cb.disabled = False
         self.select_project_widget.sort_date_cb.disabled = False
         self.select_project_widget.sort_name_cb.disabled = False
-    
 
     def _get_most_recent_process_step(self, sample_object):
         """Helper to extract the most recent 'Process Step' parent from a sample."""
@@ -410,7 +451,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         sample_object = utils.get_openbis_object(
             self.openbis_session, sample_ident=sample_id
         )
-        
+
         sample_name = sample_object.props["name"]
         self.measurement_session_name_text.value = f"MEAS_{sample_name}"
         most_recent_parent = self._get_most_recent_process_step(sample_object)
@@ -426,19 +467,24 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
         if new_exp_id == current_exp_id:
             return  # Early exit if they are already the same
-        
+
         most_recent_parent_experiment = utils.get_openbis_collection(
-            self.openbis_session,
-            code=most_recent_parent.experiment.identifier
+            self.openbis_session, code=most_recent_parent.experiment.identifier
         )
-        
-        self.select_project_widget.project_dropdown.value = most_recent_parent_experiment.project.permId
-        
+
+        self.select_project_widget.project_dropdown.value = (
+            most_recent_parent_experiment.project.permId
+        )
+
         self.select_experiment_widget.experiment_dropdown.value = (
             most_recent_parent.experiment.permId
         )
-        
-        display(Javascript(data="alert('Project and Experiment were auto-updated based on the sample!')"))
+
+        display(
+            Javascript(
+                data="alert('Project and Experiment were auto-updated based on the sample!')"
+            )
+        )
 
         # 4. Better logging: Actually log *what* happened
         logger.info(
@@ -494,27 +540,38 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
     def _get_or_create_measurement_session(
         self, sample_id, instrument_id, experiment_id, data_folder
     ):
-        """Creates an openBIS session object or retrieves an existing one from logging.json."""
-        logging_filepath = os.path.join(data_folder, "logging.json")
+        """Creates an openBIS session object or retrieves an existing one from logs/measurements."""
+        logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
+        norm_data_folder = os.path.normpath(data_folder)
 
-        # 1. Try to load an existing session (EAFP Approach)
-        try:
-            logging_data = utils.read_json(logging_filepath)
+        # 1. Try to load an existing session for this data_folder from logs/measurements
+        for log_filepath, logging_data in find_measurement_logs_for_folder(
+            norm_data_folder, logs_dir=logs_dir
+        ):
             session_id = logging_data.get("measurement_session_id")
-
-            # Verify we actually got a valid ID from the JSON
-            if session_id:
+            if not session_id:
+                continue
+            try:
                 measurement_session = utils.get_openbis_object(
                     self.openbis_session, sample_ident=session_id
                 )
+                logging_data["eln_url"] = self.session_data["url"]
+                logging_data["eln_token"] = self.session_data["token"]
+                logging_data["data_folder"] = norm_data_folder
+                logging_data.setdefault("processed_files", [])
+                utils.write_json(logging_data, str(log_filepath))
                 logger.info(
                     f"Uploading data into existing Measurement Session {measurement_session.permId}."
                 )
                 return measurement_session
-
-        except (FileNotFoundError, ValueError):
-            # File doesn't exist, or JSON is invalid. Move on to creation.
-            pass
+            except ValueError:
+                logger.info(
+                    f"Previous Measurement Session {session_id} no longer exists in openBIS. Removing stale log."
+                )
+                try:
+                    log_filepath.unlink()
+                except OSError:
+                    pass
 
         # 2. Create a new session if no valid existing one was found
         measurement_session = utils.create_openbis_object(
@@ -525,9 +582,21 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             props={
                 "name": self.measurement_session_name_text.value,
                 "default_object_view": "IMAGING_GALLERY_VIEW",
-                "measurement_folder_path": data_folder,
+                "measurement_folder_path": norm_data_folder,
             },
         )
+
+        log_filepath = get_measurement_log_filepath(
+            measurement_session.permId, logs_dir=logs_dir
+        )
+        logging_data = {
+            "eln_url": self.session_data["url"],
+            "eln_token": self.session_data["token"],
+            "measurement_session_id": measurement_session.permId,
+            "data_folder": norm_data_folder,
+            "processed_files": [],
+        }
+        utils.write_json(logging_data, str(log_filepath))
 
         logger.info(f"New Measurement Session {measurement_session.permId} created.")
         return measurement_session
@@ -541,11 +610,18 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         sample_id = self.select_sample_widget.sample_dropdown.value
         experiment_id = self.select_experiment_widget.experiment_dropdown.value
         instrument_id = self.select_instrument_widget.instrument_dropdown.value
-        data_folder = self.select_measurements_folder_widget.selected_path
+        data_folder = os.path.normpath(
+            self.select_measurements_folder_widget.selected_path
+        )
+
+        # Refresh running watchdogs list first so dead PIDs are pruned
+        self.running_watchdogs_widget.refresh_watchdog_list()
 
         # Check if the folder is already being monitored
         current_options = self.running_watchdogs_widget.running_watchdogs_widget.options
-        if any(folder == data_folder for folder, pid in current_options):
+        if any(
+            os.path.normpath(folder) == data_folder for folder, pid in current_options
+        ):
             display(
                 Javascript(data="alert('This directory is already being monitored!');")
             )
@@ -585,7 +661,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         )
 
         # 5. Update the JSON log file
-        json_file = f"{APP_FOLDER}/logs/active_watchdogs.json"
+        json_file = LOGS_FOLDER / "active_watchdogs.json"
         data = []
         try:
             with open(json_file, "r") as f:
@@ -595,7 +671,13 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         except (FileNotFoundError, json.JSONDecodeError):
             pass
 
-        data.append({"pid": watchdog_process.pid, "monitored_folder": data_folder})
+        data.append(
+            {
+                "pid": watchdog_process.pid,
+                "monitored_folder": data_folder,
+                "measurement_session_id": measurement_session.permId,
+            }
+        )
 
         with open(json_file, "w") as f:
             json.dump(data, f, indent=4)

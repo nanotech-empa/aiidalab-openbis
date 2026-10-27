@@ -15,13 +15,55 @@ from nanonis_importer.nanonis_importer import process_measurement_files
 import logging
 
 logger = logging.getLogger(__name__)
-app_folder = pathlib.Path().resolve().parent
+app_folder = pathlib.Path(__file__).resolve().parent.parent
+MEASUREMENT_LOGS_FOLDER = app_folder / "logs" / "measurements"
+(app_folder / "logs").mkdir(parents=True, exist_ok=True)
+MEASUREMENT_LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
-    filename="/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log",
+    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
+
+
+def get_measurement_log_filepath(
+    measurement_session_id, logs_dir=MEASUREMENT_LOGS_FOLDER
+):
+    logs_path = pathlib.Path(logs_dir)
+    logs_path.mkdir(parents=True, exist_ok=True)
+    return str(logs_path / f"{measurement_session_id}.json")
+
+
+def init_or_load_measurement_log(
+    openbis_url,
+    openbis_token,
+    measurement_session_id,
+    data_folder,
+    logs_dir=MEASUREMENT_LOGS_FOLDER,
+):
+    logging_filepath = get_measurement_log_filepath(
+        measurement_session_id, logs_dir=logs_dir
+    )
+    norm_data_folder = os.path.normpath(data_folder)
+    if os.path.exists(logging_filepath):
+        logging_data = utils.read_json(logging_filepath)
+        logging_data["eln_url"] = openbis_url
+        logging_data["eln_token"] = openbis_token
+        logging_data["measurement_session_id"] = measurement_session_id
+        logging_data["data_folder"] = norm_data_folder
+        logging_data.setdefault("processed_files", [])
+        utils.write_json(logging_data, logging_filepath)
+    else:
+        logging_data = {
+            "eln_url": openbis_url,
+            "eln_token": openbis_token,
+            "measurement_session_id": measurement_session_id,
+            "data_folder": norm_data_folder,
+            "processed_files": [],
+        }
+        utils.write_json(logging_data, logging_filepath)
+    return logging_filepath, logging_data
 
 
 class NewFileHandler(FileSystemEventHandler):
@@ -132,19 +174,11 @@ if __name__ == "__main__":
     openbis_url = args.openbis_url
     openbis_token = args.openbis_token
     measurement_session_id = args.measurement_session_id
-    data_folder = args.data_folder
+    data_folder = os.path.normpath(args.data_folder)
 
-    logging_filepath = f"{data_folder}/logging.json"
-    if os.path.exists(logging_filepath):
-        logging_data = utils.read_json(logging_filepath)
-    else:
-        logging_data = {
-            "eln_url": openbis_url,
-            "eln_token": openbis_token,
-            "measurement_session_id": measurement_session_id,
-            "processed_files": [],
-        }
-        utils.write_json(logging_data, logging_filepath)
+    logging_filepath, logging_data = init_or_load_measurement_log(
+        openbis_url, openbis_token, measurement_session_id, data_folder
+    )
 
     try:
         openbis_session = Openbis(openbis_url, verify_certificates=False)
