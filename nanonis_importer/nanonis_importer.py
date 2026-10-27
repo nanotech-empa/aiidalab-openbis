@@ -17,7 +17,17 @@ import sys
 
 sys.path.append("/home/jovyan/aiidalab-openbis/")
 import os
-from pybis import Openbis, ImagingControl, ImagingDataSetControlVisibility, ImagingSemanticAnnotation, ImagingDataSetPropertyConfig, ImagingDataSetImage, ImagingDataSetConfig, ImagingDataSetControl, ImagingDataSetPreview, ImagingDataSetFilter
+from pybis import (
+    Openbis,
+    ImagingControl,
+    ImagingDataSetControlVisibility,
+    ImagingSemanticAnnotation,
+    ImagingDataSetPropertyConfig,
+    ImagingDataSetImage,
+    ImagingDataSetConfig,
+    ImagingDataSetControl,
+    ImagingDataSetPreview,
+)
 import numpy as np
 from nanonis_importer.spmpy import Spm as spm
 from datetime import datetime
@@ -38,7 +48,7 @@ DEFAULT_URL = "local.openbis.ch"
 logger = logging.getLogger(__name__)
 app_folder = pathlib.Path().resolve()
 logging.basicConfig(
-    filename = "/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log",
+    filename="/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log",
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
@@ -220,14 +230,8 @@ def demo_sxm_flow(session, file_path, experiment=None, sample=None):
     update_image_with_preview(session, perm_id, 0, preview)
 
     config_preview = config_sxm_preview.copy()
-    config_preview['Scaling'] = 'logarithmic'
-    config_preview['Colormap'] = 'inferno'
-
-    filter_config = [
-        ImagingDataSetFilter("Gaussian", {"Sigma":"20", "Truncate":"0.3"}),
-        ImagingDataSetFilter("Zero background", {}),
-        ImagingDataSetFilter("Laplace", {"Size":"3"})
-    ]
+    config_preview["Scaling"] = "logarithmic"
+    config_preview["Colormap"] = "inferno"
 
     # preview = create_preview(openbis, perm_id, config_preview, filterConfig=filter_config, tags=['SXM'])
     # preview.index = 1
@@ -336,9 +340,7 @@ def create_sxm_dataset(
     ]
 
     inputs = [
-        ImagingDataSetControl(
-            "Channel", "Dropdown", values=channels, section="Data"
-        ),
+        ImagingDataSetControl("Channel", "Dropdown", values=channels, section="Data"),
         ImagingDataSetControl(
             "X-axis",
             "Range",
@@ -578,12 +580,8 @@ def create_dat_dataset(
         ImagingDataSetControl(
             "Channel Y", "Dropdown", values=[channel for channel in channels_y]
         ),
-        ImagingDataSetControl(
-            "X-axis", "Range", visibility=color_scale_visibility_x
-        ),
-        ImagingDataSetControl(
-            "Y-axis", "Range", visibility=color_scale_visibility_y
-        ),
+        ImagingDataSetControl("X-axis", "Range", visibility=color_scale_visibility_x),
+        ImagingDataSetControl("Y-axis", "Range", visibility=color_scale_visibility_y),
         ImagingDataSetControl(
             "Grouping", "Dropdown", values=[d.name for d in data], multiselect=True
         ),
@@ -620,9 +618,7 @@ def create_dat_dataset(
     )
 
     images = [
-        ImagingDataSetImage(
-            imaging_config, metadata=data[0].print_params_dict(False)
-        )
+        ImagingDataSetImage(imaging_config, metadata=data[0].print_params_dict(False))
     ]
     imaging_property_config = ImagingDataSetPropertyConfig(images)
     if VERBOSE:
@@ -728,7 +724,7 @@ def process_measurement_files(
                         logging_file["processed_files"].append(file_path)
                         utils.write_json(logging_file, logging_filepath)
 
-                    except (ValueError, KeyError) as e:
+                    except Exception as e:
                         logger.info(f"Cannot upload {file_path}. Reason: {e}")
                         # Report it in a logging file
                 else:
@@ -769,7 +765,9 @@ def process_measurement_files(
                     if group_in_openbis:
                         if delete_original_openBIS_dataset:
                             try:
-                                measurements_object = session.get_sample(measurements_id)
+                                measurements_object = session.get_sample(
+                                    measurements_id
+                                )
                                 experiment = measurements_object.experiment
 
                                 # Delete old dataset in order to update it
@@ -778,7 +776,9 @@ def process_measurement_files(
                                         "registrationDate", ascending=False
                                     )
                                 )
-                                dataset_to_remove = measurements_datasets.iloc[0]["permId"]
+                                dataset_to_remove = measurements_datasets.iloc[0][
+                                    "permId"
+                                ]
                                 session.get_dataset(dataset_to_remove).delete(
                                     "update dataset group"
                                 )
@@ -792,11 +792,11 @@ def process_measurement_files(
                                 )
                                 utils.write_json(logging_file, logging_filepath)
 
-                            except ValueError as e:
+                            except Exception as e:
                                 logger.info(
                                     f"Cannot upload {dat_files_directory}. Reason: {e}"
                                 )
-                                # Report it in a logging file
+
                     else:
                         try:
                             measurements_object = session.get_sample(measurements_id)
@@ -809,10 +809,13 @@ def process_measurement_files(
                                 experiment=experiment,
                             )
                             utils.write_json(logging_file, logging_filepath)
-                        except ValueError as e:
-                            logger.info(f"Cannot upload {dat_files_directory}. Reason: {e}")
+                        except Exception as e:
+                            logger.info(
+                                f"Cannot upload {dat_files_directory}. Reason: {e}"
+                            )
+
                     shutil.rmtree(dat_files_directory)
-    
+
     except Exception as e:
         logger.info(f"Error processing measurement files: {e}")
 
