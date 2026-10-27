@@ -635,11 +635,28 @@ def create_dat_dataset(
 
 
 def process_measurement_files(
-    openbis_url, token, data_folder, measurements_id, logging_filepath
+    openbis_url, token, data_folder, measurements_id, logging_filepath=None
 ):
     session, _ = utils.connect_openbis(openbis_url, token)
     measurement_files = [f for f in os.listdir(data_folder)]
-    logging_file = utils.read_json(logging_filepath)
+    if logging_filepath is None:
+        logs_dir = (
+            pathlib.Path(__file__).resolve().parent.parent / "logs" / "measurements"
+        )
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        logging_filepath = str(logs_dir / f"{measurements_id}.json")
+    if os.path.exists(logging_filepath):
+        logging_file = utils.read_json(logging_filepath)
+    else:
+        pathlib.Path(logging_filepath).parent.mkdir(parents=True, exist_ok=True)
+        logging_file = {
+            "eln_url": openbis_url,
+            "eln_token": token,
+            "measurement_session_id": measurements_id,
+            "data_folder": os.path.normpath(data_folder),
+            "processed_files": [],
+        }
+        utils.write_json(logging_file, logging_filepath)
 
     readable_measurement_files = []
     measurement_datetimes = []
