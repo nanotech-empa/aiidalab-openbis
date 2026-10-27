@@ -1,4 +1,7 @@
 # D2.1 - Metadata schema to store and access microscopy data
+
+> **Legacy Python 3.9 / AiiDA 2.6.3:** use [v0.1.1](https://github.com/nanotech-empa/aiidalab-openbis/releases/tag/v0.1.1). See the [Empa legacy compatibility guide](https://github.com/nanotech-empa/aiida-nanotech-empa/blob/master/docs/legacy-python39-aiida263.md) for the matching package versions and installation constraints. Use a tagged version to preserve this runtime.
+
 Common metadata schema to store and access microscopy data from simulations and experiments in a single platform.
 
 ## Authors
