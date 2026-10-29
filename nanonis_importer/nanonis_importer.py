@@ -767,6 +767,7 @@ def process_measurement_files(
                     try:
                         delete_original_openBIS_dataset = False
                         group_in_openbis = False
+                        new_dat_paths = []
                         for dat_file in dat_files_group:
                             original_dat_path = os.path.join(data_folder, dat_file)
                             temporary_dat_path = os.path.join(
@@ -778,9 +779,7 @@ def process_measurement_files(
                                 group_in_openbis = True
                             else:
                                 delete_original_openBIS_dataset = True
-                                logging_file["processed_files"].append(
-                                    original_dat_path
-                                )
+                                new_dat_paths.append(original_dat_path)
 
                         if group_in_openbis:
                             if delete_original_openBIS_dataset:
@@ -790,15 +789,14 @@ def process_measurement_files(
                                     )
                                     experiment = measurements_object.experiment
 
-                                    # Delete old dataset in order to update it
+                                    # Identify old dataset in order to update it after upload succeeds
                                     measurements_datasets = measurements_object.get_datasets().df.sort_values(
                                         "registrationDate", ascending=False
                                     )
-                                    dataset_to_remove = measurements_datasets.iloc[0][
-                                        "permId"
-                                    ]
-                                    session.get_dataset(dataset_to_remove).delete(
-                                        "update dataset group"
+                                    dataset_to_remove = (
+                                        measurements_datasets.iloc[0]["permId"]
+                                        if not measurements_datasets.empty
+                                        else None
                                     )
 
                                     # Upload dat files
@@ -808,7 +806,14 @@ def process_measurement_files(
                                         sample=measurements_id,
                                         experiment=experiment,
                                     )
+                                    logging_file["processed_files"].extend(
+                                        new_dat_paths
+                                    )
                                     utils.write_json(logging_file, logging_filepath)
+                                    if dataset_to_remove:
+                                        session.get_dataset(dataset_to_remove).delete(
+                                            "update dataset group"
+                                        )
 
                                 except Exception as e:
                                     logger.info(
@@ -828,6 +833,7 @@ def process_measurement_files(
                                     sample=measurements_id,
                                     experiment=experiment,
                                 )
+                                logging_file["processed_files"].extend(new_dat_paths)
                                 utils.write_json(logging_file, logging_filepath)
                             except Exception as e:
                                 logger.info(

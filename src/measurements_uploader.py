@@ -66,14 +66,58 @@ def init_or_load_measurement_log(
     return logging_filepath, logging_data
 
 
+IGNORED_SUFFIXES = (".json", ".ini", ".part", ".openbis-drive-part", ".tmp")
+
+
+def is_ignored_file(file_path):
+    filename = os.path.basename(file_path)
+    return filename.startswith(".") or filename.endswith(IGNORED_SUFFIXES)
+
+
+def wait_for_file_ready(file_path, timeout=10.0, poll_interval=0.2):
+    deadline = time.monotonic() + timeout
+    last_size = -1
+    while time.monotonic() < deadline:
+        try:
+            if not os.path.isfile(file_path):
+                return False
+            current_size = os.path.getsize(file_path)
+        except OSError:
+            return False
+        if current_size > 0 and current_size == last_size:
+            return True
+        last_size = current_size
+        time.sleep(poll_interval)
+    return os.path.isfile(file_path)
+
+
+def get_candidate_files(data_folder, uploaded_files=None):
+    uploaded_set = set(uploaded_files or [])
+    candidates = []
+    for f in os.listdir(data_folder):
+        full_path = os.path.join(data_folder, f)
+        if not os.path.isfile(full_path) or is_ignored_file(full_path):
+            continue
+        if full_path in uploaded_set or wait_for_file_ready(full_path):
+            candidates.append(full_path)
+    return candidates
+
+
 class NewFileHandler(FileSystemEventHandler):
     def __init__(self, custom_function):
         self.custom_function = custom_function
 
     def on_created(self, event):
-        if not event.is_directory:
-            print(f"New file detected: {event.src_path}")
-            self.custom_function(event.src_path)
+        if not event.is_directory and not is_ignored_file(event.src_path):
+            if wait_for_file_ready(event.src_path):
+                print(f"New file detected: {event.src_path}")
+                self.custom_function(event.src_path)
+
+    def on_moved(self, event):
+        if not event.is_directory and not is_ignored_file(event.dest_path):
+            if wait_for_file_ready(event.dest_path):
+                print(f"New file detected: {event.dest_path}")
+                self.custom_function(event.dest_path)
 
 
 def monitor_folder(path_to_watch, custom_function):
@@ -99,7 +143,17 @@ def process_new_file(
     measurement_session_id,
     logging_filepath,
 ):
+    if is_ignored_file(file_path) or not wait_for_file_ready(file_path):
+        return
+
     data_folder = os.path.dirname(file_path)
+    initial_logging_data = (
+        utils.read_json(logging_filepath) if os.path.exists(logging_filepath) else {}
+    )
+    candidate_files = get_candidate_files(
+        data_folder, initial_logging_data.get("processed_files", [])
+    )
+
     process_measurement_files(
         openbis_url,
         openbis_token,
@@ -112,18 +166,11 @@ def process_new_file(
 
     uploaded_files = logging_data.get("processed_files", [])
 
-    # List files in the data folder
-    all_local_files = [
-        os.path.join(data_folder, f)
-        for f in os.listdir(data_folder)
-        if os.path.isfile(os.path.join(data_folder, f))
-    ]
-
-    # Determine which files need uploading
+    # Determine which files from the pre-processing snapshot still need uploading
     missing_files = [
         f
-        for f in all_local_files
-        if f not in uploaded_files and not f.endswith((".json", ".ini"))
+        for f in candidate_files
+        if f not in uploaded_files and os.path.isfile(f) and not is_ignored_file(f)
     ]
 
     # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
@@ -200,6 +247,10 @@ if __name__ == "__main__":
                 logging_filepath=logging_filepath,
             )
 
+        candidate_files = get_candidate_files(
+            data_folder, logging_data.get("processed_files", [])
+        )
+
         process_measurement_files(
             openbis_url,
             openbis_token,
@@ -212,18 +263,11 @@ if __name__ == "__main__":
 
         uploaded_files = logging_data.get("processed_files", [])
 
-        # List files in the data folder
-        all_local_files = [
-            os.path.join(data_folder, f)
-            for f in os.listdir(data_folder)
-            if os.path.isfile(os.path.join(data_folder, f))
-        ]
-
-        # Determine which files need uploading
+        # Determine which files from the pre-processing snapshot still need uploading
         missing_files = [
             f
-            for f in all_local_files
-            if f not in uploaded_files and not f.endswith((".json", ".ini"))
+            for f in candidate_files
+            if f not in uploaded_files and os.path.isfile(f) and not is_ignored_file(f)
         ]
 
         # Upload missing files as attachments (At the moment the gallery view cannot handle ATTACHEMENTs. So lets not upload them.)
