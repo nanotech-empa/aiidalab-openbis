@@ -324,3 +324,94 @@ def test_stop_and_resume_uploads_only_new_files_to_same_session(tmp_path):
     # scan_001.sxm was NOT uploaded again; only scan_002.sxm was uploaded to SESS-500
     assert len(uploaded_sxm_files) == 2
     assert uploaded_sxm_files[1] == (str(sxm_2), "SESS-500")
+
+
+def test_failed_dat_upload_not_marked_processed_and_uploaded_as_attachment(tmp_path):
+    from src import measurements_uploader, utils
+
+    data_folder = tmp_path / "measurement_folder"
+    data_folder.mkdir()
+    logs_dir = tmp_path / "logs" / "measurements"
+
+    z_spec = data_folder / "Z-Spectroscopy00001.dat"
+    z_spec.write_text("z-spec content")
+    img_2 = data_folder / "img0002.sxm"
+    img_2.write_text("sxm content")
+
+    log_filepath, _ = measurements_uploader.init_or_load_measurement_log(
+        openbis_url="http://mock.openbis",
+        openbis_token="tok-1",
+        measurement_session_id="SESS-777",
+        data_folder=str(data_folder),
+        logs_dir=logs_dir,
+    )
+
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    def fake_spm(path):
+        inst = MagicMock()
+        if path.endswith(".dat"):
+            inst.record_datetime = datetime(2026, 1, 1, 12, 0, 0)
+            inst.signals = ["Z", "Current"]
+            inst.measurement_type = "z_spec"
+        else:
+            inst.record_datetime = datetime(2026, 1, 1, 12, 5, 0)
+        return inst
+
+    def failing_demo_dat_flow(session, directory, sample, experiment):
+        raise TypeError("must be real number, not str")
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_dat_flow",
+            side_effect=failing_demo_dat_flow,
+        ),
+        patch("nanonis_importer.nanonis_importer.demo_sxm_flow"),
+    ):
+        nanonis_importer.process_measurement_files(
+            openbis_url="http://mock.openbis",
+            token="tok-1",
+            data_folder=str(data_folder),
+            measurements_id="SESS-777",
+            logging_filepath=log_filepath,
+        )
+
+    # After process_measurement_files: img0002.sxm succeeded so it is in processed_files,
+    # but Z-Spectroscopy00001.dat failed so it MUST NOT be in processed_files!
+    log_data_after_importer = utils.read_json(log_filepath)
+    assert str(img_2) in log_data_after_importer["processed_files"]
+    assert str(z_spec) not in log_data_after_importer["processed_files"]
+
+    # Now when process_new_file runs, Z-Spectroscopy00001.dat is uploaded as an ATTACHMENT
+    attachments_created = []
+
+    def fake_create_dataset(session, type, sample, files):
+        attachments_created.append((type, files))
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_dat_flow",
+            side_effect=failing_demo_dat_flow,
+        ),
+        patch("nanonis_importer.nanonis_importer.demo_sxm_flow"),
+        patch("src.utils.create_openbis_dataset", side_effect=fake_create_dataset),
+    ):
+        measurements_uploader.process_new_file(
+            file_path=str(z_spec),
+            openbis_session=mock_session,
+            openbis_url="http://mock.openbis",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-777",
+            logging_filepath=log_filepath,
+        )
+
+    assert attachments_created == [("ATTACHMENT", [str(z_spec)])]
+    log_data_final = utils.read_json(log_filepath)
+    assert str(z_spec) in log_data_final["processed_files"]
