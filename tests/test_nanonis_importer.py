@@ -415,3 +415,98 @@ def test_failed_dat_upload_not_marked_processed_and_uploaded_as_attachment(tmp_p
     assert attachments_created == [("ATTACHMENT", [str(z_spec)])]
     log_data_final = utils.read_json(log_filepath)
     assert str(z_spec) in log_data_final["processed_files"]
+
+
+def test_new_file_handler_ignores_part_files_and_triggers_on_moved(tmp_path):
+    from src import measurements_uploader
+
+    detected_files = []
+    handler = measurements_uploader.NewFileHandler(
+        custom_function=lambda path: detected_files.append(path)
+    )
+
+    part_file = tmp_path / "img0037.sxm.part"
+    part_file.write_text("partial content")
+
+    created_part_event = MagicMock()
+    created_part_event.is_directory = False
+    created_part_event.src_path = str(part_file)
+
+    with patch("src.measurements_uploader.wait_for_file_ready", return_value=True):
+        handler.on_created(created_part_event)
+        assert detected_files == []
+
+        final_file = tmp_path / "img0037.sxm"
+        part_file.replace(final_file)
+
+        moved_event = MagicMock()
+        moved_event.is_directory = False
+        moved_event.src_path = str(part_file)
+        moved_event.dest_path = str(final_file)
+
+        handler.on_moved(moved_event)
+        assert detected_files == [str(final_file)]
+
+
+def test_process_new_file_does_not_upload_concurrently_arriving_sxm_as_attachment(
+    tmp_path,
+):
+    from src import measurements_uploader, utils
+
+    data_folder = tmp_path / "measurement_folder"
+    data_folder.mkdir()
+    logs_dir = tmp_path / "logs" / "measurements"
+
+    sxm_1 = data_folder / "img0001.sxm"
+    sxm_1.write_text("sxm 1 content")
+    part_2 = data_folder / "img0002.sxm.part"
+    part_2.write_text("sxm 2 content being synced")
+    sxm_2 = data_folder / "img0002.sxm"
+
+    log_filepath, _ = measurements_uploader.init_or_load_measurement_log(
+        openbis_url="http://mock.openbis",
+        openbis_token="tok-1",
+        measurement_session_id="SESS-888",
+        data_folder=str(data_folder),
+        logs_dir=logs_dir,
+    )
+
+    mock_session = MagicMock()
+    attachments_created = []
+
+    def fake_create_dataset(session, type, sample, files):
+        attachments_created.append((type, files))
+
+    # Simulate img0002.sxm.part finishing download and being renamed to img0002.sxm
+    # while process_measurement_files is running for img0001.sxm
+    def fake_process_measurement_files(
+        openbis_url, token, folder, measurements_id, logging_fp
+    ):
+        log_data = utils.read_json(logging_fp)
+        if str(sxm_1) not in log_data["processed_files"]:
+            log_data["processed_files"].append(str(sxm_1))
+            utils.write_json(log_data, logging_fp)
+        if part_2.exists():
+            part_2.replace(sxm_2)
+
+    with (
+        patch(
+            "src.measurements_uploader.process_measurement_files",
+            side_effect=fake_process_measurement_files,
+        ),
+        patch("src.measurements_uploader.wait_for_file_ready", return_value=True),
+        patch("src.utils.create_openbis_dataset", side_effect=fake_create_dataset),
+    ):
+        measurements_uploader.process_new_file(
+            file_path=str(sxm_1),
+            openbis_session=mock_session,
+            openbis_url="http://mock.openbis",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-888",
+            logging_filepath=log_filepath,
+        )
+
+    # Neither img0002.sxm.part nor img0002.sxm should have been uploaded as ATTACHMENT!
+    assert attachments_created == []
+    log_data_after = utils.read_json(log_filepath)
+    assert str(sxm_2) not in log_data_after["processed_files"]

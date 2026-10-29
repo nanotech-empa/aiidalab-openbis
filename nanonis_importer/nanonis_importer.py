@@ -793,9 +793,11 @@ def process_measurement_files(
                                     measurements_datasets = measurements_object.get_datasets().df.sort_values(
                                         "registrationDate", ascending=False
                                     )
-                                    dataset_to_remove = measurements_datasets.iloc[0][
-                                        "permId"
-                                    ]
+                                    dataset_to_remove = (
+                                        measurements_datasets.iloc[0]["permId"]
+                                        if not measurements_datasets.empty
+                                        else None
+                                    )
 
                                     # Upload dat files
                                     demo_dat_flow(
@@ -804,13 +806,14 @@ def process_measurement_files(
                                         sample=measurements_id,
                                         experiment=experiment,
                                     )
-                                    session.get_dataset(dataset_to_remove).delete(
-                                        "update dataset group"
-                                    )
                                     logging_file["processed_files"].extend(
                                         new_dat_paths
                                     )
                                     utils.write_json(logging_file, logging_filepath)
+                                    if dataset_to_remove:
+                                        session.get_dataset(dataset_to_remove).delete(
+                                            "update dataset group"
+                                        )
 
                                 except Exception as e:
                                     logger.info(
