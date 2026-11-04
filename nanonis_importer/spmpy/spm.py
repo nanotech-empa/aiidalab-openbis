@@ -226,7 +226,7 @@ class Spm:
             # Get Lock-in status
             lock_in_status = None
             if "Lock-in>Lock-in status" in self.header:
-                if lock_in_status == "ON":
+                if self.header["Lock-in>Lock-in status"] == "ON":
                     lock_in_status = True
                 else:
                     lock_in_status = False

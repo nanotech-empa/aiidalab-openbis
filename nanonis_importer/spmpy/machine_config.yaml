@@ -1,14 +1,14 @@
 ---
 MachineConfig: THzSTM
 Channels:
-    LI_Demod_1_X:
-        nickname: dIdV
-        scaling: 1.e12
-        unit: pS
-    LI_Demod_1_Y:
-        nickname: dIdV_Y
-        scaling: 1e12
-        unit: pS
+    # LI_Demod_1_X:
+    #     nickname: dIdV
+    #     scaling: 1.e12
+    #     unit: pS
+    # LI_Demod_1_Y:
+    #     nickname: dIdV_Y
+    #     scaling: 1e12
+    #     unit: pS
     Z:
         nickname: z
         scaling: 1e9
@@ -86,7 +86,7 @@ Channels:
         scaling: 1
         unit: Hz
     LI Demod 1 Y (A):
-        nickname: dIdV
+        nickname: dIdV_Y
         scaling: 1e12
         unit: pS
     LI Demod 1 X (A):
