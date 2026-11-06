@@ -860,6 +860,7 @@ def test_aiida_export_links_selected_molecule_to_atomistic_model(
             simulations_dropdown=SimpleNamespace(value="workflow-uuid"),
             preview_overrides=dict,
             property_overrides=dict,
+            _preview_entries={"workflow-uuid:geometry_optimization": {}},
         ),
         used_aiida_checkbox=SimpleNamespace(value=True),
         _apply_pending_reference_resolution=lambda: True,
@@ -2138,6 +2139,9 @@ def test_unsupported_pk_clears_previous_preview_state(
     widget._clear_preview_suggestions = MethodType(
         simulations_widgets.SimulationDetailsWidget._clear_preview_suggestions, widget
     )
+    widget.clear_checked_simulation = MethodType(
+        simulations_widgets.SimulationDetailsWidget.clear_checked_simulation, widget
+    )
     simulations_widgets.SimulationDetailsWidget.check_aiida_simulation(widget)
 
     assert widget._preview_entries == {}
@@ -2448,3 +2452,66 @@ def test_simulation_add_product_offers_checked_aiida_structure(
         "role": "product molecule",
         "structure": structure,
     }
+
+
+def test_prefilled_shared_form_reviews_whole_entry_without_source_picker(
+    monkeypatch, simulations_widgets
+):
+    ipw = simulations_widgets.ipw
+
+    class Experiment(ipw.VBox):
+        def __init__(self, session):
+            super().__init__()
+            self.experiment_dropdown = ipw.Dropdown(
+                options=[("Select", "-1"), ("Chosen experiment", "experiment")]
+            )
+
+    class Details(ipw.VBox):
+        def __init__(self, session, used_aiida):
+            super().__init__()
+            self.simulation_pk_input = ipw.IntText()
+            self.check_simulation_button = ipw.Button()
+            self.manual_molecules = ["selected-molecule"]
+            self.source_history = []
+            self.checks = 0
+
+        def set_target_experiment(self, value):
+            self.target = value
+
+        def load_widgets(self, value):
+            pass
+
+        def set_process_uuid(self, uid):
+            self.simulation_pk_input.value = 10
+            self.source_history.append(uid)
+
+        def check_aiida_simulation(self):
+            self.checks += 1
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets, "SelectExperimentWidget", Experiment
+    )
+    monkeypatch.setattr(simulations_widgets, "SimulationDetailsWidget", Details)
+    widget = simulations_widgets.ExportSimulationsWidget(
+        object(), source_uuid="geometry-uuid"
+    )
+    details = widget.simulation_details_vbox
+    assert not hasattr(widget, "source_selection")
+    assert details.source_history == ["geometry-uuid"]
+    assert details.checks == 1
+    assert details.simulation_pk_input.disabled
+    assert details.simulation_pk_input.layout.display == "none"
+    assert widget.simulation_source_selector.layout.display == "none"
+    assert details.check_simulation_button.description == "Refresh entry results"
+    assert details.check_simulation_button.layout.width == "auto"
+    widget.select_experiment_widget.experiment_dropdown.value = "experiment"
+    widget.set_source_uuid("geometry-uuid")
+    assert widget.simulation_details_vbox is details
+    assert details.target == "experiment"
+    assert details.manual_molecules == ["selected-molecule"]
+    assert details.checks == 2
+    widget._exporting = True
+    widget.set_source_uuid("another-entry")
+    assert details.source_history == ["geometry-uuid", "geometry-uuid"]
+    widget._exporting = False
+    widget.close()

@@ -1295,7 +1295,7 @@ class ImportSimulationsWidget(ipw.VBox):
 
 
 class ExportSimulationsWidget(ipw.VBox):
-    def __init__(self, openbis_session):
+    def __init__(self, openbis_session, *, source_uuid=None):
         super().__init__()
         self.openbis_session = openbis_session
         self._provenance_overrides = {
@@ -1405,6 +1405,30 @@ class ExportSimulationsWidget(ipw.VBox):
             self.retry_export_button,
             self.export_message_html,
         ]
+        if source_uuid is not None:
+            self.set_source_uuid(source_uuid)
+
+    def set_source_uuid(self, source_uuid):
+        """Open the common review for the app entry, with no second source picker."""
+        if self._exporting:
+            return
+        self._source_root_uuid = str(source_uuid)
+        self.simulation_details_title.value = "<h3>Review entry results</h3>"
+        self.simulation_source_selector.value = True
+        self.simulation_source_selector.layout.display = "none"
+        details = self.simulation_details_vbox
+        details.simulation_pk_input.disabled = True
+        details.simulation_pk_input.layout.display = "none"
+        details.set_process_uuid(self._source_root_uuid)
+        details.check_simulation_button.description = "Refresh entry results"
+        details.check_simulation_button.icon = "refresh"
+        details.check_simulation_button.layout.width = "auto"
+        details.check_simulation_button.layout.min_width = "190px"
+        details.check_simulation_button.tooltip = (
+            "Refresh the complete result review for this entry"
+        )
+        details.check_aiida_simulation()
+        self._clear_previous_export_feedback()
 
     def _clear_previous_export_feedback(self, _change=None):
         """Discard links and resolution prompts belonging to an earlier PK."""
@@ -2082,6 +2106,9 @@ class ExportSimulationsWidget(ipw.VBox):
                             preview_overrides=preview_overrides,
                             property_overrides=property_overrides,
                             allow_duplicate_simulations=duplicate_existing,
+                            reviewed_result_keys=tuple(
+                                self.simulation_details_vbox._preview_entries
+                            ),
                         )
                     except aiida_utils.MissingExecutablesError as error:
                         self._show_missing_executables(error)
@@ -2686,8 +2713,8 @@ class SimulationDetailsWidget(ipw.VBox):
             molecule_widget.dropdown.value = permid
             selected.add(permid)
 
-    def check_aiida_simulation(self, _button=None):
-        """Validate a PK and prepare previews only for supported WorkChains."""
+    def clear_checked_simulation(self):
+        """Invalidate the old review while retaining explicit destination/context choices."""
         self._clear_inferred_molecules()
         self._checked_workchain = None
         self.simulation_check_status.value = ""
@@ -2695,6 +2722,17 @@ class SimulationDetailsWidget(ipw.VBox):
         self.preview_suggestions_status.value = ""
         self.simulations_dropdown.options = [("No checked simulation", "-1")]
         self.simulations_dropdown.value = "-1"
+
+    def set_process_uuid(self, source_uuid):
+        node = orm.load_node(source_uuid)
+        pk = node.pk
+        del node
+        self.clear_checked_simulation()
+        self.simulation_pk_input.value = pk
+
+    def check_aiida_simulation(self, _button=None):
+        """Validate a PK and prepare previews only for supported WorkChains."""
+        self.clear_checked_simulation()
         pk = int(self.simulation_pk_input.value or 0)
         if pk <= 0:
             self.simulation_check_status.value = (

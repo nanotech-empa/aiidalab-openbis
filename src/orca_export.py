@@ -37,6 +37,22 @@ PROCESS_TYPES = {
     },
 }
 LABELS = set(PROCESS_TYPES.values())
+RESULT_TITLES = {
+    "geometry": "Geometry / SCF",
+    "reference": "SCF",
+    "common_orbitals": "QRO / UNO reference",
+    "casci": "CASCI states",
+    "orbitals": "Orbitals / density cubes",
+    "common_orbital_cubes": "QRO / UNO cubes",
+    "dyson": "Dyson transitions",
+    "dyson_cubes": "Dyson cubes",
+    "kondo": "Kondo exchange",
+    "kondo_cubes": "Kondo cubes",
+    "vibrations": "IR / Raman",
+    "dyson_maps": "Dyson maps",
+    "kondo_maps": "Kondo maps",
+    "map_figure": "Saved map figure",
+}
 SPATIAL = {
     "orbitals",
     "common_orbital_cubes",
@@ -521,6 +537,7 @@ def related_results(source_uuid):
                     "uuid": str(node.uuid),
                     "label": node.label or node.process_label,
                     "process_label": node.process_label,
+                    "title": RESULT_TITLES[operation(node)],
                     "created": node.ctime.isoformat(),
                 }
             )

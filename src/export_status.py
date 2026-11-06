@@ -181,7 +181,7 @@ def inspect_workchain_export(session, experiment_id, workchain_uuid):
     report = ExportReport()
     try:
         workchain = au.orm.load_node(workchain_uuid)
-        for uuid in au.get_all_preceding_main_workchains(workchain.uuid):
+        for uuid in au.get_export_main_workchains(workchain.uuid):
             main = au.orm.load_node(uuid)
             if not main.is_finished_ok:
                 continue

@@ -2915,3 +2915,101 @@ def test_orca_dispatch_requires_entry_point_identity(aiida_utils):
     )
     assert not aiida_utils.is_exportable_process(other)
     assert aiida_utils.is_exportable_process(orca)
+
+
+def test_orca_entry_scope_includes_siblings_but_stops_at_new_geometry(
+    aiida_profile_clean, monkeypatch, aiida_utils
+):
+    from aiida import orm
+    from aiida.common.links import LinkType
+
+    def calculation(op, inputs, outputs):
+        node = orm.WorkChainNode(process_type="aiida.workflows:empa_orca." + op)
+        node.set_process_label(aiida_utils.orca_export.WORKFLOWS[op])
+        for key, data in inputs.items():
+            node.base.links.add_incoming(data, LinkType.INPUT_WORK, key)
+        node.store()
+        creator = orm.CalcJobNode()
+        creator.base.links.add_incoming(node, LinkType.CALL_CALC, "run")
+        creator.store()
+        for key, data in outputs.items():
+            data.base.links.add_incoming(creator, LinkType.CREATE, key)
+            data.store()
+            data.base.links.add_incoming(node, LinkType.RETURN, key)
+        for process in (creator, node):
+            process.set_process_state("finished")
+            process.set_exit_status(0)
+            process.seal()
+        return node
+
+    geometry = orm.StructureData(pbc=False)
+    geometry.append_atom(position=(0, 0, 0), symbols="N")
+    geometry.store()
+    optimized = geometry.clone()
+    entry = calculation("geometry", {"structure": geometry}, {"structure": optimized})
+    reference = calculation(
+        "common_orbitals",
+        {"structure": optimized},
+        {"orbital_reference": orm.Dict(dict={"structure_uuid": optimized.uuid})},
+    )
+    casci = calculation(
+        "casci",
+        {"orbital_reference": reference.outputs.orbital_reference},
+        {},
+    )
+    cubes = calculation(
+        "common_orbital_cubes",
+        {"orbital_reference": reference.outputs.orbital_reference},
+        {},
+    )
+    # Same chemical formula, different optimization: it is a new app entry.
+    next_entry = calculation(
+        "geometry", {"structure": optimized}, {"structure": optimized.clone()}
+    )
+    calculation("orbitals", {"structure": next_entry.outputs.structure}, {})
+    monkeypatch.setattr(
+        orm.Computer, "get_transport", lambda *_: pytest.fail("No transport")
+    )
+    expected = [entry.uuid, reference.uuid, casci.uuid, cubes.uuid]
+    assert aiida_utils.get_export_main_workchains(entry.uuid) == expected
+    assert [str(n.uuid) for n in aiida_utils._exportable_workchains(entry)] == expected
+    # Selecting a single analysis programmatically retains the preceding-only scope.
+    assert aiida_utils.get_export_main_workchains(casci.uuid) == [
+        entry.uuid,
+        reference.uuid,
+        casci.uuid,
+    ]
+
+
+def test_export_rejects_changed_result_set_before_any_server_write(
+    monkeypatch, aiida_utils
+):
+    source = SimpleNamespace(uuid="entry", is_finished_ok=True)
+    sibling = SimpleNamespace(uuid="casci")
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _: source)
+    monkeypatch.setattr(
+        aiida_utils, "get_export_main_workchains", lambda _: ["entry", "casci"]
+    )
+    monkeypatch.setattr(
+        aiida_utils, "_exportable_workchains", lambda *a, **kw: [source, sibling]
+    )
+    monkeypatch.setattr(
+        aiida_utils, "_result_property_definitions", lambda _: {"result": {}}
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "get_uuids_from_oBIS",
+        lambda *_: pytest.fail("No publication before review"),
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "_ensure_executables_for_workchains",
+        lambda *_: pytest.fail("No executable creation"),
+    )
+    with pytest.raises(ValueError, match="results changed since review"):
+        aiida_utils.export_workchain(
+            object(),
+            "/SPACE/PROJECT/EXPERIMENT",
+            "entry",
+            reviewed_result_keys=["entry:result"],
+        )

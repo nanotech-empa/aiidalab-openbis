@@ -329,6 +329,27 @@ def get_all_preceding_main_workchains(node_uuid):
     return [wc.uuid for wc in ordered]
 
 
+def get_export_main_workchains(node_uuid):
+    """Resolve one entry's scope for review, publishing and recovery.
+
+    QE and other nested app workflows already contain their analyses. ORCA
+    extends a geometry entry through independently submitted workflows sharing
+    that exact stored geometry, so include its connected completed analyses too.
+    """
+    identifiers = set(get_all_preceding_main_workchains(node_uuid))
+    node = orm.load_node(node_uuid)
+    if getattr(node, "process_type", "") in {
+        "aiida.workflows:empa_orca.geometry",
+        "aiida.workflows:empa_orca.reference",
+    }:
+        for row in orca_export.related_results(str(node.uuid)):
+            identifiers.update(get_all_preceding_main_workchains(row["uuid"]))
+    return sorted(
+        identifiers,
+        key=lambda uid: (str(getattr(orm.load_node(uid), "ctime", "")), str(uid)),
+    )
+
+
 def get_qe_output_parameters(outputs):
     parameters = [
         "energy",
@@ -5528,11 +5549,14 @@ def _preview_definitions(workchain):
     return []
 
 
-def _exportable_workchains(workchain):
+def _exportable_workchains(workchain, *, main_uuids=None):
     """Collect supported finished workchains represented by an export action."""
     targets = []
     seen = set()
-    for main_workchain_uuid in get_all_preceding_main_workchains(workchain.uuid):
+    identifiers = (
+        get_export_main_workchains(workchain.uuid) if main_uuids is None else main_uuids
+    )
+    for main_workchain_uuid in identifiers:
         main_workchain = orm.load_node(main_workchain_uuid)
         if not main_workchain.is_finished_ok:
             continue
@@ -5699,11 +5723,25 @@ def export_workchain(
     preview_overrides=None,
     property_overrides=None,
     allow_duplicate_simulations=False,
+    reviewed_result_keys=None,
 ):
     property_overrides = dict(property_overrides or {})
     property_overrides[_ALLOW_DUPLICATE_SIMULATIONS] = bool(allow_duplicate_simulations)
     workchain = orm.load_node(workchain_uuid)
-    workchains_to_export = get_all_preceding_main_workchains(workchain.uuid)
+    workchains_to_export = get_export_main_workchains(workchain.uuid)
+    if reviewed_result_keys is not None:
+        current_keys = {
+            f"{target.uuid}:{role}"
+            for target in _exportable_workchains(
+                workchain, main_uuids=workchains_to_export
+            )
+            for role in _result_property_definitions(target)
+        }
+        if set(reviewed_result_keys) != current_keys:
+            raise ValueError(
+                "The entry's results changed since review. Refresh the entry results "
+                "and review them before exporting. Nothing has been exported."
+            )
     simulation_uuids_openbis = get_uuids_from_oBIS(openbis_session)
 
     pending_workchains = []

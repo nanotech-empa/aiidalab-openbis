@@ -2153,6 +2153,15 @@ Existing computer records are never moved by the exporter.
 ## ORCA molecular-result exports
 
 
+An app hands its geometry/SCF workflow UUID to the common export interface.
+The interface reviews and exports the whole entry: connected completed analyses
+at the exact final geometry, including independently submitted ORCA workflows.
+Preview, publication and retry inspection share the same scope. A new optimized
+geometry starts another entry. A changed result set requires refreshing the
+review before publication. Experiment/molecule selections apply to the whole
+entry. Each main workflow retains its own single-root archive and scalar
+`WFMS_UUID`; this aggregation creates no synthetic AiiDA parent or new schema.
+
 ORCA uses the existing scientific types, independently of its executable:
 
 | Result | Object type | Notes |
@@ -2186,8 +2195,9 @@ metadata require a separate reviewed schema change, synchronized across this
 normative document, `simulation_object_types.md`, Python/LinkML models and the
 provisioner. XPS/research workflows without an adapter remain unsupported.
 
-For a complete ORCA analysis workspace, import its source geometry, orbital
-reference and state records together with the selected orbital/map record.
+The whole-entry export creates or reuses the related records together. For a
+complete ORCA analysis workspace, import its source geometry, orbital reference
+and state records together with the orbital/map records.
 Each main workflow keeps a separate single-root archive; selecting only the
 last map does not implicitly import every earlier calculation. Shared AiiDA
 UUIDs reconnect the records when their archives are imported together.

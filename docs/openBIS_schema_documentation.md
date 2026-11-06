@@ -3228,6 +3228,15 @@ A structural or concept parent is required when applicable; simulation parents a
 
 ### ORCA molecular results and stored-file boundary
 
+An app hands its geometry/SCF workflow UUID to the common export interface.
+The interface reviews and exports the whole entry: connected completed analyses
+at the exact final geometry, including independently submitted ORCA workflows.
+Preview, publication and retry inspection share the same scope. A new optimized
+geometry starts another entry. A changed result set requires refreshing the
+review before publication. Experiment/molecule selections apply to the whole
+entry. Each main workflow retains its own single-root archive and scalar
+`WFMS_UUID`; this aggregation creates no synthetic AiiDA parent or new schema.
+
 ORCA uses the existing scientific types, independently of its executable:
 
 | Result | Object type | Notes |

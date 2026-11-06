@@ -8,46 +8,48 @@ from pathlib import Path
 
 def _app_module(name):
     expected = Path(__file__).resolve().parents[1] / "src"
-    spec = importlib.util.find_spec("src")
-    if spec is None:
-        # AiiDAlab can run this app directly from its checkout without installing
-        # its optional legacy chatbot dependencies. Load its real source package.
+    try:
+        spec = importlib.util.find_spec("src")
+    except (ImportError, ValueError):
+        spec = None
+    locations = () if spec is None else spec.submodule_search_locations or ()
+    if expected in {Path(path).resolve() for path in locations}:
+        return importlib.import_module("src." + name)
+
+    # Other AiiDAlab apps also use a top-level `src` package. Keep theirs intact
+    # and load the real shared exporter under a distinct, package-relative name.
+    namespace = "_aiidalab_openbis_app"
+    package = sys.modules.get(namespace)
+    if package is None:
         spec = importlib.util.spec_from_file_location(
-            "src", expected / "__init__.py", submodule_search_locations=[str(expected)]
+            namespace,
+            expected / "__init__.py",
+            submodule_search_locations=[str(expected)],
         )
         package = importlib.util.module_from_spec(spec)
-        sys.modules["src"] = package
+        sys.modules[namespace] = package
         try:
             spec.loader.exec_module(package)
         except Exception:
-            sys.modules.pop("src", None)
+            sys.modules.pop(namespace, None)
             raise
-    locations = () if spec is None else spec.submodule_search_locations or ()
-    if expected not in {Path(path).resolve() for path in locations}:
-        raise RuntimeError(
-            "The matching openBIS source package is unavailable or shadowed."
-        )
-    return importlib.import_module("src." + name)
+    if expected not in {Path(path).resolve() for path in package.__path__}:
+        raise RuntimeError("A different openBIS exporter checkout is already loaded.")
+    return importlib.import_module(namespace + "." + name)
 
 
 def make_export_widget(source_uuid):
-    """Open a review form for a stored process; this never clicks Export."""
-    from aiida import orm
-
+    """Open the common interface with a process UUID; never click Export."""
     simulations_widgets, utils = (
         _app_module("simulations_widgets"),
         _app_module("utils"),
     )
-    node = orm.load_node(source_uuid)
-    # Only the plain PK is carried into the shared form. It reloads on Check.
-    pk = node.pk
-    del node
     session, _ = utils.connect_openbis_aiida()
     if session is None:
         raise ValueError("Configure your openBIS connection in the ELN app first.")
-    widget = simulations_widgets.ExportSimulationsWidget(session)
-    widget.simulation_details_vbox.simulation_pk_input.value = pk
-    return widget
+    return simulations_widgets.ExportSimulationsWidget(
+        session, source_uuid=str(source_uuid)
+    )
 
 
 def plan_export(source_uuid):
