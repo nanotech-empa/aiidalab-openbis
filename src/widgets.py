@@ -19,7 +19,7 @@ OPENBIS_OBJECT_TYPES, _ = (
 MATERIALS_CONCEPTS_TYPES = INTERFACE_CONFIG_INFO["slabs_concepts_types"]
 INSTRUMENTS_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
 
-OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
 SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
 OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
 OPENBIS_PROJECTS_PATHS = OPENBIS_CONFIG["Projects"]["Paths"]

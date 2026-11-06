@@ -24,9 +24,10 @@ from ase.io.jsonio import encode
 from ase.units import Bohr, Hartree
 
 from . import export_recovery as recovery
+from . import orca_export
 from . import upload_diagnostics, utils
 
-OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
 OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
 OPENBIS_OBJECT_TYPES = OPENBIS_CONFIG["OpenBIS Types"]
 OPENBIS_SIMULATION_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
@@ -273,8 +274,9 @@ def get_all_preceding_main_workchains(node_uuid):
     # Helper function to check if a node is a MAIN workchain
     def is_main_workchain(n):
         return (
-            isinstance(n, orm.WorkChainNode)
+            (isinstance(n, orm.WorkChainNode) or orca_export.supported(n))
             and not n.base.links.get_incoming(link_type=LinkType.CALL_WORK).all()
+            and not n.base.links.get_incoming(link_type=LinkType.CALL_CALC).all()
         )
 
     # Recursive function to trace back and find all preceding MAIN workchains
@@ -1394,7 +1396,7 @@ def _find_executable(executable_objects, aiida_code, software, computer):
 
 def _workchain_codes(workchain):
     codes = {}
-    for node in workchain.called_descendants:
+    for node in [workchain, *workchain.called_descendants]:
         if not isinstance(node, orm.CalcJobNode):
             continue
         try:
@@ -5057,7 +5059,56 @@ def Cp2kSpmWorkChain_export(
 Cp2kStmWorkChain_export = Cp2kSpmWorkChain_export
 
 
+def OrcaWorkChain_export(
+    openbis_session,
+    experiment_id,
+    workchain_uuid,
+    uuids,
+    aiida_node_id,
+    executable_ids=None,
+    preview_overrides=None,
+    property_overrides=None,
+):
+    """Publish stored ORCA results through the established shared publisher."""
+    node = orm.load_node(workchain_uuid)
+    results = []
+    for role, definition in orca_export.definitions(node).items():
+        properties = dict(
+            definition["properties"],
+            aiida_node=aiida_node_id,
+            executables=executable_ids or [],
+            _aiidalab_result_role=role,
+        )
+        properties = _apply_property_overrides(
+            properties, property_overrides, node, role
+        )
+        parent_ids, child_ids = orca_export.structures(node, role)
+        parents = [
+            structure_to_atomistic_model(openbis_session, uid, uuids)
+            for uid in parent_ids
+        ]
+        result = _create_simulation_object(
+            openbis_session,
+            experiment_id,
+            definition["object_type"],
+            properties,
+            parents,
+            lambda path, uid=str(node.uuid), role=role: orca_export.render_preview(
+                uid, role, path
+            ),
+            role,
+            preview_override=_preview_override(preview_overrides, node, role),
+        )
+        for uid in child_ids:
+            _ensure_openbis_parent(
+                structure_to_atomistic_model(openbis_session, uid, uuids), result
+            )
+        results.append(result)
+    return tuple(results)
+
+
 workchain_exporters = {
+    **{label: OrcaWorkChain_export for label in orca_export.LABELS},
     "NanoribbonWorkChain": NanoribbonWorkChain_export,
     "PwRelaxWorkChain": PwRelaxWorkChain_export,
     "BandsWorkChain": BandsWorkChain_export,
@@ -5075,8 +5126,18 @@ workchain_exporters = {
 }
 
 
+def is_exportable_process(node):
+    """ORCA registrations require their entry-point identity, not just a label."""
+    label = getattr(node, "process_label", "")
+    if label in orca_export.LABELS:
+        return orca_export.supported(node)
+    return label in workchain_exporters
+
+
 def _result_property_definitions(workchain):
     """Return schema-valid automatic properties for each exported result role."""
+    if orca_export.supported(workchain):
+        return orca_export.definitions(workchain)
     process_label = workchain.process_label
     definitions = {}
 
@@ -5252,6 +5313,18 @@ def _result_property_definitions(workchain):
 
 def _preview_definitions(workchain):
     """Return the suggested preview renderers for one exportable workchain."""
+    if orca_export.supported(workchain):
+        return [
+            (
+                role,
+                item["title"],
+                role,
+                lambda path,
+                uid=str(workchain.uuid),
+                role=role: orca_export.render_preview(uid, role, path),
+            )
+            for role, item in orca_export.definitions(workchain).items()
+        ]
     process_label = workchain.process_label
     if process_label == "NanoribbonWorkChain":
         calculations = _find_nanoribbon_calculations(workchain)
@@ -5465,11 +5538,11 @@ def _exportable_workchains(workchain):
             continue
         candidates = (
             [main_workchain]
-            if main_workchain.process_label in workchain_exporters
+            if is_exportable_process(main_workchain)
             else [
                 child
                 for child in main_workchain.called_descendants
-                if child.process_label in workchain_exporters
+                if is_exportable_process(child)
             ]
         )
         for candidate in candidates:
@@ -5655,7 +5728,7 @@ def export_workchain(
         aiida_archive = create_and_export_AiiDA_archive(
             openbis_session, main_workchain_uuid
         )
-        if main_workchain.process_label in workchain_exporters:
+        if is_exportable_process(main_workchain):
             export = _run_exporter(
                 openbis_session,
                 experiment_id,
@@ -5671,7 +5744,7 @@ def export_workchain(
 
         logger.info("%s checking sub_workchains", main_workchain.process_label)
         for child in main_workchain.called_descendants:
-            if child.process_label not in workchain_exporters:
+            if not is_exportable_process(child):
                 continue
             export = _run_exporter(
                 openbis_session,

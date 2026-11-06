@@ -2830,3 +2830,88 @@ def test_atomistic_model_conflicting_uuid_is_never_overwritten(
     assert source.props["wfms_uuid"] == "different-uuid"
     assert created == []
     assert updated == []
+
+
+def test_orca_export_reuses_results_and_repairs_missing_preview(
+    monkeypatch, aiida_utils
+):
+    from aiida.common import AttributeDict
+
+    node = SimpleNamespace(
+        uuid="orca-source",
+        process_type="aiida.workflows:empa_orca.geometry",
+        process_label="GeometryWorkChain",
+        is_finished_ok=True,
+        label="NO optimization",
+        inputs=AttributeDict(
+            {
+                "structure": SimpleNamespace(uuid="input"),
+                "optimize": SimpleNamespace(value=True),
+                "settings": FakeDict(
+                    {
+                        "method": "PBE",
+                        "basis": "def2-SVP",
+                        "charge": 0,
+                        "multiplicity": 2,
+                    }
+                ),
+            }
+        ),
+        outputs=AttributeDict(
+            {
+                "structure": SimpleNamespace(uuid="final"),
+                "optimization_summary": FakeDict(
+                    {"converged": True, "energy_hartree": -129.1}
+                ),
+            }
+        ),
+    )
+    models = {key: FakeOpenbisObject("ATOMISTIC_MODEL") for key in ("input", "final")}
+    session = FakeSession()
+    created = []
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda uid: node)
+    monkeypatch.setattr(
+        aiida_utils,
+        "structure_to_atomistic_model",
+        lambda session, uid, uuids: models[uid],
+    )
+    monkeypatch.setattr(aiida_utils.utils, "update_openbis_object", lambda obj: None)
+
+    def create(_session, type, props, collection, parents):
+        obj = FakeOpenbisObject(type, props)
+        obj.collection, obj.parents = collection, list(parents)
+        session.objects.setdefault(type, []).append(obj)
+        created.append(obj)
+        return obj
+
+    monkeypatch.setattr(aiida_utils.utils, "create_openbis_object", create)
+    monkeypatch.setattr(
+        aiida_utils,
+        "_upload_preview",
+        lambda session, obj, renderer, stem: publish_dataset(
+            type="ELN_PREVIEW", sample=obj, files=[stem + ".png"]
+        ),
+    )
+    args = (session, "/SPACE/PROJECT/COLLECTION", node.uuid, [], "archive-id")
+    first = aiida_utils.OrcaWorkChain_export(*args, executable_ids=["orca-executable"])
+    first[0].datasets.clear()  # emulate an interrupted preview upload
+    second = aiida_utils.OrcaWorkChain_export(*args, executable_ids=["orca-executable"])
+    assert first == second and len(created) == 1
+    assert first[0].parents == [models["input"]]
+    assert models["final"].parents == [first[0]]
+    assert len(first[0].datasets) == 1
+    assert first[0].props["aiida_source_uuid"] == "orca-source"
+    assert first[0].props["executables"] == ["orca-executable"]
+
+
+def test_orca_dispatch_requires_entry_point_identity(aiida_utils):
+    other = SimpleNamespace(
+        process_label="ReferenceWorkChain",
+        process_type="aiida.workflows:another.reference",
+    )
+    orca = SimpleNamespace(
+        process_label="ReferenceWorkChain",
+        process_type="aiida.workflows:empa_orca.reference",
+    )
+    assert not aiida_utils.is_exportable_process(other)
+    assert aiida_utils.is_exportable_process(orca)

@@ -32,7 +32,7 @@ from .widget_lifecycle import close_owned_widgets
 
 logger = logging.getLogger(__name__)
 
-OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
 MATERIALS_CONCEPTS_TYPES = OPENBIS_CONFIG["OpenBIS Materials Concepts Types"]
 SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
 SIMULATION_EXPORT_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
@@ -2610,18 +2610,14 @@ class SimulationDetailsWidget(ipw.VBox):
             if uuid in visited:
                 break
             visited.add(uuid)
-            if (
-                getattr(candidate, "process_label", "")
-                in aiida_utils.workchain_exporters
-            ):
+            if aiida_utils.is_exportable_process(candidate):
                 return candidate
             # Container workflows such as QeAppWorkChain do not have a direct
             # exporter: one export action dispatches their supported child
             # WorkChains while keeping a single archive for the container.
             descendants = getattr(candidate, "called_descendants", ()) or ()
             if any(
-                getattr(descendant, "process_label", "")
-                in aiida_utils.workchain_exporters
+                aiida_utils.is_exportable_process(descendant)
                 for descendant in descendants
             ):
                 return candidate
@@ -2649,8 +2645,13 @@ class SimulationDetailsWidget(ipw.VBox):
 
     def _populate_inferred_molecules(self, workchain):
         """Show explicit openBIS molecule relations carried by the input structure."""
+        structure = (
+            orm.load_node(aiida_utils.orca_export.structure_uuid(workchain))
+            if aiida_utils.orca_export.supported(workchain)
+            else workchain.inputs.structure
+        )
         inferred = aiida_utils.openbis_molecules_for_input_structure(
-            self.openbis_session, workchain.inputs.structure
+            self.openbis_session, structure
         )
         selected = {
             str(child.dropdown.value)
@@ -2723,7 +2724,7 @@ class SimulationDetailsWidget(ipw.VBox):
             )
             return
 
-        self._checked_workchain = workchain
+        self._checked_workchain = str(workchain.uuid)
         description = aiida_utils._workchain_description(workchain)
         suffix = f": {html.escape(description)}" if description else ""
         if workchain.pk != pk:
@@ -3182,7 +3183,12 @@ class SimulationDetailsWidget(ipw.VBox):
             material_dropdown.observe(load_material_details, names="value")
 
     def _checked_structure(self):
-        workchain = getattr(self, "_checked_workchain", None)
+        uuid = getattr(self, "_checked_workchain", None)
+        if uuid is None:
+            return None
+        workchain = orm.load_node(uuid)
+        if aiida_utils.orca_export.supported(workchain):
+            return orm.load_node(aiida_utils.orca_export.structure_uuid(workchain))
         inputs = getattr(workchain, "inputs", None)
         return getattr(inputs, "structure", None)
 

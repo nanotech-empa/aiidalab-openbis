@@ -285,8 +285,10 @@ def test_molecule_preview_constrains_only_the_longest_side(
     )
 
     def png_header(width, height):
-        return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(
-            ">II", width, height
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + b"\x00\x00\x00\x0dIHDR"
+            + struct.pack(">II", width, height)
         )
 
     selector._set_molecule_sketch(png_header(600, 400))
@@ -2427,13 +2429,16 @@ def test_simulation_add_product_offers_checked_aiida_structure(
         FakeMoleculeWidget,
     )
     structure = object()
+    monkeypatch.setattr(
+        simulations_widgets.orm,
+        "load_node",
+        lambda uuid: SimpleNamespace(inputs=SimpleNamespace(structure=structure)),
+    )
     accordion = simulations_widgets.ipw.Accordion()
     widget = SimpleNamespace(
         openbis_session=object(),
         reacprod_concepts_accordion=accordion,
-        _checked_workchain=SimpleNamespace(
-            inputs=SimpleNamespace(structure=structure)
-        ),
+        _checked_workchain="checked-workflow-uuid",
     )
 
     simulations_widgets.SimulationDetailsWidget.add_reacprod_concept(widget, None)

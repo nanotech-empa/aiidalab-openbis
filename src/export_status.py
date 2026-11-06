@@ -20,6 +20,12 @@ from .export_recovery import (
 
 def _structures(workchain, role, au):
     """Describe structure links already created by the existing exporters."""
+    if au.orca_export.supported(workchain):
+        parents, children = au.orca_export.structures(workchain, role)
+        return (
+            [au.orm.load_node(uid) for uid in parents],
+            [au.orm.load_node(uid) for uid in children],
+        )
     label = workchain.process_label
     if role == "minimum_energy_path":
         if label == "Cp2kReplicaWorkChain":
