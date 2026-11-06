@@ -9,7 +9,7 @@ import rdkit
 from IPython.display import Javascript, display
 from rdkit.Chem import AllChem, Draw, rdMolDescriptors
 
-from src import chemical_search, molecule_creation, utils
+from . import chemical_search, molecule_creation, utils
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -19,7 +19,7 @@ OPENBIS_OBJECT_TYPES, _ = (
 MATERIALS_CONCEPTS_TYPES = INTERFACE_CONFIG_INFO["slabs_concepts_types"]
 INSTRUMENTS_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
 
-OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
 SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
 OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
 OPENBIS_PROJECTS_PATHS = OPENBIS_CONFIG["Projects"]["Paths"]
@@ -665,7 +665,7 @@ class MoleculeWidget(ipw.VBox):
     def _open_cdxml_generator(self, _button=None):
         self.open_cdxml_generator_button.disabled = True
         try:
-            from src.cdxml_editor import PeriodicCdxmlEditor
+            from .cdxml_editor import PeriodicCdxmlEditor
 
             self.cdxml_editor = PeriodicCdxmlEditor(
                 structure=self.structure,

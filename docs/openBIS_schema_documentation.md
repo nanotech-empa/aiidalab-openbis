@@ -1930,7 +1930,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 * **Code:** `MECHANICAL_TRANSFER_PRESS`
 * **Generated code prefix:** `METP`
 * **Semantic Annotation:**
-* **Metadata:** 
+* **Metadata:**
 
 #### Section: General information
 
@@ -1953,7 +1953,7 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 * **Code:** `MECHANICAL_TRANSFER_PRESS_SETTINGS`
 * **Generated code prefix:** `MTPS`
 * **Semantic Annotation:**
-* **Metadata:** 
+* **Metadata:**
 
 #### Section: General information
 
@@ -3225,6 +3225,50 @@ A structural or concept parent is required when applicable; simulation parents a
 | `comments` | Comments | Comments | VARCHAR | False | False | False |
 
 ---
+
+### ORCA molecular results and stored-file boundary
+
+An app hands its geometry/SCF workflow UUID to the common export interface.
+The interface reviews and exports the whole entry: connected completed analyses
+at the exact final geometry, including independently submitted ORCA workflows.
+Preview, publication and retry inspection share the same scope. A new optimized
+geometry starts another entry. A changed result set requires refreshing the
+review before publication. Experiment/molecule selections apply to the whole
+entry. Each main workflow retains its own single-root archive and scalar
+`WFMS_UUID`; this aggregation creates no synthetic AiiDA parent or new schema.
+
+ORCA uses the existing scientific types, independently of its executable:
+
+| Result | Object type | Notes |
+| --- | --- | --- |
+| Optimized geometry | `GEOMETRY_OPTIMISATION` | Input and final `ATOMISTIC_MODEL`; constraints and total energy |
+| Fixed-geometry SCF | `ENERGY_CALCULATION` | Stored total energy in Hartree; charge and multiplicity |
+| SCF projected orbital DOS | `DOS` | `PDOS=true`; symmetric Löwdin weights; alpha/beta channels remain distinct |
+| Harmonic IR/Raman | `VIBRATIONAL_SPECTROSCOPY` | Modes, Hessian and intensities remain in the archive |
+| SCF/QRO/UNO, Dyson or Kondo cubes and spatial maps | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; orbital kind in method label/comments and immutable source manifests |
+| QRO/UNO preparation, complete CASCI state table, Dyson transition table or Kondo exchange matrix | `UNCLASSIFIED_SIMULATION` | Explicit result-kind label; structured data remain intact in the archive |
+
+One multiroot CASCI calculation is one reviewed result, retaining every root.
+It is not reduced to a scalar ground-state energy. UNO occupations do not define
+an energy DOS; QRO energy labels are not recast as Kohn–Sham eigenvalues. Dyson
+and Kondo orbital/map results belong to SPM, while their state/transition/exchange
+sources retain separate provenance. `UNCLASSIFIED_SIMULATION` has no assigned
+spin-multiplicity property: its spin context stays in its comments and archive.
+
+The export boundary is the AiiDA database and repository for the selected process
+and established provenance blocks. Archives include stored retrieved files,
+compact arrays, reduced cubes and any wavefunctions already preserved there.
+Remote/stashed files are represented by their provenance records only. Export
+never opens a remote transport, retrieves an additional file, computes a cube,
+submits a job or changes a file-retention policy. External content remains an
+external dependency after import; an archive is not a guarantee that a remote
+wavefunction can be recovered on another machine.
+
+No new object/property/vocabulary definition or server migration is introduced
+by this adapter. Future searchable active-space, state-manifold or transition
+metadata require a separate reviewed schema change, synchronized across this
+normative document, `simulation_object_types.md`, Python/LinkML models and the
+provisioner. XPS/research workflows without an adapter remain unsupported.
 
 ## 2. Data Set Types
 
