@@ -1,0 +1,2 @@
+# Exact runtime under test; this is not a complete dependency lock.
+aiida-core==2.6.3
