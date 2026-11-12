@@ -14,6 +14,9 @@ dist/
 pip-wheel-metadata/
 .ipynb_checkpoints/
 .*.ipynb
+
+# Numbered copies created when AiiDAlab reopens running notebooks
+*-[0-9]*.ipynb
 /logs/
 
 ai_agent/chroma_db/
