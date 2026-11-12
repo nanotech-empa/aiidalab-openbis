@@ -3247,9 +3247,17 @@ ORCA uses the existing scientific types, independently of its executable:
 | RI-MP2 | `ENERGY_CALCULATION` | `METHOD_FAMILY=OTHER`, explicit RI-MP2 label; HF reference, correction and total remain in the archive |
 | SC/FIC/DLPNO-NEVPT2 and CASPT2 | `UNCLASSIFIED_SIMULATION` | `METHOD_FAMILY=CAS`; complete reference/correction/total state table, frozen-core model and checks remain together |
 | SCF projected orbital DOS | `DOS` | `PDOS=true`; symmetric Löwdin weights; alpha/beta channels remain distinct |
+| TDA/full-TDDFT optical states and native NTO analysis | `UNCLASSIFIED_SIMULATION` | `METHOD_FAMILY=DFT`; all excitation energies, length-gauge strengths, approximate UKS spin labels and unmodified NTO weights remain together |
+| NTO hole/particle cubes | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; NTO kind, state/pair identity and stored reduced cubes; remote full files stay external |
 | Harmonic IR/Raman | `VIBRATIONAL_SPECTROSCOPY` | Modes, Hessian and intensities remain in the archive |
 | SCF/QRO/UNO/CASSCF, Dyson or Kondo cubes and spatial maps | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; orbital kind in method label/comments and immutable source manifests |
 | QRO/UNO reference, verified CASSCF reference/state table, complete CASCI state table, Dyson transitions or Kondo exchange matrix | `UNCLASSIFIED_SIMULATION` | Explicit result-kind label; structured data remain intact in the archive |
+
+One optical calculation remains one reviewed result, including dark states and
+all requested spin families. NTO weights are response-pseudodensity eigenvalues,
+not occupations or necessarily probabilities; full-TDDFT weights can exceed one.
+NTO cubes form a separate SPM result with immutable state/pair provenance.
+Neither optical states nor NTOs are substituted for CASCI/Dyson/Kondo vectors.
 
 One multiroot CASCI or CASSCF calculation is one reviewed result, retaining every
 root. It is not reduced to a scalar ground-state energy. CASSCF exports retain
