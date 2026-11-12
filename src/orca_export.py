@@ -12,6 +12,7 @@ from aiida import orm
 
 
 WORKFLOWS = {
+    "nto_cubes": "NtoCubesWorkChain",
     "geometry": "GeometryWorkChain",
     "reference": "ReferenceWorkChain",
     "common_orbitals": "CommonOrbitalsWorkChain",
@@ -26,6 +27,7 @@ WORKFLOWS = {
     "vibrations": "VibrationsWorkChain",
 }
 CALCULATIONS = {
+    "optical": "OpticalCalculation",
     "correlation": "CorrelationCalculation",
     "dyson_maps": "DysonMapsCalculation",
     "kondo_maps": "KondoMapsCalculation",
@@ -40,6 +42,8 @@ PROCESS_TYPES = {
 }
 LABELS = set(PROCESS_TYPES.values())
 RESULT_TITLES = {
+    "optical": "Optical excitations / NTO analysis",
+    "nto_cubes": "NTO hole / particle cubes",
     "correlation": "Correlation energies",
     "geometry": "Geometry / SCF",
     "reference": "SCF",
@@ -58,6 +62,7 @@ RESULT_TITLES = {
     "map_figure": "Saved map figure",
 }
 SPATIAL = {
+    "nto_cubes",
     "orbitals",
     "common_orbital_cubes",
     "dyson_cubes",
@@ -189,7 +194,12 @@ def definitions(node):
         node.inputs, "reference_settings"
     )
     reference = mapping(node.inputs, "orbital_reference")
-    electronic = reference.get("settings", settings)
+    if op == "optical":
+        electronic = mapping(node.inputs, "electronic_settings")
+    elif op == "nto_cubes":
+        electronic = mapping(node.inputs, "excitations").get("electronic_settings", {})
+    else:
+        electronic = reference.get("settings", settings)
     common = {
         "name": node.label or ("ORCA " + op.replace("_", " ")),
         "converged": True,
@@ -302,6 +312,28 @@ def definitions(node):
                 method_label=method,
                 simulation_description="Complete CASSCF reference, correction and total state energies in the linked AiiDA archive.",
             )
+    elif op == "optical":
+        table = mapping(node.outputs, "excitations")
+        if (
+            table.get("method") not in {"TDA", "TDDFT"}
+            or not table.get("states")
+            or table.get("dyson_compatible") is not False
+        ):
+            raise ValueError("Missing or unsupported stored optical state family.")
+        for state in table["states"]:
+            if (
+                _finite(state["energy_ev"], "excitation energy") <= 0
+                or _finite(state["oscillator_strength"], "oscillator strength") < 0
+            ):
+                raise ValueError("Invalid stored optical state.")
+        add(
+            "unclassified",
+            "UNCLASSIFIED_SIMULATION",
+            "Vertical optical excitations and NTO analysis",
+            method_family="DFT",
+            method_label=table["method"] + " / " + common["method_label"],
+            simulation_description="Complete vertical excitation energies, native length-gauge strengths, spin labels and unmodified NTO weights in the linked AiiDA archive.",
+        )
     elif op == "vibrations":
         summary = mapping(node.outputs, "summary")
         add(
@@ -314,7 +346,9 @@ def definitions(node):
         )
     elif op in SPATIAL:
         kind = (
-            "Kondo"
+            "NTO"
+            if op == "nto_cubes"
+            else "Kondo"
             if "kondo" in op
             else "Dyson"
             if "dyson" in op
@@ -334,6 +368,7 @@ def definitions(node):
             )
         comments = {
             "orbital_kind": kind,
+            "selection": mapping(node.inputs, "selection"),
             "settings": mapping(node.inputs, "parameters"),
             "map_metadata": meta,
             "figure_settings": mapping(node.inputs, "settings")
@@ -417,6 +452,15 @@ def definitions(node):
                     optimized_orbital_reference_uuid=str(
                         node.outputs.orbital_reference.uuid
                     ),
+                )
+            elif op == "optical":
+                context.update(
+                    method=table["method"],
+                    reference_type=table.get("reference_type"),
+                    ground_energy_hartree=table.get("ground_energy_hartree"),
+                    checks=table.get("checks", {}),
+                    excitations_uuid=str(node.outputs.excitations.uuid),
+                    nto_weight_convention="Native pseudodensity eigenvalues, not renormalized; full-TDDFT values may exceed one.",
                 )
             elif op == "correlation":
                 context.update(metadata)
@@ -559,6 +603,23 @@ def render_preview(source_uuid, role, path):
                 + " Å"
             )
             axes.set(xlabel="Plane grid index u", ylabel="Plane grid index v")
+        elif op == "optical":
+            states = node.outputs.excitations.get_dict()["states"]
+            for family in sorted({r["family"] for r in states}):
+                rows = [r for r in states if r["family"] == family]
+                axes.vlines(
+                    [r["energy_ev"] for r in rows],
+                    0,
+                    [r["oscillator_strength"] for r in rows],
+                    label=family,
+                )
+                axes.scatter([r["energy_ev"] for r in rows], [0] * len(rows), s=10)
+            axes.set(
+                xlabel="Vertical excitation energy (eV)",
+                ylabel="Oscillator strength · length gauge",
+                title="Stored optical states · dark roots retained",
+            )
+            axes.legend()
         elif op == "vibrations":
             arrays = node.outputs.vibrational_data
             axes.vlines(

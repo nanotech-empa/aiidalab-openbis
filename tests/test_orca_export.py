@@ -379,3 +379,84 @@ def test_map_figure_keeps_kondo_identity_and_plane_metadata(geometry):
     assert item["properties"]["method_label"].startswith("Kondo")
     assert item["properties"]["image_modes"] == ["CONSTANT_HEIGHT"]
     assert '"heights_angstrom": [1.5]' in item["properties"]["comments"]
+
+
+def test_optical_states_and_nto_cubes_preserve_whole_entry_and_database_boundary(
+    geometry, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        orm.Computer, "get_transport", lambda *_: pytest.fail("No remote access")
+    )
+    table = {
+        "method": "TDDFT",
+        "structure_uuid": str(geometry.outputs.structure.uuid),
+        "electronic_settings": geometry.inputs.settings.get_dict(),
+        "ground_energy_hartree": -129.1,
+        "reference_type": "UKS",
+        "dyson_compatible": False,
+        "checks": {"native_normal_termination": True},
+        "states": [
+            {
+                "id": "uks:1",
+                "family": "uks",
+                "root": 1,
+                "energy_ev": 3.8,
+                "oscillator_strength": 0.004,
+                "nto": {"pairs": [{"weight": 1.0031}]},
+            },
+            {
+                "id": "uks:2",
+                "family": "uks",
+                "root": 2,
+                "energy_ev": 4.1,
+                "oscillator_strength": 0.0,
+                "nto": None,
+            },
+        ],
+    }
+    optics = process(
+        "optical",
+        {
+            "structure": geometry.outputs.structure,
+            "source_retrieved": geometry.outputs.retrieved,
+            "electronic_settings": geometry.inputs.settings,
+            "settings": orm.Dict(dict={"method": "TDDFT", "nroots": 2}).store(),
+        },
+        {"excitations": orm.Dict(dict=table)},
+        calculation=True,
+    )
+    cubes = process(
+        "nto_cubes",
+        {
+            "excitations": optics.outputs.excitations,
+            "selection": orm.Dict(dict={"state_id": "uks:1", "pairs": [1]}).store(),
+        },
+        {"manifest": orm.Dict(dict={"cubes": []})},
+    )
+    for node in [optics, cubes]:
+        assert_schema(orca_export.definitions(node))
+        assert orca_export.structure_uuid(node) == str(geometry.outputs.structure.uuid)
+    definition = orca_export.definitions(optics)["unclassified"]
+    assert definition["object_type"] == "UNCLASSIFIED_SIMULATION"
+    assert definition["properties"]["method_family"] == "DFT"
+    assert definition["properties"]["method_label"] == "TDDFT / PBE/def2-SVP"
+    assert json.loads(definition["properties"]["comments"])["excitations_uuid"] == str(
+        optics.outputs.excitations.uuid
+    )
+    spatial = orca_export.definitions(cubes)["spm"]
+    assert spatial["object_type"] == "SPM_SIMULATION"
+    assert json.loads(spatial["properties"]["comments"])["orbital_kind"] == "NTO"
+    assert json.loads(spatial["properties"]["comments"])["selection"] == {
+        "state_id": "uks:1",
+        "pairs": [1],
+    }
+    related = {r["uuid"] for r in orca_export.related_results(geometry.uuid)}
+    assert {str(optics.uuid), str(cubes.uuid)} <= related
+    orca_export.inventory(optics.uuid)
+    assert (
+        optics.outputs.excitations.get_dict()["states"][0]["nto"]["pairs"][0]["weight"]
+        == 1.0031
+    )
+    path = tmp_path / "optical.png"
+    orca_export.render_preview(optics.uuid, "unclassified", path)
+    assert path.read_bytes().startswith(b"\x89PNG")
