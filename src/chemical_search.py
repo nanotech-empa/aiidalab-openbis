@@ -18,7 +18,7 @@ from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
 
-from src.chemical_structures import (
+from .chemical_structures import (
     periodic_formula,
     periodic_graph_from_cxsmiles,
     periodic_graph_key,

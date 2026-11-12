@@ -5,8 +5,8 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from src import utils
-from src.chemical_structures import ChemicalRepresentation, representation_from_cdxml
+from . import utils
+from .chemical_structures import ChemicalRepresentation, representation_from_cdxml
 
 MOLECULE_TYPE = "MOLECULE"
 

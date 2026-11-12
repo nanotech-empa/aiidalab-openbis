@@ -32,7 +32,7 @@ from .widget_lifecycle import close_owned_widgets
 
 logger = logging.getLogger(__name__)
 
-OPENBIS_CONFIG = utils.read_json("config/openbis_config.json")
+OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
 MATERIALS_CONCEPTS_TYPES = OPENBIS_CONFIG["OpenBIS Materials Concepts Types"]
 SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
 SIMULATION_EXPORT_TYPES = OPENBIS_CONFIG["Simulation Export Types"]
@@ -1295,7 +1295,7 @@ class ImportSimulationsWidget(ipw.VBox):
 
 
 class ExportSimulationsWidget(ipw.VBox):
-    def __init__(self, openbis_session):
+    def __init__(self, openbis_session, *, source_uuid=None):
         super().__init__()
         self.openbis_session = openbis_session
         self._provenance_overrides = {
@@ -1405,6 +1405,30 @@ class ExportSimulationsWidget(ipw.VBox):
             self.retry_export_button,
             self.export_message_html,
         ]
+        if source_uuid is not None:
+            self.set_source_uuid(source_uuid)
+
+    def set_source_uuid(self, source_uuid):
+        """Open the common review for the app entry, with no second source picker."""
+        if self._exporting:
+            return
+        self._source_root_uuid = str(source_uuid)
+        self.simulation_details_title.value = "<h3>Review entry results</h3>"
+        self.simulation_source_selector.value = True
+        self.simulation_source_selector.layout.display = "none"
+        details = self.simulation_details_vbox
+        details.simulation_pk_input.disabled = True
+        details.simulation_pk_input.layout.display = "none"
+        details.set_process_uuid(self._source_root_uuid)
+        details.check_simulation_button.description = "Refresh entry results"
+        details.check_simulation_button.icon = "refresh"
+        details.check_simulation_button.layout.width = "auto"
+        details.check_simulation_button.layout.min_width = "190px"
+        details.check_simulation_button.tooltip = (
+            "Refresh the complete result review for this entry"
+        )
+        details.check_aiida_simulation()
+        self._clear_previous_export_feedback()
 
     def _clear_previous_export_feedback(self, _change=None):
         """Discard links and resolution prompts belonging to an earlier PK."""
@@ -2082,6 +2106,9 @@ class ExportSimulationsWidget(ipw.VBox):
                             preview_overrides=preview_overrides,
                             property_overrides=property_overrides,
                             allow_duplicate_simulations=duplicate_existing,
+                            reviewed_result_keys=tuple(
+                                self.simulation_details_vbox._preview_entries
+                            ),
                         )
                     except aiida_utils.MissingExecutablesError as error:
                         self._show_missing_executables(error)
@@ -2610,18 +2637,14 @@ class SimulationDetailsWidget(ipw.VBox):
             if uuid in visited:
                 break
             visited.add(uuid)
-            if (
-                getattr(candidate, "process_label", "")
-                in aiida_utils.workchain_exporters
-            ):
+            if aiida_utils.is_exportable_process(candidate):
                 return candidate
             # Container workflows such as QeAppWorkChain do not have a direct
             # exporter: one export action dispatches their supported child
             # WorkChains while keeping a single archive for the container.
             descendants = getattr(candidate, "called_descendants", ()) or ()
             if any(
-                getattr(descendant, "process_label", "")
-                in aiida_utils.workchain_exporters
+                aiida_utils.is_exportable_process(descendant)
                 for descendant in descendants
             ):
                 return candidate
@@ -2649,8 +2672,13 @@ class SimulationDetailsWidget(ipw.VBox):
 
     def _populate_inferred_molecules(self, workchain):
         """Show explicit openBIS molecule relations carried by the input structure."""
+        structure = (
+            orm.load_node(aiida_utils.orca_export.structure_uuid(workchain))
+            if aiida_utils.orca_export.supported(workchain)
+            else workchain.inputs.structure
+        )
         inferred = aiida_utils.openbis_molecules_for_input_structure(
-            self.openbis_session, workchain.inputs.structure
+            self.openbis_session, structure
         )
         selected = {
             str(child.dropdown.value)
@@ -2685,8 +2713,8 @@ class SimulationDetailsWidget(ipw.VBox):
             molecule_widget.dropdown.value = permid
             selected.add(permid)
 
-    def check_aiida_simulation(self, _button=None):
-        """Validate a PK and prepare previews only for supported WorkChains."""
+    def clear_checked_simulation(self):
+        """Invalidate the old review while retaining explicit destination/context choices."""
         self._clear_inferred_molecules()
         self._checked_workchain = None
         self.simulation_check_status.value = ""
@@ -2694,6 +2722,17 @@ class SimulationDetailsWidget(ipw.VBox):
         self.preview_suggestions_status.value = ""
         self.simulations_dropdown.options = [("No checked simulation", "-1")]
         self.simulations_dropdown.value = "-1"
+
+    def set_process_uuid(self, source_uuid):
+        node = orm.load_node(source_uuid)
+        pk = node.pk
+        del node
+        self.clear_checked_simulation()
+        self.simulation_pk_input.value = pk
+
+    def check_aiida_simulation(self, _button=None):
+        """Validate a PK and prepare previews only for supported WorkChains."""
+        self.clear_checked_simulation()
         pk = int(self.simulation_pk_input.value or 0)
         if pk <= 0:
             self.simulation_check_status.value = (
@@ -2723,7 +2762,7 @@ class SimulationDetailsWidget(ipw.VBox):
             )
             return
 
-        self._checked_workchain = workchain
+        self._checked_workchain = str(workchain.uuid)
         description = aiida_utils._workchain_description(workchain)
         suffix = f": {html.escape(description)}" if description else ""
         if workchain.pk != pk:
@@ -3182,7 +3221,12 @@ class SimulationDetailsWidget(ipw.VBox):
             material_dropdown.observe(load_material_details, names="value")
 
     def _checked_structure(self):
-        workchain = getattr(self, "_checked_workchain", None)
+        uuid = getattr(self, "_checked_workchain", None)
+        if uuid is None:
+            return None
+        workchain = orm.load_node(uuid)
+        if aiida_utils.orca_export.supported(workchain):
+            return orm.load_node(aiida_utils.orca_export.structure_uuid(workchain))
         inputs = getattr(workchain, "inputs", None)
         return getattr(inputs, "structure", None)
 

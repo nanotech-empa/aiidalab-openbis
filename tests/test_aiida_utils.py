@@ -2830,3 +2830,186 @@ def test_atomistic_model_conflicting_uuid_is_never_overwritten(
     assert source.props["wfms_uuid"] == "different-uuid"
     assert created == []
     assert updated == []
+
+
+def test_orca_export_reuses_results_and_repairs_missing_preview(
+    monkeypatch, aiida_utils
+):
+    from aiida.common import AttributeDict
+
+    node = SimpleNamespace(
+        uuid="orca-source",
+        process_type="aiida.workflows:empa_orca.geometry",
+        process_label="GeometryWorkChain",
+        is_finished_ok=True,
+        label="NO optimization",
+        inputs=AttributeDict(
+            {
+                "structure": SimpleNamespace(uuid="input"),
+                "optimize": SimpleNamespace(value=True),
+                "settings": FakeDict(
+                    {
+                        "method": "PBE",
+                        "basis": "def2-SVP",
+                        "charge": 0,
+                        "multiplicity": 2,
+                    }
+                ),
+            }
+        ),
+        outputs=AttributeDict(
+            {
+                "structure": SimpleNamespace(uuid="final"),
+                "optimization_summary": FakeDict(
+                    {"converged": True, "energy_hartree": -129.1}
+                ),
+            }
+        ),
+    )
+    models = {key: FakeOpenbisObject("ATOMISTIC_MODEL") for key in ("input", "final")}
+    session = FakeSession()
+    created = []
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda uid: node)
+    monkeypatch.setattr(
+        aiida_utils,
+        "structure_to_atomistic_model",
+        lambda session, uid, uuids: models[uid],
+    )
+    monkeypatch.setattr(aiida_utils.utils, "update_openbis_object", lambda obj: None)
+
+    def create(_session, type, props, collection, parents):
+        obj = FakeOpenbisObject(type, props)
+        obj.collection, obj.parents = collection, list(parents)
+        session.objects.setdefault(type, []).append(obj)
+        created.append(obj)
+        return obj
+
+    monkeypatch.setattr(aiida_utils.utils, "create_openbis_object", create)
+    monkeypatch.setattr(
+        aiida_utils,
+        "_upload_preview",
+        lambda session, obj, renderer, stem: publish_dataset(
+            type="ELN_PREVIEW", sample=obj, files=[stem + ".png"]
+        ),
+    )
+    args = (session, "/SPACE/PROJECT/COLLECTION", node.uuid, [], "archive-id")
+    first = aiida_utils.OrcaWorkChain_export(*args, executable_ids=["orca-executable"])
+    first[0].datasets.clear()  # emulate an interrupted preview upload
+    second = aiida_utils.OrcaWorkChain_export(*args, executable_ids=["orca-executable"])
+    assert first == second and len(created) == 1
+    assert first[0].parents == [models["input"]]
+    assert models["final"].parents == [first[0]]
+    assert len(first[0].datasets) == 1
+    assert first[0].props["aiida_source_uuid"] == "orca-source"
+    assert first[0].props["executables"] == ["orca-executable"]
+
+
+def test_orca_dispatch_requires_entry_point_identity(aiida_utils):
+    other = SimpleNamespace(
+        process_label="ReferenceWorkChain",
+        process_type="aiida.workflows:another.reference",
+    )
+    orca = SimpleNamespace(
+        process_label="ReferenceWorkChain",
+        process_type="aiida.workflows:empa_orca.reference",
+    )
+    assert not aiida_utils.is_exportable_process(other)
+    assert aiida_utils.is_exportable_process(orca)
+
+
+def test_orca_entry_scope_includes_siblings_but_stops_at_new_geometry(
+    aiida_profile_clean, monkeypatch, aiida_utils
+):
+    from aiida import orm
+    from aiida.common.links import LinkType
+
+    def calculation(op, inputs, outputs):
+        node = orm.WorkChainNode(process_type="aiida.workflows:empa_orca." + op)
+        node.set_process_label(aiida_utils.orca_export.WORKFLOWS[op])
+        for key, data in inputs.items():
+            node.base.links.add_incoming(data, LinkType.INPUT_WORK, key)
+        node.store()
+        creator = orm.CalcJobNode()
+        creator.base.links.add_incoming(node, LinkType.CALL_CALC, "run")
+        creator.store()
+        for key, data in outputs.items():
+            data.base.links.add_incoming(creator, LinkType.CREATE, key)
+            data.store()
+            data.base.links.add_incoming(node, LinkType.RETURN, key)
+        for process in (creator, node):
+            process.set_process_state("finished")
+            process.set_exit_status(0)
+            process.seal()
+        return node
+
+    geometry = orm.StructureData(pbc=False)
+    geometry.append_atom(position=(0, 0, 0), symbols="N")
+    geometry.store()
+    optimized = geometry.clone()
+    entry = calculation("geometry", {"structure": geometry}, {"structure": optimized})
+    reference = calculation(
+        "common_orbitals",
+        {"structure": optimized},
+        {"orbital_reference": orm.Dict(dict={"structure_uuid": optimized.uuid})},
+    )
+    casci = calculation(
+        "casci",
+        {"orbital_reference": reference.outputs.orbital_reference},
+        {},
+    )
+    cubes = calculation(
+        "common_orbital_cubes",
+        {"orbital_reference": reference.outputs.orbital_reference},
+        {},
+    )
+    # Same chemical formula, different optimization: it is a new app entry.
+    next_entry = calculation(
+        "geometry", {"structure": optimized}, {"structure": optimized.clone()}
+    )
+    calculation("orbitals", {"structure": next_entry.outputs.structure}, {})
+    monkeypatch.setattr(
+        orm.Computer, "get_transport", lambda *_: pytest.fail("No transport")
+    )
+    expected = [entry.uuid, reference.uuid, casci.uuid, cubes.uuid]
+    assert aiida_utils.get_export_main_workchains(entry.uuid) == expected
+    assert [str(n.uuid) for n in aiida_utils._exportable_workchains(entry)] == expected
+    # Selecting a single analysis programmatically retains the preceding-only scope.
+    assert aiida_utils.get_export_main_workchains(casci.uuid) == [
+        entry.uuid,
+        reference.uuid,
+        casci.uuid,
+    ]
+
+
+def test_export_rejects_changed_result_set_before_any_server_write(
+    monkeypatch, aiida_utils
+):
+    source = SimpleNamespace(uuid="entry", is_finished_ok=True)
+    sibling = SimpleNamespace(uuid="casci")
+    monkeypatch.setattr(aiida_utils.orm, "load_node", lambda _: source)
+    monkeypatch.setattr(
+        aiida_utils, "get_export_main_workchains", lambda _: ["entry", "casci"]
+    )
+    monkeypatch.setattr(
+        aiida_utils, "_exportable_workchains", lambda *a, **kw: [source, sibling]
+    )
+    monkeypatch.setattr(
+        aiida_utils, "_result_property_definitions", lambda _: {"result": {}}
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "get_uuids_from_oBIS",
+        lambda *_: pytest.fail("No publication before review"),
+    )
+    monkeypatch.setattr(
+        aiida_utils,
+        "_ensure_executables_for_workchains",
+        lambda *_: pytest.fail("No executable creation"),
+    )
+    with pytest.raises(ValueError, match="results changed since review"):
+        aiida_utils.export_workchain(
+            object(),
+            "/SPACE/PROJECT/EXPERIMENT",
+            "entry",
+            reviewed_result_keys=["entry:result"],
+        )

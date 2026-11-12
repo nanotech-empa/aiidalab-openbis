@@ -2149,3 +2149,68 @@ New `COMPUTER` records are placed according to their scope:
   `/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_EXTERNAL_AND_HPC_RESOURCES`
 
 Existing computer records are never moved by the exporter.
+
+## ORCA molecular-result exports
+
+
+An app hands its geometry/SCF workflow UUID to the common export interface.
+The interface reviews and exports the whole entry: connected completed analyses
+at the exact final geometry, including independently submitted ORCA workflows.
+Preview, publication and retry inspection share the same scope. A new optimized
+geometry starts another entry. A changed result set requires refreshing the
+review before publication. Experiment/molecule selections apply to the whole
+entry. Each main workflow retains its own single-root archive and scalar
+`WFMS_UUID`; this aggregation creates no synthetic AiiDA parent or new schema.
+
+ORCA uses the existing scientific types, independently of its executable:
+
+| Result | Object type | Notes |
+| --- | --- | --- |
+| Optimized geometry | `GEOMETRY_OPTIMISATION` | Input and final `ATOMISTIC_MODEL`; constraints and total energy |
+| Fixed-geometry SCF | `ENERGY_CALCULATION` | Stored total energy in Hartree; charge and multiplicity |
+| RI-MP2 | `ENERGY_CALCULATION` | `METHOD_FAMILY=OTHER`, explicit RI-MP2 label; HF reference, correction and total remain in the archive |
+| SC/FIC/DLPNO-NEVPT2 and CASPT2 | `UNCLASSIFIED_SIMULATION` | `METHOD_FAMILY=CAS`; complete reference/correction/total state table, frozen-core model and checks remain together |
+| SCF projected orbital DOS | `DOS` | `PDOS=true`; symmetric Löwdin weights; alpha/beta channels remain distinct |
+| Harmonic IR/Raman | `VIBRATIONAL_SPECTROSCOPY` | Modes, Hessian and intensities remain in the archive |
+| SCF/QRO/UNO/CASSCF, Dyson or Kondo cubes and spatial maps | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; orbital kind in method label/comments and immutable source manifests |
+| QRO/UNO reference, verified CASSCF reference/state table, complete CASCI state table, Dyson transitions or Kondo exchange matrix | `UNCLASSIFIED_SIMULATION` | Explicit result-kind label; structured data remain intact in the archive |
+
+One multiroot CASCI or CASSCF calculation is one reviewed result, retaining every
+root. It is not reduced to a scalar ground-state energy. CASSCF exports retain
+the optimization mode, normalized state weights, optimized-reference UUID and
+saved-orbital readback result. State averaging keeps distinct spin-labelled
+states; its weights are not spectral intensities. CASSCF cubes use the CAS
+method family. UNO/CASSCF natural occupations do not define an energy DOS; QRO
+energy labels are not recast as Kohn–Sham eigenvalues. Dyson
+and Kondo orbital/map results belong to SPM, while their state/transition/exchange
+sources retain separate provenance. `UNCLASSIFIED_SIMULATION` has no assigned
+spin-multiplicity property: its spin context stays in its comments and archive.
+
+The export boundary is the AiiDA database and repository for the selected process
+and established provenance blocks. Archives include stored retrieved files,
+compact arrays, reduced cubes and any wavefunctions already preserved there.
+Remote/stashed files are represented by their provenance records only. Export
+never opens a remote transport, retrieves an additional file, computes a cube,
+submits a job or changes a file-retention policy. External content remains an
+external dependency after import; an archive is not a guarantee that a remote
+wavefunction can be recovered on another machine.
+
+No new object/property/vocabulary definition or server migration is introduced
+by this adapter. Future searchable active-space, state-manifold or transition
+metadata require a separate reviewed schema change, synchronized across this
+normative document, `simulation_object_types.md`, Python/LinkML models and the
+provisioner. XPS/research workflows without an adapter remain unsupported.
+
+The whole-entry export creates or reuses the related records together. For a
+complete ORCA analysis workspace, import its source geometry, orbital reference
+and state records together with the orbital/map records.
+Each main workflow keeps a separate single-root archive; selecting only the
+last map does not implicitly import every earlier calculation. Shared AiiDA
+UUIDs reconnect the records when their archives are imported together.
+
+Local regression checks cover ORCA mappings, the common review, archive scope,
+duplicate handling and interrupted-export recovery. They do not establish
+a live-server upload/import round trip. That remains a separate acceptance
+gate with an approved destination and the matching shared-exporter revision.
+The CASSCF/correlation implementation and native-pilot limits are recorded in
+[the ORCA stage validation guide](https://github.com/nanotech-empa/aiidalab-orca/blob/main/docs/release-readiness.md).
