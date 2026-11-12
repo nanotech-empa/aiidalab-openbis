@@ -95,11 +95,22 @@ class AtomModelWidget(ipw.VBox):
 
     def load_atom_models(self):
         atom_models = utils.get_openbis_objects(
-            self.openbis_session, type=OPENBIS_OBJECT_TYPES["Atomistic Model"]
+            self.openbis_session,
+            type=OPENBIS_OBJECT_TYPES["Atomistic Model"],
+            props=["name"],
         )
-        atom_model_options = [
-            (f"{obj.props['name']}", obj.permId) for obj in atom_models
-        ]
+        atom_model_frame = getattr(atom_models, "df", None)
+        if atom_model_frame is not None:
+            atom_model_options = []
+            for record in atom_model_frame.to_dict(orient="records"):
+                name = record.get("NAME")
+                if name is None or pd.isna(name) or not str(name).strip():
+                    name = record["permId"]
+                atom_model_options.append((str(name), str(record["permId"])))
+        else:
+            atom_model_options = [
+                (f"{obj.props['name']}", obj.permId) for obj in atom_models
+            ]
         atom_model_options.sort()
         atom_model_options.insert(0, ("Select atomistic model...", "-1"))
         self.atom_model_dropdown.options = atom_model_options
@@ -962,25 +973,39 @@ class SelectExperimentWidget(ipw.VBox):
     # 2. DATA LOADING METHODS
     # ==========================================
     def load_experiments(self, project_identifier):
-        """Fetches experiments from openBIS ONCE and stores them."""
+        """Fetch display properties in bulk for the selected project only."""
         experiments = utils.get_openbis_collections(
-            self.openbis_session, type="EXPERIMENT", project=project_identifier
+            self.openbis_session,
+            type="EXPERIMENT",
+            project=project_identifier,
+            props=["name"],
         )
-
         data = []
-        for exp in experiments:
-            name = exp.props["name"] if "name" in exp.props.all() else exp.code
-            display_name = name
-            registrator = getattr(exp.registrator, "userId", exp.registrator)
-
-            data.append(
-                {
-                    "display_name": display_name,
-                    "permId": exp.permId,
-                    "is_mine": registrator == self.current_user,
-                }
-            )
-
+        experiment_frame = getattr(experiments, "df", None)
+        if experiment_frame is not None:
+            for record in experiment_frame.to_dict(orient="records"):
+                code = str(record.get("identifier") or "").rstrip("/").split("/")[-1]
+                name = record.get("NAME")
+                if name is None or pd.isna(name) or not str(name).strip():
+                    name = code
+                data.append(
+                    {
+                        "display_name": name,
+                        "permId": str(record["permId"]),
+                        "is_mine": record.get("registrator") == self.current_user,
+                    }
+                )
+        else:
+            for exp in experiments:
+                name = exp.props["name"] if "name" in exp.props.all() else exp.code
+                registrator = getattr(exp.registrator, "userId", exp.registrator)
+                data.append(
+                    {
+                        "display_name": name,
+                        "permId": exp.permId,
+                        "is_mine": registrator == self.current_user,
+                    }
+                )
         self.raw_experiments_df = pd.DataFrame(data)
         self.update_experiment_dropdown(None)
 
