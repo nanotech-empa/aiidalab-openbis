@@ -295,7 +295,7 @@ Examples:
 ## Definition
 
 Simulation that computes the energy of a fixed `ATOMISTIC_MODEL`,
-`MOLECULE_CONCEPT`, or `CRYSTAL_CONCEPT` without intentionally modifying its
+`MOLECULE`, or `CRYSTAL_CONCEPT` without intentionally modifying its
 geometry.
 
 ## Suggested method families
@@ -318,7 +318,7 @@ Required (one or more of):
 
 ```text
 ATOMISTIC_MODEL[]
-MOLECULE_CONCEPT[]
+MOLECULE[]
 CRYSTAL_CONCEPT[]
 ```
 
@@ -326,7 +326,7 @@ Relations:
 
 ```text
 ATOMISTIC_MODEL → ENERGY_CALCULATION
-MOLECULE_CONCEPT → ENERGY_CALCULATION
+MOLECULE → ENERGY_CALCULATION
 CRYSTAL_CONCEPT → ENERGY_CALCULATION
 ```
 
@@ -357,7 +357,7 @@ ELN_PREVIEW
 Content:
 
 ```text
-image of the input ATOMISTIC_MODEL, MOLECULE_CONCEPT, or CRYSTAL_CONCEPT
+image of the input ATOMISTIC_MODEL, MOLECULE, or CRYSTAL_CONCEPT
 ```
 
 Required if non-AiiDA:
@@ -398,7 +398,7 @@ comments: text
 ## Required linked content
 
 ```text
-parents: ATOMISTIC_MODEL[], MOLECULE_CONCEPT[], and/or CRYSTAL_CONCEPT[]
+parents: ATOMISTIC_MODEL[], MOLECULE[], and/or CRYSTAL_CONCEPT[]
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
 aiida_node: AIIDA_NODE, if AiiDA
@@ -1064,7 +1064,7 @@ full volumetric charge files
 ## Definition
 
 Simulation or post-processing analysis that computes the electronic density of
-states of an `ATOMISTIC_MODEL`, `MOLECULE_CONCEPT`, or `CRYSTAL_CONCEPT`.
+states of an `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT`.
 
 If projected density of states is included, set:
 
@@ -1086,7 +1086,7 @@ Required (one or more of):
 
 ```text
 ATOMISTIC_MODEL
-MOLECULE_CONCEPT
+MOLECULE
 CRYSTAL_CONCEPT
 ```
 
@@ -1094,7 +1094,7 @@ Relations:
 
 ```text
 ATOMISTIC_MODEL → DOS
-MOLECULE_CONCEPT → DOS
+MOLECULE → DOS
 CRYSTAL_CONCEPT → DOS
 ```
 
@@ -1194,7 +1194,7 @@ simulation object is created for the overlap post-processing step.
 ## Required linked content
 
 ```text
-parents: ATOMISTIC_MODEL, MOLECULE_CONCEPT, and/or CRYSTAL_CONCEPT
+parents: ATOMISTIC_MODEL, MOLECULE, and/or CRYSTAL_CONCEPT
 optional parent: ENERGY_CALCULATION
 executables: EXECUTABLE[]
 ELN_PREVIEW: image dataset
@@ -1983,7 +1983,7 @@ Required if applicable (one or more of):
 
 ```text
 ATOMISTIC_MODEL[]
-MOLECULE_CONCEPT[]
+MOLECULE[]
 CRYSTAL_CONCEPT[]
 ```
 
@@ -1994,7 +1994,7 @@ Relations:
 
 ```text
 ATOMISTIC_MODEL → UNCLASSIFIED_SIMULATION
-MOLECULE_CONCEPT → UNCLASSIFIED_SIMULATION
+MOLECULE → UNCLASSIFIED_SIMULATION
 CRYSTAL_CONCEPT → UNCLASSIFIED_SIMULATION
 ```
 
@@ -2092,7 +2092,7 @@ comments: text
 ## Required linked content
 
 ```text
-parents: ATOMISTIC_MODEL[], MOLECULE_CONCEPT[], and/or CRYSTAL_CONCEPT[], if applicable
+parents: ATOMISTIC_MODEL[], MOLECULE[], and/or CRYSTAL_CONCEPT[], if applicable
 children: ATOMISTIC_MODEL[], if produced
 executables: EXECUTABLE[], if known
 ELN_PREVIEW: image dataset
