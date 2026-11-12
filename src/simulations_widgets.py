@@ -2437,28 +2437,17 @@ class SimulationDetailsWidget(ipw.VBox):
         self.select_atom_model_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 18px;'>Select atomistic model</span>"
         )
-        self.atom_model_widget = widgets.AtomModelWidget(self.openbis_session)
+        self.atom_model_widget = None
 
         self.select_executables_title = ipw.HTML(
             value="<span style='font-weight: bold; font-size: 18px;'>Select executables</span>"
         )
 
         self.executables_label = ipw.Label(value="Executables")
-        executable_objects = list(
-            utils.get_openbis_objects(
-                self.openbis_session, type=OPENBIS_OBJECT_TYPES["Executable"]
-            )
-            or []
-        )
-        executable_options = [
-            (details, permid)
-            for permid, details in aiida_utils._openbis_executable_options(
-                self.openbis_session, executable_objects
-            )
-        ]
         self.executables_multi_selector = ipw.SelectMultiple(
-            options=executable_options, layout=ipw.Layout(width="850px", height="120px")
+            options=(), layout=ipw.Layout(width="850px", height="120px")
         )
+        self._manual_reference_widgets_loaded = False
         self.executables_hbox = ipw.HBox(
             children=[self.executables_label, self.executables_multi_selector]
         )
@@ -2522,6 +2511,87 @@ class SimulationDetailsWidget(ipw.VBox):
         self._owned_widgets = ()
         self.children = ()
         super().close()
+
+    @staticmethod
+    def _bulk_object_name_map(objects):
+        frame = getattr(objects, "df", None)
+        if frame is None:
+            return None
+
+        names = {}
+        for record in frame.to_dict(orient="records"):
+            permid = str(record["permId"])
+            name = record.get("NAME")
+            if name is None or pd.isna(name) or not str(name).strip():
+                name = permid
+            names[permid] = str(name)
+        return names
+
+    def _load_manual_reference_widgets(self):
+        """Load external-export inventories only when that mode is selected."""
+        if self._manual_reference_widgets_loaded:
+            return
+
+        atom_model_widget = widgets.AtomModelWidget(self.openbis_session)
+        executable_objects = utils.get_openbis_objects(
+            self.openbis_session,
+            type=OPENBIS_OBJECT_TYPES["Executable"],
+            props=["name", "code", "computer"],
+        )
+        executable_frame = getattr(executable_objects, "df", None)
+        if executable_frame is None:
+            executable_options = [
+                (details, permid)
+                for permid, details in aiida_utils._openbis_executable_options(
+                    self.openbis_session, list(executable_objects or [])
+                )
+            ]
+        else:
+            code_objects = utils.get_openbis_objects(
+                self.openbis_session,
+                type=OPENBIS_OBJECT_TYPES["Code"],
+                props=["name"],
+            )
+            computer_objects = utils.get_openbis_objects(
+                self.openbis_session,
+                type=OPENBIS_OBJECT_TYPES["Computer"],
+                props=["name"],
+            )
+            code_names = self._bulk_object_name_map(code_objects) or {}
+            computer_names = self._bulk_object_name_map(computer_objects) or {}
+            executable_options = []
+            for record in executable_frame.to_dict(orient="records"):
+                permid = str(record["permId"])
+                name = record.get("NAME")
+                if name is None or pd.isna(name) or not str(name).strip():
+                    name = permid
+
+                code_reference = record.get("CODE")
+                code_reference = (
+                    ""
+                    if code_reference is None or pd.isna(code_reference)
+                    else str(code_reference)
+                )
+                computer_reference = record.get("COMPUTER")
+                computer_reference = (
+                    ""
+                    if computer_reference is None or pd.isna(computer_reference)
+                    else str(computer_reference)
+                )
+                code_name = code_names.get(code_reference, code_reference or "unlinked")
+                computer_name = computer_names.get(
+                    computer_reference, computer_reference or "unlinked"
+                )
+                executable_options.append(
+                    (
+                        f"{name}; code {code_name}; computer {computer_name}",
+                        permid,
+                    )
+                )
+
+        self.atom_model_widget = atom_model_widget
+        self.executables_multi_selector.options = executable_options
+        self._manual_reference_widgets_loaded = True
 
     @staticmethod
     def _exportable_ancestor(node):
@@ -2981,6 +3051,7 @@ class SimulationDetailsWidget(ipw.VBox):
             self.children = children
 
         else:
+            self._load_manual_reference_widgets()
             self.children = [
                 self.select_simulation_type_title,
                 self.simulation_type_hbox,
