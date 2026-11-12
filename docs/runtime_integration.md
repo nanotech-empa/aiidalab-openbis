@@ -39,6 +39,24 @@ artifact. These are isolated source tests; they do not establish that the
 active installation satisfies every declared dependency. Existing widget-value normalization is
 retained; it does not imply continued support for old Python runtimes.
 
+## Modern dependency selection
+
+The modern qualification selects official ASE 3.29.0, scikit-learn 1.9.1 and
+RDKit 2026.9.2. These exact versions are exercised by the chemical, archive and
+widget regressions. The frozen compatibility releases retain their old pins.
+
+AiiDAlab 26.10 requires packaging >=26. Langfuse 3.7 (also the checked 3.8,
+3.10, 3.15 and 4.0 releases) instead requires packaging <26. The modern app
+selects official Langfuse 5.2, whose supported range includes packaging 26.3.
+The callback contract remains `langfuse.langchain.CallbackHandler()`.
+
+Keep the existing LangChain 0.3 / LangGraph 0.6 provider line: the app uses
+`langchain.schema.Document`, `InMemorySaver` and `ToolNode`. Selecting the
+latest LangChain 1.x API is a separate migration. Real provider-package imports, the no-argument callback and all 390 source
+regressions pass against the staged official packages without the earlier two
+provider-import mocks. The staged prefix also passes dependency consistency.
+Live LLM requests still require configuration and separate GUI qualification.
+
 ## Validation and remaining checks
 
 Use the focused export/archive/widget tests plus `test_runtime_integration.py`.
