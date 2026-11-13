@@ -2,7 +2,7 @@
 
 This document provides a comprehensive overview of the openBIS Data Model schema configured for tracking experimental, operational, and computational workflows in advanced materials science, surface physics, and nanotechnology infrastructure. openBIS is an open-source Research Data Management (RDM) platform designed to support data provenance, reproducibility, and compliance with FAIR (Findable, Accessible, Interoperable, and Reusable) data principles.
 
-The schema documented herein is structured into three primary architectural pillars to ensure seamless data tracking from initial sample fabrication to final computational analysis:
+The schema documented herein is structured into four primary architectural pillars to ensure seamless data tracking from initial sample fabrication to final computational analysis:
 
 1. [Object Types](#1-object-types): Defines the core entities within the laboratory and simulation ecosystem. These encompass physical materials (e.g., `2D_LAYER_MATERIAL`, `CRYSTAL`, `SUBSTANCE`), instrument setups and hardware components (e.g., `INSTRUMENT.STM`, `TURBO_PUMP`, `SPUTTER_GUN`), discrete experimental procedures and operational logbook entries (e.g., `ANNEALING`, `DEGASING_LOGENTRY`, `SPUTTERING`), and computational nodes or structures (e.g., `ATOMISTIC_MODEL`, `AIIDA_NODE`, `STM_SIMULATION`).
 
@@ -10,9 +10,175 @@ The schema documented herein is structured into three primary architectural pill
 
 3. [Vocabulary Types](#3-vocabulary-types): Establishes standardized, controlled vocabularies to enforce metadata integrity across fields. These regulate attributes such as component classification, object statuses, and special storage environments.
 
+4. [Collection Types](#4-collection-types): Defines the collection containers (such as `EXPERIMENT`) used to group experimental runs, sample preparations, and measurement sessions within openBIS projects.
+
 By mapping the detailed relationships between physical materials, hardware state variables, experimental parameters, and downstream computational datasets, this data model provides a robust framework that preserves complete scientific lineage across the entire research lifecycle.
 
 ## 1. Object Types
+
+### Quick Reference: Object Types by Category
+
+To make navigating the 117 object types easier, the tables below group them by functional role alongside their openBIS **Code**, **Generated Code Prefix**, and **Metadata**. The full alphabetical index is preserved inside the collapsible block immediately below.
+
+#### 1.1 Experimental Workflow & Provenance
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [Sample](#sample) | `SAMPLE` | `SAMP` | *(None)* |
+| [Preparation](#preparation) | `PREPARATION` | `PREP` | *(None)* |
+| [Process](#process) | `PROCESS` | `PROC` | *(None)* |
+| [Process Step](#process-step) | `PROCESS_STEP` | `PRST` | *(None)* |
+| [Measurement Session](#measurement-session) | `MEASUREMENT_SESSION` | `MSSE` | *(None)* |
+| [Analysis](#analysis) | `ANALYSIS` | `ANLY` | *(None)* |
+| [Result](#result) | `RESULT` | `RESL` | *(None)* |
+
+#### 1.2 Materials, Substrates & Chemical Concepts
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [2D Layer Material](#2d-layer-material) | `2D_LAYER_MATERIAL` | `TDLM` | `{'type': 'slab'}` |
+| [Crystal](#crystal) | `CRYSTAL` | `CRRE` | `{'type': 'slab'}` |
+| [Crystal Concept](#crystal-concept) | `CRYSTAL_CONCEPT` | `CRCO` | `{'type': 'slab_concept'}` |
+| [Device Substrate](#device-substrate) | `DEVICE_SUBSTRATE` | `DVSB` | *(None)* |
+| [Gas Bottle](#gas-bottle) | `GAS_BOTTLE` | `GASB` | *(None)* |
+| [Molecule](#molecule) | `MOLECULE` | `MOLE` | `{'type': 'material_concept'}` |
+| [Raw Crystal](#raw-crystal) | `RAW_CRYSTAL` | `RWCR` | *(None)* |
+| [Solution](#solution) | `SOLUTION` | `SLTN` | *(None)* |
+| [Stamp](#stamp) | `STAMP` | `STMP` | *(None)* |
+| [Substance](#substance) | `SUBSTANCE` | `SUBS` | *(None)* |
+| [Wafer](#wafer) | `WAFER` | `WAFR` | *(None)* |
+| [Wafer Substrate](#wafer-substrate) | `WAFER_SUBSTRATE` | `WFSB` | `{'type': 'slab'}` |
+| [Wire](#wire) | `WIRE` | `WIRE` | *(None)* |
+
+#### 1.3 Sample Preparation Actions
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [Action](#action) | `ACTION` | `ACTN` | `{'icon': '⚙️', 'type': 'action'}` |
+| [Annealing](#annealing) | `ANNEALING` | `HEAT` | `{'icon': '🔥', 'type': 'action'}` |
+| [Coating](#coating) | `COATING` | `COAT` | `{'icon': '💧', 'type': 'action'}` |
+| [Cooldown](#cooldown) | `COOLDOWN` | `COOL` | `{'icon': '❄️', 'type': 'action'}` |
+| [Deposition](#deposition) | `DEPOSITION` | `DEPO` | `{'icon': '🧱', 'type': 'action'}` |
+| [Dosing](#dosing) | `DOSING` | `GASD` | `{'icon': '💨', 'type': 'action'}` |
+| [Field Emission](#field-emission) | `FIELD_EMISSION` | `FIEM` | `{'icon': '⚡', 'type': 'action'}` |
+| [Fishing](#fishing) | `FISHING` | `FISH` | `{'icon': '🎣', 'type': 'action'}` |
+| [Light Irradiation](#light-irradiation) | `LIGHT_IRRADIATION` | `LITE` | `{'icon': '💡', 'type': 'action'}` |
+| [Mechanical Pressing](#mechanical-pressing) | `MECHANICAL_PRESSING` | `MEPR` | `{'icon': '🗜', 'type': 'action', 'requires_component': False, 'samples_generated': 2}` |
+| [Rinse](#rinse) | `RINSE` | `RINS` | `{'icon': '🚿', 'type': 'action'}` |
+| [Soaking](#soaking) | `SOAKING` | `SOAK` | `{'icon': '🛁', 'type': 'action'}` |
+| [Sputtering](#sputtering) | `SPUTTERING` | `IONB` | `{'icon': '🔫', 'type': 'action'}` |
+
+#### 1.4 Instruments & Hardware Components
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [Instrument](#instrument) | `INSTRUMENT` | `ISTR` | `{'collectionType': 'INSTRUMENT_COLLECTION', 'ilog': true, 'type': 'instrument'}` |
+| [Instrument STM](#instrument-stm) | `INSTRUMENT.STM` | `ISTM` | `{'collectionType': 'INSTRUMENT_COLLECTION', 'ilog': true, 'type': 'instrument'}` |
+| [6-Fold Evaporator](#6-fold-evaporator) | `6_FOLD_EVAPORATOR` | `6FEV` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [AFM Sensor](#afm-sensor) | `AFM_SENSOR` | `AFMS` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Analyser](#analyser) | `ANALYSER` | `ANLS` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Balance](#balance) | `BALANCE` | `BLNC` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [By Hand](#by-hand) | `BY_HAND` | `HAND` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Chamber](#chamber) | `CHAMBER` | `CHBR` | *(None)* |
+| [Component](#component) | `COMPONENT` | `COMP` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Cryostat](#cryostat) | `CRYOSTAT` | `CRYO` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [DC Evaporator](#dc-evaporator) | `DC_EVAPORATOR` | `DCEV` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Dewar](#dewar) | `DEWAR` | `DWAR` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [E-beam Heater](#e-beam-heater) | `E_BEAM_HEATER` | `EBHT` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Electrochemical Cell](#electrochemical-cell) | `ELECTROCHEMICAL_CELL` | `ELCL` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Electronics](#electronics) | `ELECTRONICS` | `ELTR` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Filament](#filament) | `FILAMENT` | `FILA` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Glassware](#glassware) | `GLASSWARE` | `GLAS` | *(None)* |
+| [Hot Plate](#hot-plate) | `HOT_PLATE` | `HOTP` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Ion Gauge](#ion-gauge) | `ION_GAUGE` | `IONG` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Ion Pump](#ion-pump) | `ION_PUMP` | `IONP` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Mechanical Transfer Press](#mechanical-transfer-press) | `MECHANICAL_TRANSFER_PRESS` | `METP` | *(None)* |
+| [PBN Stage](#pbn-stage) | `PBN_STAGE` | `PBNS` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Pipette](#pipette) | `PIPETTE` | `PIPT` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Plasma Cleaner](#plasma-cleaner) | `PLASMA_CLEANER` | `PLCL` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Scroll Pump](#scroll-pump) | `SCROLL_PUMP` | `SCLP` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Spin Coater](#spin-coater) | `SPIN_COATER` | `SPCO` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [SPM Controller](#spm-controller) | `SPM_CONTROLLER` | `SPMC` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Sputter Gun](#sputter-gun) | `SPUTTER_GUN` | `SPTG` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [STM Tip](#stm-tip) | `STM_TIP` | `STMT` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Thyracont](#thyracont) | `THYRACONT` | `THYR` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Turbo Pump](#turbo-pump) | `TURBO_PUMP` | `TRBP` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Vacuum Oven](#vacuum-oven) | `VACUUM_OVEN` | `VAOV` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Valve](#valve) | `VALVE` | `VALV` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+
+#### 1.5 Component Settings
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [6-Fold Evaporator Settings](#6-fold-evaporator-settings) | `6_FOLD_EVAPORATOR_SETTINGS` | `6FST` | *(None)* |
+| [Analyser Settings](#analyser-settings) | `ANALYSER_SETTINGS` | `ANST` | *(None)* |
+| [Balance Settings](#balance-settings) | `BALANCE_SETTINGS` | `BLST` | *(None)* |
+| [By Hand Settings](#by-hand-settings) | `BY_HAND_SETTINGS` | `BHST` | `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}` |
+| [Cryostat Settings](#cryostat-settings) | `CRYOSTAT_SETTINGS` | `CRST` | *(None)* |
+| [DC Evaporator Settings](#dc-evaporator-settings) | `DC_EVAPORATOR_SETTINGS` | `DCST` | *(None)* |
+| [E-beam Heater Settings](#e-beam-heater-settings) | `E_BEAM_HEATER_SETTINGS` | `EBHS` | *(None)* |
+| [Electrochemical Cell Settings](#electrochemical-cell-settings) | `ELECTROCHEMICAL_CELL_SETTINGS` | `ELCS` | *(None)* |
+| [Glassware Settings](#glassware-settings) | `GLASSWARE_SETTINGS` | `GLST` | *(None)* |
+| [Hot Plate Settings](#hot-plate-settings) | `HOT_PLATE_SETTINGS` | `HTPS` | *(None)* |
+| [Ion Gauge Settings](#ion-gauge-settings) | `ION_GAUGE_SETTINGS` | `IONG` | *(None)* |
+| [Mechanical Transfer Press Settings](#mechanical-transfer-press-settings) | `MECHANICAL_TRANSFER_PRESS_SETTINGS` | `MTPS` | *(None)* |
+| [PBN Stage Settings](#pbn-stage-settings) | `PBN_STAGE_SETTINGS` | `PBST` | *(None)* |
+| [Pipette Settings](#pipette-settings) | `PIPETTE_SETTINGS` | `PPTS` | *(None)* |
+| [Plasma Cleaner Settings](#plasma-cleaner-settings) | `PLASMA_CLEANER_SETTINGS` | `PCST` | *(None)* |
+| [Spin Coater Settings](#spin-coater-settings) | `SPIN_COATER_SETTINGS` | `SPCS` | *(None)* |
+| [Sputter Gun Settings](#sputter-gun-settings) | `SPUTTER_GUN_SETTINGS` | `SGST` | *(None)* |
+| [Vacuum Oven Settings](#vacuum-oven-settings) | `VACUUM_OVEN_SETTINGS` | `VAOS` | *(None)* |
+| [Valve Settings](#valve-settings) | `VALVE_SETTINGS` | `VVST` | *(None)* |
+
+#### 1.6 Instrument Logbook (iLog) Entries
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [🔥 Bakeout](#-bakeout) | `BAKEOUT_LOGENTRY` | `BAKEOUTLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#e67800', 'icon': '🔥', 'type': 'BAKEOUT_LOGENTRY'}` |
+| [⚙️ Calibration & Optimization](#%EF%B8%8F-calibration--optimization) | `CALIBRATION_OPTIMIZATION_LOGENTRY` | `CALIBRATIONOPTIMIZATIONLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#40cd54', 'icon': '⚙️', 'type': 'CALIBRATION_OPTIMIZATION_LOGENTRY'}` |
+| [🧼 Cleaning](#-cleaning) | `CLEANING_LOGENTRY` | `CLEANINGLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#dcbe28', 'icon': '🧼', 'type': 'CLEANING_LOGENTRY'}` |
+| [💬 Comment](#-comment) | `COMMENT_LOGENTRY` | `COMMENTLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#aa78c8', 'icon': '💬', 'type': 'COMMENT_LOGENTRY'}` |
+| [❄️ Cryogen Filling](#%EF%B8%8F-cryogen-filling) | `CRYOGEN_FILLING_LOGENTRY` | `CRYOGENFILLINGLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#005aaa', 'icon': '❄️', 'type': 'CRYOGEN_FILLING_LOGENTRY'}` |
+| [💨 Degasing](#-degasing) | `DEGASING_LOGENTRY` | `DEGASINGLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#009678', 'icon': '💨', 'type': 'DEGASING_LOGENTRY'}` |
+| [⚠️ Errors & Problems](#%EF%B8%8F-errors--problems) | `ERRORS_AND_PROBLEMS_LOGENTRY` | `ERRORSANDPROBLEMSLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#b8131d', 'icon': '⚠️', 'type': 'ERRORS_AND_PROBLEMS_LOGENTRY'}` |
+| [🔧 Maintenance](#-maintenance) | `MAINTENANCE_LOGENTRY` | `MAINTENANCELOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#966e3c', 'icon': '🔧', 'type': 'MAINTENANCE_LOGENTRY'}` |
+| [📝 Other](#-other) | `OTHER_LOGENTRY` | `OTHERLOG` | `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#788c96', 'icon': '📝', 'type': 'OTHER_LOGENTRY'}` |
+
+#### 1.7 Simulations & Computational Entities
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [Aiida Node](#aiida-node) | `AIIDA_NODE` | `ADND` | *(None)* |
+| [Atomistic Model](#atomistic-model) | `ATOMISTIC_MODEL` | `ATMO` | *(None)* |
+| [Band Structure](#band-structure) | `BAND_STRUCTURE` | `BAND` | *(None)* |
+| [Code](#code) | `CODE` | `CODE` | *(None)* |
+| [Computer](#computer) | `COMPUTER` | `COMP` | *(None)* |
+| [Executable](#executable) | `EXECUTABLE` | `EXEC` | *(None)* |
+| [Geometry Optimisation](#geometry-optimisation) | `GEOMETRY_OPTIMISATION` | `GEOP` | *(None)* |
+| [Mean Field Hubbard](#mean-field-hubbard) | `MEAN_FIELD_HUBBARD` | `MFHU` | *(None)* |
+| [Minimum Energy Potential](#minimum-energy-potential) | `MINIMUM_ENERGY_POTENTIAL` | `MEPO` | *(None)* |
+| [PDOS](#pdos) | `PDOS` | `PDOS` | *(None)* |
+| [Potential Energy Calculation](#potential-energy-calculation) | `POTENTIAL_ENERGY_CALCULATION` | `PECA` | *(None)* |
+| [Software](#software) | `SOFTWARE` | `SOFT` | *(None)* |
+| [STM Simulation](#stm-simulation) | `STM_SIMULATION` | `STMS` | *(None)* |
+| [Unclassified Simulation](#unclassified-simulation) | `UNCLASSIFIED_SIMULATION` | `UNSM` | *(None)* |
+| [Vibrational Spectroscopy](#vibrational-spectroscopy) | `VIBRATIONAL_SPECTROSCOPY` | `VBSP` | *(None)* |
+
+#### 1.8 Administrative, Locations & Publications
+
+| Object Type | Code | Prefix | Metadata |
+| :--- | :--- | :--- | :--- |
+| [Author](#author) | `AUTHOR` | `AUTH` | *(None)* |
+| [Draft](#draft) | `DRAFT` | `DRFT` | *(None)* |
+| [Grant](#grant) | `GRANT` | `GRNT` | *(None)* |
+| [Group](#group) | `GROUP` | `GROP` | *(None)* |
+| [Organisation](#organisation) | `ORGANISATION` | `ORGA` | *(None)* |
+| [Person](#person) | `PERSON` | `PERS` | *(None)* |
+| [Publication](#publication) | `PUBLICATION` | `PUB` | *(None)* |
+| [Room](#room) | `ROOM` | `ROOM` | *(None)* |
+
+<details>
+<summary><strong>📚 Full Alphabetical List of Object Types (Click to Expand/Collapse)</strong></summary>
 
 * Currently in openBIS, there are the following object types:
     * [2D Layer Material](#2d-layer-material)
@@ -55,7 +221,6 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Dewar](#dewar)
     * [Dosing](#dosing)
     * [Draft](#draft)
-    * [Dropcast-Coating](#dropcast-coating)
     * [E-beam Heater](#e-beam-heater)
     * [E-beam Heater Settings](#e-beam-heater-settings)
     * [Electrochemical Cell](#electrochemical-cell)
@@ -134,1780 +299,2122 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Wafer Substrate](#wafer-substrate)
     * [Wire](#wire)
 
+</details>
+
+---
+
 ### 2D Layer Material
 * **Code:** `2D_LAYER_MATERIAL`
 * **Generated code prefix:** `TDLM`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'type': 'slab'}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Material Composition & Structure
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `top_layer_material` | Top Layer Material | Top layer material | VARCHAR | False | False | False | |
-| `layer_count` | Number of layers | Number of layers | VARCHAR | False | False | False |
-| `impurities` | Impurities | Impurities | VARCHAR | False | False | False |
-| `heterostructure_stack` | Heterostructure Stack | Heterostructure Stack | XML | False | False | False |  | `{'custom_widget': 'Spreadsheet'}`
-| `substrate` | Substrate | Substrate | VARCHAR | False | False | False |
-| `sample_plate` | Sample Plate | Sample Plate | VARCHAR | False | False | False |
+| `top_layer_material` | Top Layer Material | Top layer material | VARCHAR | False | False | False |  |  |
+| `layer_count` | Number of layers | Number of layers | VARCHAR | False | False | False |  |  |
+| `impurities` | Impurities | Impurities | VARCHAR | False | False | False |  |  |
+| `heterostructure_stack` | Heterostructure Stack | Heterostructure Stack | XML | False | False | False |  | `{'custom_widget': 'Spreadsheet'}` |
+| `substrate` | Substrate | Substrate | VARCHAR | False | False | False |  |  |
+| `sample_plate` | Sample Plate | Sample Plate | VARCHAR | False | False | False |  |  |
 
 #### Section: Synthesis & Origin
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `growth_method` | Growth/Fabrication Method | Growth/Fabrication method | VARCHAR | False | False | False | |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |
+| `growth_method` | Growth/Fabrication Method | Growth/Fabrication method | VARCHAR | False | False | False |  |  |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
 
 #### Section: Dimensions
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False | |
-| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
-| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |
-| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |  |
-| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |  |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |  |  |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |  |  |
+| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |  |  |
+| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |  |  |
+| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |  |  |
 
 #### Section: Storage & Location
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `special_storage_conditions` | Special Storage Conditions | Special storage conditions | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False | |
-| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `special_storage_conditions` | Special Storage Conditions | Special storage conditions | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 6-Fold Evaporator
 * **Code:** `6_FOLD_EVAPORATOR`
 * **Generated code prefix:** `6FEV`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `slot_number` | Slot number | Slot number | INTEGER | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}`
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `slot_number` | Slot number | Slot number | INTEGER | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `target_temperature_k` | Target Temperature [K] | Target temperature [K] | REAL | False | False | False | |
-| `p_value` | P value | P value | REAL | False | False | False |
-| `i_value` | I value | I value | REAL | False | False | False |
-| `ep_percentage` | EP (%) | EP (%) | REAL | False | False | False |  |
+| `target_temperature_k` | Target Temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+| `p_value` | P value | P value | REAL | False | False | False |  |  |
+| `i_value` | I value | I value | REAL | False | False | False |  |  |
+| `ep_percentage` | EP (%) | EP (%) | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 6-Fold Evaporator Settings
 * **Code:** `6_FOLD_EVAPORATOR_SETTINGS`
 * **Generated code prefix:** `6FST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | 6_FOLD_EVAPORATOR | 1 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `target_temperature_k` | Target Temperature [K] | Target temperature [K] | REAL | False | False | False | |
-| `p_value` | P value | P value | REAL | False | False | False |
-| `i_value` | I value | I value | REAL | False | False | False |
-| `ep_percentage` | EP (%) | EP (%) | REAL | False | False | False |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `target_temperature_k` | Target Temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+| `p_value` | P value | P value | REAL | False | False | False |  |  |
+| `i_value` | I value | I value | REAL | False | False | False |  |  |
+| `ep_percentage` | EP (%) | EP (%) | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Action
 * **Code:** `ACTION`
 * **Generated code prefix:** `ACTN`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '⚙️', 'type': 'action'}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Component & Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |
-| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |
+| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |  |  |
+| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### AFM Sensor
 * **Code:** `AFM_SENSOR`
 * **Generated code prefix:** `AFMS`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | WIRE | 0 | - |
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Technical specifications
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}`
-| `fabrication_method` | Fabrication method | Fabrication method | VARCHAR | False | False | False |
-| `fabrication_date` | Fabrication date | Fabrication date | DATE | False | False | False |
-| `resonance_frequency_hz` | Resonance frequency [Hz] | Resonance frequency [Hz] | REAL | False | False | False | |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `fabrication_method` | Fabrication method | Fabrication method | VARCHAR | False | False | False |  |  |
+| `fabrication_date` | Fabrication date | Fabrication date | DATE | False | False | False |  |  |
+| `resonance_frequency_hz` | Resonance frequency [Hz] | Resonance frequency [Hz] | REAL | False | False | False |  |  |
 
 #### Section: Storage & Location
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Aiida Node
 * **Code:** `AIIDA_NODE`
 * **Generated code prefix:** `ADND`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Analyser
 * **Code:** `ANALYSER`
 * **Generated code prefix:** `ANLS`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}`
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `density_g_cm3` | Density [g/cm3] | Density [g/cm3] | REAL | False | False | False | |
+| `density_g_cm3` | Density [g/cm3] | Density [g/cm3] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Analyser Settings
 * **Code:** `ANALYSER_SETTINGS`
 * **Generated code prefix:** `ANST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | ANALYSER | 1 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `density_g_cm3` | Density [g/cm3] | Density [g/cm3] | REAL | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `density_g_cm3` | Density [g/cm3] | Density [g/cm3] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Analysis
 * **Code:** `ANALYSIS`
 * **Generated code prefix:** `ANLY`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | MEASUREMENT_SESSION | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Annealing
 * **Code:** `ANNEALING`
 * **Generated code prefix:** `HEAT`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '🔥', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `pbn_stage` | PBN Stage | PBN Stage | OBJECT (PBN_STAGE) | False | False | False |
-| `pbn_stage_settings` | PBN Stage Settings | PBN Stage Settings | OBJECT (PBN_STAGE_SETTINGS) | False | False | False |
-| `dc_evaporator` | DC Evaporator | DC Evaporator | OBJECT (DC_EVAPORATOR) | False | False | False |
-| `dc_evaporator_settings` | DC Evaporator Settings | DC Evaporator Settings | OBJECT (DC_EVAPORATOR_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `pbn_stage` | PBN Stage | PBN Stage | OBJECT (PBN_STAGE) | False | False | False |  |  |
+| `pbn_stage_settings` | PBN Stage Settings | PBN Stage Settings | OBJECT (PBN_STAGE_SETTINGS) | False | False | False |  |  |
+| `dc_evaporator` | DC Evaporator | DC Evaporator | OBJECT (DC_EVAPORATOR) | False | False | False |  |  |
+| `dc_evaporator_settings` | DC Evaporator Settings | DC Evaporator Settings | OBJECT (DC_EVAPORATOR_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Atomistic Model
 * **Code:** `ATOMISTIC_MODEL`
 * **Generated code prefix:** `ATMO`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | MOLECULE | 0 | - |
 | CRYSTAL_CONCEPT | 0 | - |
 | GEOMETRY_OPTIMISATION | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `cell` | Cell | Cell | JSON | False | False | False |
-| `dimensionality` | Dimensionality | Dimensionality | INTEGER | False | False | False |
-| `periodic_boundary_conditions` | PBC | PBC | BOOLEAN | False | True | False |
-| `volume` | Volume | Volume | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `cell` | Cell | Cell | JSON | False | False | False |  |  |
+| `dimensionality` | Dimensionality | Dimensionality | INTEGER | False | False | False |  |  |
+| `periodic_boundary_conditions` | PBC | PBC | BOOLEAN | False | True | False |  |  |
+| `volume` | Volume | Volume | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Author
 * **Code:** `AUTHOR`
 * **Generated code prefix:** `AUTH`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `person` | Person | Person | OBJECT (PERSON) | False | False | False |
-| `affiliations` | Affiliation(s) | Affiliation(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}`
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `person` | Person | Person | OBJECT (PERSON) | False | False | False |  |  |
+| `affiliations` | Affiliation(s) | Affiliation(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 🔥 Bakeout
 * **Code:** `BAKEOUT_LOGENTRY`
 * **Generated code prefix:** `BAKEOUTLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#e67800', 'icon': '🔥', 'type': 'BAKEOUT_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Balance
 * **Code:** `BALANCE`
 * **Generated code prefix:** `BLNC`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `weight_g` | Weight [g] | Weight [g] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `weight_g` | Weight [g] | Weight [g] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Balance Settings
 * **Code:** `BALANCE_SETTINGS`
 * **Generated code prefix:** `BLST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
 
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | BALANCE | 1 | 1 |
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `weight_g` | Weight [g] | Weight [g] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `weight_g` | Weight [g] | Weight [g] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Band Structure
 * **Code:** `BAND_STRUCTURE`
 * **Generated code prefix:** `BAND`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `band_gap` | Band gap | Description | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `band_gap` | Band gap | Description | VARCHAR | False | False | False |  |  |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |  |  |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |  |  |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |  |  |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |  |  |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### By Hand
 * **Code:** `BY_HAND`
 * **Generated code prefix:** `HAND`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### By Hand Settings
 * **Code:** `BY_HAND_SETTINGS`
 * **Generated code prefix:** `BHST`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### ⚙️ Calibration & Optimization
 * **Code:** `CALIBRATION_OPTIMIZATION_LOGENTRY`
 * **Generated code prefix:** `CALIBRATIONOPTIMIZATIONLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#40cd54', 'icon': '⚙️', 'type': 'CALIBRATION_OPTIMIZATION_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Chamber
 * **Code:** `CHAMBER`
 * **Generated code prefix:** `CHBR`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 🧼 Cleaning
 * **Code:** `CLEANING_LOGENTRY`
 * **Generated code prefix:** `CLEANINGLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#dcbe28', 'icon': '🧼', 'type': 'CLEANING_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Coating
 * **Code:** `COATING`
 * **Generated code prefix:** `COAT`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '💧', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
-| `pipette` | Pipette | Pipette | OBJECT (PIPETTE) | False | False | False |
-| `pipette_settings` | Pipette settings | Pipette settings | OBJECT (PIPETTE_SETTINGS) | False | False | False |
-| `spin_coater` | Spin Coater | Spin Coater | OBJECT (SPIN_COATER) | False | False | False |
-| `spin_coater_settings` | Spin Coater Settings | Spin Coater Settings | OBJECT (SPIN_COATER_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |  |  |
+| `pipette` | Pipette | Pipette | OBJECT (PIPETTE) | False | False | False |  |  |
+| `pipette_settings` | Pipette settings | Pipette settings | OBJECT (PIPETTE_SETTINGS) | False | False | False |  |  |
+| `spin_coater` | Spin Coater | Spin Coater | OBJECT (SPIN_COATER) | False | False | False |  |  |
+| `spin_coater_settings` | Spin Coater Settings | Spin Coater Settings | OBJECT (SPIN_COATER_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Code
 * **Code:** `CODE`
 * **Generated code prefix:** `CODE`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `version` | Version | Version | VARCHAR | False | False | False |
-| `url` | URL | URL | HYPERLINK | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `version` | Version | Version | VARCHAR | False | False | False |  |  |
+| `url` | URL | URL | HYPERLINK | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 💬 Comment
 * **Code:** `COMMENT_LOGENTRY`
 * **Generated code prefix:** `COMMENTLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#aa78c8', 'icon': '💬', 'type': 'COMMENT_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Component
 * **Code:** `COMPONENT`
 * **Generated code prefix:** `COMP`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Computer
 * **Code:** `COMPUTER`
 * **Generated code prefix:** `COMP`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `url` | URL | URL | HYPERLINK | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `url` | URL | URL | HYPERLINK | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Cooldown
 * **Code:** `COOLDOWN`
 * **Generated code prefix:** `COOL`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '❄️', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `cryostat` | Cryostat | Cryostat | OBJECT (CRYOSTAT) | False | False | False |
-| `cryostat_settings` | Cryostat Settings | Cryostat Settings | OBJECT (CRYOSTAT_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `cryostat` | Cryostat | Cryostat | OBJECT (CRYOSTAT) | False | False | False |  |  |
+| `cryostat_settings` | Cryostat Settings | Cryostat Settings | OBJECT (CRYOSTAT_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### ❄️ Cryogen Filling
 * **Code:** `CRYOGEN_FILLING_LOGENTRY`
 * **Generated code prefix:** `CRYOGENFILLINGLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#005aaa', 'icon': '❄️', 'type': 'CRYOGEN_FILLING_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False |
-| `weight_before_kg` | Weight Before [kg] | Weight Before [kg] | REAL | False | False | False |
-| `weight_after_kg` | Weight After [kg] | Weight After [kg] | REAL | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
-| `dewar` | Dewar | Dewar | VARCHAR | False | False | False |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False |  |  |
+| `weight_before_kg` | Weight Before [kg] | Weight Before [kg] | REAL | False | False | False |  |  |
+| `weight_after_kg` | Weight After [kg] | Weight After [kg] | REAL | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `dewar` | Dewar | Dewar | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Cryostat
 * **Code:** `CRYOSTAT`
 * **Generated code prefix:** `CRYO`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False | |
-| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False | |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False |  |  |
+| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Cryostat Settings
 * **Code:** `CRYOSTAT_SETTINGS`
 * **Generated code prefix:** `CRST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | CRYOSTAT | 1 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False | |
-| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False |  |  |
+| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Crystal
 * **Code:** `CRYSTAL`
 * **Generated code prefix:** `CRRE`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'type': 'slab'}`
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | CRYSTAL_CONCEPT | 1 | 1 |
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `barcode` | Custom Barcode | Custom Barcode | VARCHAR | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `face` | Face | Face | VARCHAR | False | False | False |
-| `material` | Material | Material | VARCHAR | False | False | False |
-| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
-| `multing_temperature_k` | Multing temperature [K] | Multing temperature [K] | REAL | False | False | False |
-| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
-| `length_mm` | Length [mm] | Length [mm] | REAL | False | False | False |
-| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |
-| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |
-| `screw_material` | Screw material | Screw material | VARCHAR | False | False | False |
-| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
-| `reference_number` | Reference number | Reference number | VARCHAR | False | False | False |
-| `current_location` | Current location | Current location (Temporary. It should be replaced by Location in the meantime.) | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
-| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
-| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
-| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `barcode` | Custom Barcode | Custom Barcode | VARCHAR | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `face` | Face | Face | VARCHAR | False | False | False |  |  |
+| `material` | Material | Material | VARCHAR | False | False | False |  |  |
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |  |  |
+| `multing_temperature_k` | Multing temperature [K] | Multing temperature [K] | REAL | False | False | False |  |  |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |  |  |
+| `length_mm` | Length [mm] | Length [mm] | REAL | False | False | False |  |  |
+| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |  |  |
+| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |  |  |
+| `screw_material` | Screw material | Screw material | VARCHAR | False | False | False |  |  |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |  |  |
+| `reference_number` | Reference number | Reference number | VARCHAR | False | False | False |  |  |
+| `current_location` | Current location | Current location (Temporary. It should be replaced by Location in the meantime.) | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Crystal Concept
 * **Code:** `CRYSTAL_CONCEPT`
 * **Generated code prefix:** `CRCO`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'type': 'slab_concept'}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `face` | Face | Face | VARCHAR | False | False | False |
-| `material` | Material | Material | VARCHAR | False | False | False |
-| `lattice_parameters_angstrom` | Lattice parameters [Angstrom] | Lattice parameters [Angstrom] | VARCHAR | False | True | False |
-| `crystal_space_group` | Crystal space group | Crystal space group | INTEGER | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `face` | Face | Face | VARCHAR | False | False | False |  |  |
+| `material` | Material | Material | VARCHAR | False | False | False |  |  |
+| `lattice_parameters_angstrom` | Lattice parameters [Angstrom] | Lattice parameters [Angstrom] | VARCHAR | False | True | False |  |  |
+| `crystal_space_group` | Crystal space group | Crystal space group | INTEGER | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### DC Evaporator
 * **Code:** `DC_EVAPORATOR`
 * **Generated code prefix:** `DCEV`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `current_a` | Current [A] | Current [A] | REAL | False | False | False | |
-| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False | |
+| `current_a` | Current [A] | Current [A] | REAL | False | False | False |  |  |
+| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### DC Evaporator Settings
 * **Code:** `DC_EVAPORATOR_SETTINGS`
 * **Generated code prefix:** `DCST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | DC_EVAPORATOR | 1 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `current_a` | Current [A] | Current [A] | REAL | False | False | False | |
-| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `current_a` | Current [A] | Current [A] | REAL | False | False | False |  |  |
+| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 💨 Degasing
 * **Code:** `DEGASING_LOGENTRY`
 * **Generated code prefix:** `DEGASINGLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#009678', 'icon': '💨', 'type': 'DEGASING_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `molecule` | Molecule | Molecule | OBJECT (MOLECULE) | False | False | False |
-| `temperature_celsius` | Temperature [Celsius] | Temperature [Celsius] | REAL | False | False | False |
-| `duration` | Duration | Duration | REAL | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `molecule` | Molecule | Molecule | OBJECT (MOLECULE) | False | False | False |  |  |
+| `temperature_celsius` | Temperature [Celsius] | Temperature [Celsius] | REAL | False | False | False |  |  |
+| `duration` | Duration | Duration | REAL | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Deposition
 * **Code:** `DEPOSITION`
 * **Generated code prefix:** `DEPO`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '🧱', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `substance` | Substance | Substance | OBJECT (SUBSTANCE) | False | False | False |
-| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
-| `by_hand_settings` | By Hand Settings | By Hand | OBJECT (BY_HAND_SETTINGS) | False | False | False |
-| `6_fold_evaporator` | 6-Fold Evaporator | 6-Fold Evaporator | OBJECT (6_FOLD_EVAPORATOR) | False | False | False |
-| `6_fold_evaporator_settings` | 6-Fold Evaporator Settings | 6-Fold Evaporator Settings | OBJECT (6_FOLD_EVAPORATOR_SETTINGS) | False | False |False |
-| `dc_evaporator` | DC Evaporator | DC Evaporator | OBJECT (DC_EVAPORATOR) | False | False | False |
-| `dc_evaporator_settings` | DC Evaporator Settings | DC Evaporator Settings | OBJECT (DC_EVAPORATOR_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `substance` | Substance | Substance | OBJECT (SUBSTANCE) | False | False | False |  |  |
+| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |  |  |
+| `by_hand_settings` | By Hand Settings | By Hand | OBJECT (BY_HAND_SETTINGS) | False | False | False |  |  |
+| `6_fold_evaporator` | 6-Fold Evaporator | 6-Fold Evaporator | OBJECT (6_FOLD_EVAPORATOR) | False | False | False |  |  |
+| `6_fold_evaporator_settings` | 6-Fold Evaporator Settings | 6-Fold Evaporator Settings | OBJECT (6_FOLD_EVAPORATOR_SETTINGS) | False | False | False |  |  |
+| `dc_evaporator` | DC Evaporator | DC Evaporator | OBJECT (DC_EVAPORATOR) | False | False | False |  |  |
+| `dc_evaporator_settings` | DC Evaporator Settings | DC Evaporator Settings | OBJECT (DC_EVAPORATOR_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Device Substrate
 * **Code:** `DEVICE_SUBSTRATE`
 * **Generated code prefix:** `DVSB`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
-| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}`
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
-| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Dewar
 * **Code:** `DEWAR`
 * **Generated code prefix:** `DWAR`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False |
-| `current_weight_kg` | Current weight [kg] | Current weight [kg] | REAL | False | False | False |
-| `tara_weight_kg` | Tara weight [kg] | Tara weight [kg] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `cryogen` | Cryogen | Cryogen | VARCHAR | False | False | False |  |  |
+| `current_weight_kg` | Current weight [kg] | Current weight [kg] | REAL | False | False | False |  |  |
+| `tara_weight_kg` | Tara weight [kg] | Tara weight [kg] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Dosing
 * **Code:** `DOSING`
 * **Generated code prefix:** `GASD`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '💨', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `gas_bottle` | Dosing gas | Dosing gas | OBJECT (GAS_BOTTLE) | False | False | False |
-| `valve` | Valve | Valve | OBJECT (VALVE) | False | False | False |
-| `valve_settings` | Valve settings | Valve settings | OBJECT (VALVE_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `gas_bottle` | Dosing gas | Dosing gas | OBJECT (GAS_BOTTLE) | False | False | False |  |  |
+| `valve` | Valve | Valve | OBJECT (VALVE) | False | False | False |  |  |
+| `valve_settings` | Valve settings | Valve settings | OBJECT (VALVE_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Draft
 * **Code:** `DRAFT`
 * **Generated code prefix:** `DRFT`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | RESULT | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `draft_type` | Draft type | Draft type | CONTROLLEDVOCABULARY (DRAFTTYPEENUM) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `draft_type` | Draft type | Draft type | CONTROLLEDVOCABULARY (DRAFTTYPEENUM) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### E-beam Heater
 * **Code:** `E_BEAM_HEATER`
 * **Generated code prefix:** `EBHT`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General info
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `current_a` | Current [A] | Current [A] | REAL | False | False | False |
-| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |
-| `emission_current_a` | Emission current [A] | Emission current [A] | REAL | False | False | False |
-| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
+| `current_a` | Current [A] | Current [A] | REAL | False | False | False |  |  |
+| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |  |  |
+| `emission_current_a` | Emission current [A] | Emission current [A] | REAL | False | False | False |  |  |
+| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### E-beam Heater Settings
 * **Code:** `E_BEAM_HEATER_SETTINGS`
 * **Generated code prefix:** `EBHS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General info
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `current_a` | Current [A] | Current [A] | REAL | False | False | False |
-| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |
-| `emission_current_a` | Emission current [A] | Emission current [A] | REAL | False | False | False |
-| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `current_a` | Current [A] | Current [A] | REAL | False | False | False |  |  |
+| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |  |  |
+| `emission_current_a` | Emission current [A] | Emission current [A] | REAL | False | False | False |  |  |
+| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Electrochemical Cell
 * **Code:** `ELECTROCHEMICAL_CELL`
 * **Generated code prefix:** `ELCL`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General info
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `current_a` | Current [A] | Current [A] | REAL | False | False | False |
-| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |
-| `anode` | Anode | Anode | VARCHAR | False | False | False |
-| `cathode` | Cathode | Cathode | VARCHAR | False | False | False |
+| `current_a` | Current [A] | Current [A] | REAL | False | False | False |  |  |
+| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |  |  |
+| `anode` | Anode | Anode | VARCHAR | False | False | False |  |  |
+| `cathode` | Cathode | Cathode | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Electrochemical Cell Settings
 * **Code:** `ELECTROCHEMICAL_CELL_SETTINGS`
 * **Generated code prefix:** `ELCS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General info
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `current_a` | Current [A] | Current [A] | REAL | False | False | False |
-| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |
-| `anode` | Anode | Anode | VARCHAR | False | False | False |
-| `cathode` | Cathode | Cathode | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `current_a` | Current [A] | Current [A] | REAL | False | False | False |  |  |
+| `voltage_v` | Voltage [V] | Voltage [V] | REAL | False | False | False |  |  |
+| `anode` | Anode | Anode | VARCHAR | False | False | False |  |  |
+| `cathode` | Cathode | Cathode | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Electronics
 * **Code:** `ELECTRONICS`
 * **Generated code prefix:** `ELTR`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### ⚠️ Errors & Problems
 * **Code:** `ERRORS_AND_PROBLEMS_LOGENTRY`
 * **Generated code prefix:** `ERRORSANDPROBLEMSLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#b8131d', 'icon': '⚠️', 'type': 'ERRORS_AND_PROBLEMS_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Executable
 * **Code:** `EXECUTABLE`
 * **Generated code prefix:** `EXEC`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `code` | Code | Code | OBJECT (CODE) | False | False | False |
-| `computer` | Computer | Computer | OBJECT (COMPUTER) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `code` | Code | Code | OBJECT (CODE) | False | False | False |  |  |
+| `computer` | Computer | Computer | OBJECT (COMPUTER) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Field Emission
 * **Code:** `FIELD_EMISSION`
 * **Generated code prefix:** `FIEM`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '⚡', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |
-| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |  |  |
+| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Filament
 * **Code:** `FILAMENT`
 * **Generated code prefix:** `FILA`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Fishing
 * **Code:** `FISHING`
 * **Generated code prefix:** `FISH`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '🎣', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `target_substrate` | Target Substrate | Target Substrate | OBJECT (SAMPLE) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `target_substrate` | Target Substrate | Target Substrate | OBJECT (SAMPLE) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Gas Bottle
 * **Code:** `GAS_BOTTLE`
 * **Generated code prefix:** `GASB`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `chemical_formula` | Chemical Formula | Chemical Formula | VARCHAR | False | False | False |
-| `amount_mg` | Amount [mg] | Amount [mg] | VARCHAR | False | False | False |
-| `amount_ml` | Amount [ml] | Amount [ml] | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
-| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `chemical_formula` | Chemical Formula | Chemical Formula | VARCHAR | False | False | False |  |  |
+| `amount_mg` | Amount [mg] | Amount [mg] | VARCHAR | False | False | False |  |  |
+| `amount_ml` | Amount [ml] | Amount [ml] | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Geometry Optimisation
 * **Code:** `GEOMETRY_OPTIMISATION`
 * **Generated code prefix:** `GEOP`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `cell_opt_constraints` | Cell optimisation constraints | Cell optimisation constraints | VARCHAR | False | False | False |
-| `cell_optimised` | Cell optimised | Cell optimised | BOOLEAN | False | False | False |
-| `driver_code` | Driver code | Driver code | VARCHAR | False | False | False |
-| `constrained` | Constrained | Constrained | BOOLEAN | False | False | False |
-| `force_convergence_threshold` | Force convergence threshold | Force convergence threshold | JSON | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `cell_opt_constraints` | Cell optimisation constraints | Cell optimisation constraints | VARCHAR | False | False | False |  |  |
+| `cell_optimised` | Cell optimised | Cell optimised | BOOLEAN | False | False | False |  |  |
+| `driver_code` | Driver code | Driver code | VARCHAR | False | False | False |  |  |
+| `constrained` | Constrained | Constrained | BOOLEAN | False | False | False |  |  |
+| `force_convergence_threshold` | Force convergence threshold | Force convergence threshold | JSON | False | False | False |  |  |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |  |  |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |  |  |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |  |  |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |  |  |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Glassware
 * **Code:** `GLASSWARE`
 * **Generated code prefix:** `GLAS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Glassware Settings
 * **Code:** `GLASSWARE_SETTINGS`
 * **Generated code prefix:** `GLST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Grant
 * **Code:** `GRANT`
 * **Generated code prefix:** `GRNT`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `acronym` | Acronym | Acronym | VARCHAR | False | False | False |
-| `funding_scheme` | Funding scheme | Funding scheme | VARCHAR | False | False | False |
-| `budget_value` | Budget (value) | Budget (value) | REAL | False | False | False |
-| `budget_currency` | Budget (currency) | Budget (currency) | CONTROLLEDVOCABULARY (BUDGET_CURRENCY_ENUM) | False | False | False |
-| `project_id` | Project ID | Project ID | VARCHAR | False | False | False |
-| `acknowledgement_sentence` | Acknowledgement sentence | Acknowledgement sentence | MULTILINE_VARCHAR | False | False | False |
-| `start_date` | Start date | Start date | DATE | False | False | False |
-| `end_date` | End date | End date | DATE | False | False | False |
-| `funder_name` | Funder name | Funder name | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `acronym` | Acronym | Acronym | VARCHAR | False | False | False |  |  |
+| `funding_scheme` | Funding scheme | Funding scheme | VARCHAR | False | False | False |  |  |
+| `budget_value` | Budget (value) | Budget (value) | REAL | False | False | False |  |  |
+| `budget_currency` | Budget (currency) | Budget (currency) | CONTROLLEDVOCABULARY (BUDGET_CURRENCY_ENUM) | False | False | False |  |  |
+| `project_id` | Project ID | Project ID | VARCHAR | False | False | False |  |  |
+| `acknowledgement_sentence` | Acknowledgement sentence | Acknowledgement sentence | MULTILINE_VARCHAR | False | False | False |  |  |
+| `start_date` | Start date | Start date | DATE | False | False | False |  |  |
+| `end_date` | End date | End date | DATE | False | False | False |  |  |
+| `funder_name` | Funder name | Funder name | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Group
 * **Code:** `GROUP`
 * **Generated code prefix:** `GROP`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `organisation` | Organisation | Organisation | OBJECT (ORGANISATION) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `organisation` | Organisation | Organisation | OBJECT (ORGANISATION) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Hot Plate
 * **Code:** `HOT_PLATE`
 * **Generated code prefix:** `HOTP`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
-| `speed_level` | Speed level | Speed level | INTEGER | False | False | False |
+| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+| `speed_level` | Speed level | Speed level | INTEGER | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Hot Plate Settings
 * **Code:** `HOT_PLATE_SETTINGS`
 * **Generated code prefix:** `HTPS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
-| `speed_level` | Speed level | Speed level | INTEGER | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+| `speed_level` | Speed level | Speed level | INTEGER | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Instrument
 * **Code:** `INSTRUMENT`
 * **Generated code prefix:** `ISTR`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'INSTRUMENT_COLLECTION', 'ilog': true, 'type': 'instrument'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |  |  |
 
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Instrument STM
 * **Code:** `INSTRUMENT.STM`
 * **Generated code prefix:** `ISTM`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'INSTRUMENT_COLLECTION', 'ilog': true, 'type': 'instrument'}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |  |  |
 
 #### Section: Components
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `pumps` | Pump(s) | Pump(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'TURBO_PUMP, ION_PUMP, SCROLL_PUMP'}` |
-| `gauges` | Gauge(s) | Gauge(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'ION_GAUGE, THYRACONT'}` |
-| `vacuum_chambers` | Vacuum chamber(s) | Vacuum chamber(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'CHAMBER'}` |
-| `ports_valves` | Port(s)/Valve(s) | Port(s)/Valve(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'VALVE'}` |
-| `preparation_tools` | Preparation tool(s) | Preparation tool(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': '6_FOLD_EVAPORATOR, DC_EVAPORATOR, CRYOSTAT, COMPONENT, PBN_STAGE, VALVE, SPUTTER_GUN'}` |
-| `analysers` | Analyser(s) | Analyser(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'ANALYSER'}`
-| `mechanical_components` | Mechanical component(s) | Mechanical component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'COMPONENT'}` |
-| `stm_components` | STM component(s) | STM component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'STM_TIP, COMPONENT, ELECTRONICS'}` |
-| `control_data_acquisition` | Control and data acquisition component(s) | Control and data acquisition component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'SPM_CONTROLLER'}` |
-| `temperature_environment_control` | Temperature and environment control component(s) | Temperature and environment control component(s) | OBJECT (All) | False | False | False | | `{'object_subtypes': 'CRYOSTAT, COMPONENT'}` |
-| `auxiliary_components` | Auxiliary component(s) | Auxiliary component(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'COMPONENT, ANALYSER, ELECTRONICS'}` |
+| `pumps` | Pump(s) | Pump(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'TURBO_PUMP, ION_PUMP, SCROLL_PUMP'}` |
+| `gauges` | Gauge(s) | Gauge(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'ION_GAUGE, THYRACONT'}` |
+| `vacuum_chambers` | Vacuum chamber(s) | Vacuum chamber(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'CHAMBER'}` |
+| `ports_valves` | Port(s)/Valve(s) | Port(s)/Valve(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'VALVE'}` |
+| `preparation_tools` | Preparation tool(s) | Preparation tool(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': '6_FOLD_EVAPORATOR, DC_EVAPORATOR, CRYOSTAT, COMPONENT, PBN_STAGE, VALVE, SPUTTER_GUN'}` |
+| `analysers` | Analyser(s) | Analyser(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'ANALYSER'}` |
+| `mechanical_components` | Mechanical component(s) | Mechanical component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'COMPONENT'}` |
+| `stm_components` | STM component(s) | STM component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'STM_TIP, COMPONENT, ELECTRONICS'}` |
+| `control_data_acquisition` | Control and data acquisition component(s) | Control and data acquisition component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'SPM_CONTROLLER'}` |
+| `temperature_environment_control` | Temperature and environment control component(s) | Temperature and environment control component(s) | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'CRYOSTAT, COMPONENT'}` |
+| `auxiliary_components` | Auxiliary component(s) | Auxiliary component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'COMPONENT, ANALYSER, ELECTRONICS'}` |
 
 #### Section: Materials
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `substances` | Substance(s) | Substance(s) | OBJECT (SUBSTANCE) | False | True | False |
-| `crystals` | Crystal(s) | Crystal(s) | OBJECT (CRYSTAL) | False | True | False |
-| `wafer_samples` | Wafer sample(s) | Wafer sample(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': '2D_LAYER_MATERIAL, WAFER_SUBSTRATE'}` |
+| `substances` | Substance(s) | Substance(s) | OBJECT (SUBSTANCE) | False | True | False |  |  |
+| `crystals` | Crystal(s) | Crystal(s) | OBJECT (CRYSTAL) | False | True | False |  |  |
+| `wafer_samples` | Wafer sample(s) | Wafer sample(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': '2D_LAYER_MATERIAL, WAFER_SUBSTRATE'}` |
 
 #### Section: Accessories
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `tip_sensors` | Tip sensor(s) | Tip sensor(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'STM_TIP, AFM_SENSOR'}` |
-| `consumables` | Consumable(s) | Consumable(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'GAS_BOTTLE'}` |
+| `tip_sensors` | Tip sensor(s) | Tip sensor(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'STM_TIP, AFM_SENSOR'}` |
+| `consumables` | Consumable(s) | Consumable(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'GAS_BOTTLE'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Ion Gauge
 * **Code:** `ION_GAUGE`
 * **Generated code prefix:** `IONG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `filament_current_a` | Filament current [A] | Filament current [A] | REAL | False | False | False | |
-| `filament` | Filament | Filament | VARCHAR | False | False | False | |
+| `filament_current_a` | Filament current [A] | Filament current [A] | REAL | False | False | False |  |  |
+| `filament` | Filament | Filament | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Ion Gauge Settings
 * **Code:** `ION_GAUGE_SETTINGS`
 * **Generated code prefix:** `IONG`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | ION_GAUGE | 1 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `filament_current_a` | Filament current [A] | Filament current [A] | REAL | False | False | False | |
-| `filament` | Filament | Filament | VARCHAR | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `filament_current_a` | Filament current [A] | Filament current [A] | REAL | False | False | False |  |  |
+| `filament` | Filament | Filament | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Ion Pump
 * **Code:** `ION_PUMP`
 * **Generated code prefix:** `IONP`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Light Irradiation
 * **Code:** `LIGHT_IRRADIATION`
 * **Generated code prefix:** `LITE`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '💡', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |
-| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `components_names` | Component(s) name(s) | Component(s) name(s) | VARCHAR | False | True | False |  |  |
+| `components_settings_values` | Component(s) settings values | Component(s) settings values | VARCHAR | False | True | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 🔧 Maintenance
 * **Code:** `MAINTENANCE_LOGENTRY`
 * **Generated code prefix:** `MAINTENANCELOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#966e3c', 'icon': '🔧', 'type': 'MAINTENANCE_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Mean Field Hubbard
 * **Code:** `MEAN_FIELD_HUBBARD`
 * **Generated code prefix:** `MFHU`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `charge` | Charge | Charge | INTEGER | False | False | False |
-| `convergence_coefficient` | Convergence Coefficient | Convergence Coefficient | REAL | False | False | False |
-| `density_tolerance` | Density Tolerance | Density Tolerance | REAL | False | False | False |
-| `down_densities` | Down densities | Down densities | REAL | False | True | False |
-| `down_electrons` | Down electrons | Down electrons | REAL | False | True | False |
-| `number_k_points` | Number of k points | Number of k points | INTEGER | False | False | False |
-| `on_site_hubbard_repulsion_value` | On-site Hubbard Repulsion U Value | On-site Hubbard Repulsion U Value | JSON | False | False | False |
-| `up_densities` | Up densities | Up densities | REAL | False | True | False |
-| `up_electrons` | Up electrons | Up electrons | REAL | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `charge` | Charge | Charge | INTEGER | False | False | False |  |  |
+| `convergence_coefficient` | Convergence Coefficient | Convergence Coefficient | REAL | False | False | False |  |  |
+| `density_tolerance` | Density Tolerance | Density Tolerance | REAL | False | False | False |  |  |
+| `down_densities` | Down densities | Down densities | REAL | False | True | False |  |  |
+| `down_electrons` | Down electrons | Down electrons | REAL | False | True | False |  |  |
+| `number_k_points` | Number of k points | Number of k points | INTEGER | False | False | False |  |  |
+| `on_site_hubbard_repulsion_value` | On-site Hubbard Repulsion U Value | On-site Hubbard Repulsion U Value | JSON | False | False | False |  |  |
+| `up_densities` | Up densities | Up densities | REAL | False | True | False |  |  |
+| `up_electrons` | Up electrons | Up electrons | REAL | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Measurement Session
 * **Code:** `MEASUREMENT_SESSION`
 * **Generated code prefix:** `MSSE`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | SAMPLE | 1 | - |
 | INSTRUMENT | 0 | - |
 | INSTRUMENT.STM | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `default_object_view` | Default Object View | Default Object View | CONTROLLEDVOCABULARY (DEFAULT_OBJECT_VIEWS) | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `measurement_folder_path` | Measurement Folder Path | Measurement Folder Path | VARCHAR | False | False | False |
+| `default_object_view` | Default Object View | Default Object View | CONTROLLEDVOCABULARY (DEFAULT_OBJECT_VIEWS) | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `measurement_folder_path` | Measurement Folder Path | Measurement Folder Path | VARCHAR | False | False | False |  |  |
 
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Mechanical Pressing
 * **Code:** `MECHANICAL_PRESSING`
 * **Generated code prefix:** `MEPR`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '🗜', 'type': 'action', 'requires_component': False, 'samples_generated': 2}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `stamp` | Stamp | Stamp | OBJECT (SAMPLE) | False | False | False |
-| `by_hand` | By hand | By hand | OBJECT (BY_HAND) | False | False | False |
-| `by_hand_settings` | By hand settings | By hand settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
-| `mechanical_transfer_press` | Mechanical transfer press | Mechanical transfer press | OBJECT (MECHANICAL_TRANSFER_PRESS) | False | False | False |
-| `mechanical_transfer_press_settings` | Mechanical transfer press settings | Mechanical transfer press settings | OBJECT (MECHANICAL_TRANSFER_PRESS_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `stamp` | Stamp | Stamp | OBJECT (SAMPLE) | False | False | False |  |  |
+| `by_hand` | By hand | By hand | OBJECT (BY_HAND) | False | False | False |  |  |
+| `by_hand_settings` | By hand settings | By hand settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |  |  |
+| `mechanical_transfer_press` | Mechanical transfer press | Mechanical transfer press | OBJECT (MECHANICAL_TRANSFER_PRESS) | False | False | False |  |  |
+| `mechanical_transfer_press_settings` | Mechanical transfer press settings | Mechanical transfer press settings | OBJECT (MECHANICAL_TRANSFER_PRESS_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Mechanical Transfer Press
 * **Code:** `MECHANICAL_TRANSFER_PRESS`
 * **Generated code prefix:** `METP`
-* **Semantic Annotation:**
-* **Metadata:** 
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Mechanical Transfer Press Settings
 * **Code:** `MECHANICAL_TRANSFER_PRESS_SETTINGS`
 * **Generated code prefix:** `MTPS`
-* **Semantic Annotation:**
-* **Metadata:** 
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Minimum Energy Potential
 * **Code:** `MINIMUM_ENERGY_POTENTIAL`
 * **Generated code prefix:** `MEPO`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `energies` | Energies | Energies | JSON | False | False | False |
-| `energy_barrier` | Energy Barrier | Energy Barrier | JSON | False | False | False |
-| `geometry_constraints` | Geometry Constraints | Geometry Constraints | REAL | False | True | False |
-| `geometry_constraints_increments` | Geometry Constraints Increments | Geometry Constraints Increments | REAL | False | True | False |
-| `method_type` | Method Type | Method Type | CONTROLLEDVOCABULARY (PATHFINDINGMETHODENUM) | False | False | False |
-| `number_geometries` | Number of geometries | Number of geometries | INTEGER | False | False | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `energies` | Energies | Energies | JSON | False | False | False |  |  |
+| `energy_barrier` | Energy Barrier | Energy Barrier | JSON | False | False | False |  |  |
+| `geometry_constraints` | Geometry Constraints | Geometry Constraints | REAL | False | True | False |  |  |
+| `geometry_constraints_increments` | Geometry Constraints Increments | Geometry Constraints Increments | REAL | False | True | False |  |  |
+| `method_type` | Method Type | Method Type | CONTROLLEDVOCABULARY (PATHFINDINGMETHODENUM) | False | False | False |  |  |
+| `number_geometries` | Number of geometries | Number of geometries | INTEGER | False | False | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Molecule
 * **Code:** `MOLECULE`
 * **Generated code prefix:** `MOLE`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'type': 'material_concept'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `chemdraw_name` | ChemDraw Name | ChemDraw Name | VARCHAR | False | False | False |
-| `empa_number` | Empa Number | Empa Number | INTEGER | False | False | False |
-| `smiles` | SMILES | SMILES | VARCHAR | False | False | False |
-| `sum_formula` | Sum Formula | Sum Formula | VARCHAR | False | False | False |
-| `cas_number` | CAS Number | CAS Number | VARCHAR | False | False | False |
-| `iupac_name` | IUPAC Name | IUPAC Name | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `chemdraw_name` | ChemDraw Name | ChemDraw Name | VARCHAR | False | False | False |  |  |
+| `empa_number` | Empa Number | Empa Number | INTEGER | False | False | False |  |  |
+| `smiles` | SMILES | SMILES | VARCHAR | False | False | False |  |  |
+| `sum_formula` | Sum Formula | Sum Formula | VARCHAR | False | False | False |  |  |
+| `cas_number` | CAS Number | CAS Number | VARCHAR | False | False | False |  |  |
+| `iupac_name` | IUPAC Name | IUPAC Name | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Organisation
 * **Code:** `ORGANISATION`
 * **Generated code prefix:** `ORGA`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `address` | Address | Address | VARCHAR | False | False | False |
-| `email` | Email | Email | VARCHAR | False | False | False |
-| `work_phone` | Work Phone | Work Phone | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `address` | Address | Address | VARCHAR | False | False | False |  |  |
+| `email` | Email | Email | VARCHAR | False | False | False |  |  |
+| `work_phone` | Work Phone | Work Phone | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### 📝 Other
 * **Code:** `OTHER_LOGENTRY`
 * **Generated code prefix:** `OTHERLOG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'LOGBOOK_COLLECTION', 'color': '#788c96', 'icon': '📝', 'type': 'OTHER_LOGENTRY'}`
 
 #### Section: GeneralInfo
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |
-| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False | | `{'custom_widget': 'Word Processor'}`
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `valid_from` | Valid From | Valid From | VARCHAR | False | False | False |  |  |
+| `ilog_logbook` | ILOG_LOGBOOK | This is the iLog logbook entry identifier. | BOOLEAN | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `document` | Document | Document | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### PBN Stage
 * **Code:** `PBN_STAGE`
 * **Generated code prefix:** `PBNS`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False | |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### PBN Stage Settings
 * **Code:** `PBN_STAGE_SETTINGS`
 * **Generated code prefix:** `PBST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | PBN_STAGE | 1 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `target_temperature_k` | Target Temperature [K] | Target Temperature [K] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### PDOS
 * **Code:** `PDOS`
 * **Generated code prefix:** `PDOS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |  |  |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |  |  |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |  |  |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |  |  |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Person
 * **Code:** `PERSON`
 * **Generated code prefix:** `PERS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `username` | Username | Username | VARCHAR | False | False | False |
-| `email` | Email | Email | VARCHAR | False | False | False |
-| `work_phone` | Work Phone | Work Phone | VARCHAR | False | False | False |
-| `work_status` | Work Status | Work Status | CONTROLLEDVOCABULARY (WORKSTATUSENUM) | False | False | False |
-| `office` | Office | Office | OBJECT (ROOM) | False | False | False |
-| `job_title` | Job Title | Job Title | VARCHAR | False | False | False |
-| `affiliations` | Affiliation(s) | Affiliation(s) | OBJECT (All) | False | True | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `nanotech_surfaces_subgroup` | nanotech@surfaces subgroup | nanotech@surfaces subgroup | CONTROLLEDVOCABULARY (NANOTECHSURFACESSUBGROUPENUM) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `username` | Username | Username | VARCHAR | False | False | False |  |  |
+| `email` | Email | Email | VARCHAR | False | False | False |  |  |
+| `work_phone` | Work Phone | Work Phone | VARCHAR | False | False | False |  |  |
+| `work_status` | Work Status | Work Status | CONTROLLEDVOCABULARY (WORKSTATUSENUM) | False | False | False |  |  |
+| `office` | Office | Office | OBJECT (ROOM) | False | False | False |  |  |
+| `job_title` | Job Title | Job Title | VARCHAR | False | False | False |  |  |
+| `affiliations` | Affiliation(s) | Affiliation(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `nanotech_surfaces_subgroup` | nanotech@surfaces subgroup | nanotech@surfaces subgroup | CONTROLLEDVOCABULARY (NANOTECHSURFACESSUBGROUPENUM) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Pipette
 * **Code:** `PIPETTE`
 * **Generated code prefix:** `PIPT`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
+| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Pipette Settings
 * **Code:** `PIPETTE_SETTINGS`
 * **Generated code prefix:** `PPTS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `volume_ml` | Volume [ml] | Volume [ml] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Plasma Cleaner
 * **Code:** `PLASMA_CLEANER`
 * **Generated code prefix:** `PLCL`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `gas` | Gas | Gas | VARCHAR | False | False | False |
-| `power_w` | Power [W] | Power [W] | REAL | False | False | False |
+| `gas` | Gas | Gas | VARCHAR | False | False | False |  |  |
+| `power_w` | Power [W] | Power [W] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Plasma Cleaner Settings
 * **Code:** `PLASMA_CLEANER_SETTINGS`
 * **Generated code prefix:** `PCST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `gas` | Gas | Gas | VARCHAR | False | False | False |
-| `power_w` | Power [W] | Power [W] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `gas` | Gas | Gas | VARCHAR | False | False | False |  |  |
+| `power_w` | Power [W] | Power [W] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Potential Energy Calculation
 * **Code:** `POTENTIAL_ENERGY_CALCULATION`
 * **Generated code prefix:** `PECA`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |  |  |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |  |  |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |  |  |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |  |  |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Preparation
 * **Code:** `PREPARATION`
 * **Generated code prefix:** `PREP`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Process
 * **Code:** `PROCESS`
 * **Generated code prefix:** `PROC`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `short_name` | Short name | Short name | VARCHAR | False | False | False |
-| `process_steps` | Process steps | Process steps | OBJECT (PROCESS_STEP) | False | True | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `short_name` | Short name | Short name | VARCHAR | False | False | False |  |  |
+| `process_steps` | Process steps | Process steps | OBJECT (PROCESS_STEP) | False | True | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Process Step
 * **Code:** `PROCESS_STEP`
 * **Generated code prefix:** `PRST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | PREPARATION | 1 | 1 |
 | SAMPLE | 1 | - |
@@ -1915,738 +2422,870 @@ By mapping the detailed relationships between physical materials, hardware state
 | INSTRUMENT.STM | 0 | - |
 | ROOM | 0 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `actions` | Actions | Actions | OBJECT (All) | False | True | False | | `{'object_subtypes': 'ACTION, ANNEALING, COOLDOWN, DELAMINATION, DEPOSITION, DILUTION, DOSING, DROPCAST_COATING, ETCHING, FISHING, MECHANICAL_PRESSING, PLASMA, RINSE, SOAKING, SPIN_COATING, SPUTTERING'}` |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `actions` | Actions | Actions | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'ACTION, ANNEALING, COOLDOWN, DELAMINATION, DEPOSITION, DILUTION, DOSING, DROPCAST_COATING, ETCHING, FISHING, MECHANICAL_PRESSING, PLASMA, RINSE, SOAKING, SPIN_COATING, SPUTTERING'}` |
 
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Publication
 * **Code:** `PUBLICATION`
 * **Generated code prefix:** `PUB`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | AUTHOR | 1 | - |
 | DRAFT | 0 | - |
 | GRANT | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `abstract` | Abstract | Abstract | MULTILINE_VARCHAR | False | False | False |
-| `year` | Year | Year | INTEGER | False | False | False |
-| `dataset_url` | Dataset URL | Dataset URL | HYPERLINK | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `abstract` | Abstract | Abstract | MULTILINE_VARCHAR | False | False | False |  |  |
+| `year` | Year | Year | INTEGER | False | False | False |  |  |
+| `dataset_url` | Dataset URL | Dataset URL | HYPERLINK | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Raw Crystal
+* **Code:** `RAW_CRYSTAL`
+* **Generated code prefix:** `RWCR`
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `material` | Material | Material | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `material` | Material | Material | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Result
 * **Code:** `RESULT`
 * **Generated code prefix:** `RESL`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | ANALYSIS | 0 | - |
 | MEASUREMENT_SESSION | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Rinse
 * **Code:** `RINSE`
 * **Generated code prefix:** `RINS`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '🚿', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
-| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
-| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |  |  |
+| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |  |  |
+| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Room
 * **Code:** `ROOM`
 * **Generated code prefix:** `ROOM`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `organisation` | Organisation | Organisation | OBJECT (ORGANISATION) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `organisation` | Organisation | Organisation | OBJECT (ORGANISATION) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Sample
 * **Code:** `SAMPLE`
 * **Generated code prefix:** `SAMP`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | 2D_LAYER_MATERIAL | 0 | - |
 | WAFER_SUBSTRATE | 0 | - |
 | CRYSTAL | 0 | - |
 | PROCESS_STEP | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `object_status` | Object Status | Object Status | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `object_status` | Object Status | Object Status | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
 
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Scroll Pump
 * **Code:** `SCROLL_PUMP`
 * **Generated code prefix:** `SCLP`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Soaking
 * **Code:** `SOAKING`
 * **Generated code prefix:** `SOAK`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '🛁', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |
-| `vacuum_oven` | Vacuum Oven | Vacuum Oven | OBJECT (VACUUM_OVEN) | False | False | False |
-| `vacuum_oven_settings` | Vacuum Oven Settings | Vacuum Oven Settings | OBJECT (VACUUM_OVEN_SETTINGS) | False | False | False |
-| `hot_plate` | Hot Plate | Hot Plate | OBJECT (HOT_PLATE) | False | False | False |
-| `hot_plate_settings` | Hot Plate Settings | Hot Plate Settings | OBJECT (HOT_PLATE_SETTINGS) | False | False | False |
-| `electrochemical_cell` | Electrochemical Cell | Electrochemical Cell | OBJECT (ELECTROCHEMICAL_CELL) | False | False | False |
-| `electrochemical_cell_settings` | Electrochemical Cell Settings | Electrochemical Cell Settings | OBJECT (ELECTROCHEMICAL_CELL_SETTINGS) | False | False | False |
-| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |
-| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `solution` | Solution | Solution | OBJECT (SOLUTION) | False | False | False |  |  |
+| `pipette` | Pipette | Pipette | OBJECT (PIPETTE) | False | False | False |  |  |
+| `pipette_settings` | Pipette settings | Pipette settings | OBJECT (PIPETTE_SETTINGS) | False | False | False |  |  |
+| `glassware` | Glassware | Glassware | OBJECT (GLASSWARE) | False | False | False |  |  |
+| `glassware_settings` | Glassware settings | Glassware settings | OBJECT (GLASSWARE_SETTINGS) | False | False | False |  |  |
+| `vacuum_oven` | Vacuum Oven | Vacuum Oven | OBJECT (VACUUM_OVEN) | False | False | False |  |  |
+| `vacuum_oven_settings` | Vacuum Oven Settings | Vacuum Oven Settings | OBJECT (VACUUM_OVEN_SETTINGS) | False | False | False |  |  |
+| `hot_plate` | Hot Plate | Hot Plate | OBJECT (HOT_PLATE) | False | False | False |  |  |
+| `hot_plate_settings` | Hot Plate Settings | Hot Plate Settings | OBJECT (HOT_PLATE_SETTINGS) | False | False | False |  |  |
+| `electrochemical_cell` | Electrochemical Cell | Electrochemical Cell | OBJECT (ELECTROCHEMICAL_CELL) | False | False | False |  |  |
+| `electrochemical_cell_settings` | Electrochemical Cell Settings | Electrochemical Cell Settings | OBJECT (ELECTROCHEMICAL_CELL_SETTINGS) | False | False | False |  |  |
+| `by_hand` | By Hand | By Hand | OBJECT (BY_HAND) | False | False | False |  |  |
+| `by_hand_settings` | By Hand Settings | By Hand Settings | OBJECT (BY_HAND_SETTINGS) | False | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Software
 * **Code:** `SOFTWARE`
 * **Generated code prefix:** `SOFT`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `version` | Version | Version | VARCHAR | False | False | False |
-| `url` | URL | URL | HYPERLINK | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `version` | Version | Version | VARCHAR | False | False | False |  |  |
+| `url` | URL | URL | HYPERLINK | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Solution
 * **Code:** `SOLUTION`
 * **Generated code prefix:** `SLTN`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `substances` | Substances | Substances | OBJECT (SUBSTANCE) | False | True | False | | |
-| `solution_elements` | Solution Elements | Solution Elements | XML | False | False | False | | `{'custom_widget': 'Spreadsheet'}` |
-| `final_concentration_mol_l` | Final Concentration [mol/L] | Final Concentration [mol/L] | REAL | False | False | False |
-| `final_concentration_percentage` | Final Concentration [%] | Final Concentration [%] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `substances` | Substances | Substances | OBJECT (SUBSTANCE) | False | True | False |  |  |
+| `solution_elements` | Solution Elements | Solution Elements | XML | False | False | False |  | `{'custom_widget': 'Spreadsheet'}` |
+| `final_concentration_mol_l` | Final Concentration [mol/L] | Final Concentration [mol/L] | REAL | False | False | False |  |  |
+| `final_concentration_percentage` | Final Concentration [%] | Final Concentration [%] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Spin Coater
 * **Code:** `SPIN_COATER`
 * **Generated code prefix:** `SPCO`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `speed_rpm` | Speed [RPM] | Speed [RPM] | REAL | False | False | False |
-| `acceleration_rpm_sec` | Acceleration [RPM/sec] | Acceleration [RPM/sec] | REAL | False | False | False |
-| `deceleration_rpm_sec` | Deceleration [RPM/sec] | Deceleration [RPM/sec] | REAL | False | False | False |
-| `custom_acceleration` | Custom acceleration | Custom acceleration | VARCHAR | False | False | False |
-| `custom_deceleration` | Custom deceleration | Custom deceleration | VARCHAR | False | False | False |
+| `speed_rpm` | Speed [RPM] | Speed [RPM] | REAL | False | False | False |  |  |
+| `acceleration_rpm_sec` | Acceleration [RPM/sec] | Acceleration [RPM/sec] | REAL | False | False | False |  |  |
+| `deceleration_rpm_sec` | Deceleration [RPM/sec] | Deceleration [RPM/sec] | REAL | False | False | False |  |  |
+| `custom_acceleration` | Custom acceleration | Custom acceleration | VARCHAR | False | False | False |  |  |
+| `custom_deceleration` | Custom deceleration | Custom deceleration | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Spin Coater Settings
 * **Code:** `SPIN_COATER_SETTINGS`
 * **Generated code prefix:** `SPCS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `speed_rpm` | Speed [RPM] | Speed [RPM] | REAL | False | False | False |
-| `acceleration_rpm_sec` | Acceleration [RPM/sec] | Acceleration [RPM/sec] | REAL | False | False | False |
-| `deceleration_rpm_sec` | Deceleration [RPM/sec] | Deceleration [RPM/sec] | REAL | False | False | False |
-| `custom_acceleration` | Custom acceleration | Custom acceleration | VARCHAR | False | False | False |
-| `custom_deceleration` | Custom deceleration | Custom deceleration | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `speed_rpm` | Speed [RPM] | Speed [RPM] | REAL | False | False | False |  |  |
+| `acceleration_rpm_sec` | Acceleration [RPM/sec] | Acceleration [RPM/sec] | REAL | False | False | False |  |  |
+| `deceleration_rpm_sec` | Deceleration [RPM/sec] | Deceleration [RPM/sec] | REAL | False | False | False |  |  |
+| `custom_acceleration` | Custom acceleration | Custom acceleration | VARCHAR | False | False | False |  |  |
+| `custom_deceleration` | Custom deceleration | Custom deceleration | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### SPM Controller
 * **Code:** `SPM_CONTROLLER`
 * **Generated code prefix:** `SPMC`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Sputter Gun
 * **Code:** `SPUTTER_GUN`
 * **Generated code prefix:** `SPTG`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `sputter_ion` | Ion | Ion | VARCHAR | False | False | False |
-| `angle_deg` | Angle [deg] | Angle [deg] | REAL | False | False | False |
-| `bias_voltage_v` | Bias voltage [V] | Bias voltage [V] | REAL | False | False | False |
-| `discharge_voltage_v` | Discharge voltage [V] | Discharge voltage [V] | REAL | False | False | False |
-| `discharge_current_a` | Discharge current [A] | Discharge current [A] | REAL | False | False | False |
+| `sputter_ion` | Ion | Ion | VARCHAR | False | False | False |  |  |
+| `angle_deg` | Angle [deg] | Angle [deg] | REAL | False | False | False |  |  |
+| `bias_voltage_v` | Bias voltage [V] | Bias voltage [V] | REAL | False | False | False |  |  |
+| `discharge_voltage_v` | Discharge voltage [V] | Discharge voltage [V] | REAL | False | False | False |  |  |
+| `discharge_current_a` | Discharge current [A] | Discharge current [A] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Sputter Gun Settings
 * **Code:** `SPUTTER_GUN_SETTINGS`
 * **Generated code prefix:** `SGST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | SPUTTER_GUN | 1 | 1 |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `sputter_ion` | Ion | Ion | VARCHAR | False | False | False |
-| `angle_deg` | Angle [deg] | Angle [deg] | REAL | False | False | False |
-| `bias_voltage_v` | Bias voltage [V] | Bias voltage [V] | REAL | False | False | False |
-| `discharge_voltage_v` | Discharge voltage [V] | Discharge voltage [V] | REAL | False | False | False |
-| `discharge_current_a` | Discharge current [A] | Discharge current [A] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `sputter_ion` | Ion | Ion | VARCHAR | False | False | False |  |  |
+| `angle_deg` | Angle [deg] | Angle [deg] | REAL | False | False | False |  |  |
+| `bias_voltage_v` | Bias voltage [V] | Bias voltage [V] | REAL | False | False | False |  |  |
+| `discharge_voltage_v` | Discharge voltage [V] | Discharge voltage [V] | REAL | False | False | False |  |  |
+| `discharge_current_a` | Discharge current [A] | Discharge current [A] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Sputtering
 * **Code:** `SPUTTERING`
 * **Generated code prefix:** `IONB`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'icon': '🔫', 'type': 'action'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `duration` | Duration | Duration | VARCHAR | False | False | False |
-| `plasma_cleaner` | Plasma Cleaner | Plasma Cleaner | OBJECT (PLASMA_CLEANER) | False | False | False |
-| `plasma_cleaner_settings` | Plasma Cleaner Settings | Plasma Cleaner Settings | OBJECT (PLASMA_CLEANER_SETTINGS) | False | False | False |
-| `sputter_gun` | Sputter Gun | Sputter Gun | OBJECT (SPUTTER_GUN) | False | False | False |
-| `sputter_gun_settings` | Sputter Gun Settings | Sputter Gun Settings | OBJECT (SPUTTER_GUN_SETTINGS) | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `duration` | Duration | Duration | VARCHAR | False | False | False |  |  |
+| `plasma_cleaner` | Plasma Cleaner | Plasma Cleaner | OBJECT (PLASMA_CLEANER) | False | False | False |  |  |
+| `plasma_cleaner_settings` | Plasma Cleaner Settings | Plasma Cleaner Settings | OBJECT (PLASMA_CLEANER_SETTINGS) | False | False | False |  |  |
+| `sputter_gun` | Sputter Gun | Sputter Gun | OBJECT (SPUTTER_GUN) | False | False | False |  |  |
+| `sputter_gun_settings` | Sputter Gun Settings | Sputter Gun Settings | OBJECT (SPUTTER_GUN_SETTINGS) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Stamp
 * **Code:** `STAMP`
 * **Generated code prefix:** `STMP`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `material` | Material | Material | VARCHAR | False | False | False |
-| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `assembled_by` | Assembled by | Synthesised by | OBJECT (All) | False | False | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
-| `assembled_date` | Assembled date | Assembled date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `material` | Material | Material | VARCHAR | False | False | False |  |  |
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `assembled_by` | Assembled by | Synthesised by | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `assembled_date` | Assembled date | Assembled date | DATE | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### STM Simulation
 * **Code:** `STM_SIMULATION`
 * **Generated code prefix:** `STMS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `default_object_view` | Default object view | Default object view | CONTROLLEDVOCABULARY (DEFAULT_OBJECT_VIEWS) | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
-| `p_tip` | P-tip | P-tip | JSON | False | False | False |
-| `bias_voltages` | Bias voltages | Bias voltages | JSON | False | False | False |
-| `isovalues` | Isovalues | Isovalues | JSON | False | False | False |
-| `heights` | Heights | Heights | JSON | False | False | False | |
+| `default_object_view` | Default object view | Default object view | CONTROLLEDVOCABULARY (DEFAULT_OBJECT_VIEWS) | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |  |  |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |  |  |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |  |  |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |  |  |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+| `p_tip` | P-tip | P-tip | JSON | False | False | False |  |  |
+| `bias_voltages` | Bias voltages | Bias voltages | JSON | False | False | False |  |  |
+| `isovalues` | Isovalues | Isovalues | JSON | False | False | False |  |  |
+| `heights` | Heights | Heights | JSON | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### STM Tip
 * **Code:** `STM_TIP`
 * **Generated code prefix:** `STMT`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | WIRE | 0 | - |
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `fabrication_method` | Fabrication method | Fabrication method | VARCHAR | False | False | False |
-| `fabrication_date` | Fabrication date | Fabrication date | DATE | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `fabrication_method` | Fabrication method | Fabrication method | VARCHAR | False | False | False |  |  |
+| `fabrication_date` | Fabrication date | Fabrication date | DATE | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Substance
 * **Code:** `SUBSTANCE`
 * **Generated code prefix:** `SUBS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | MOLECULE | 1 | - |
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `barcode` | Custom Barcode | Custom Barcode | VARCHAR | False | False | False |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `empa_number` | EMPA Number | EMPA Number | INTEGER | False | False | False |
-| `batch` | Batch | Batch | VARCHAR | False | False | False |
-| `vial` | Vial | Vial | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
-| `studied_by` | Studied by | Studied by | OBJECT (PERSON) | False | True | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}`
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
-| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `barcode` | Custom Barcode | Custom Barcode | VARCHAR | False | False | False |  |  |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `empa_number` | EMPA Number | EMPA Number | INTEGER | False | False | False |  |  |
+| `batch` | Batch | Batch | VARCHAR | False | False | False |  |  |
+| `vial` | Vial | Vial | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
+| `studied_by` | Studied by | Studied by | OBJECT (PERSON) | False | True | False |  |  |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Chemical properties
 
-| `evaporation_temperatures` | Evaporation temperatures | Evaporation temperatures | XML | False | False | False | | `{'custom_widget': 'Spreadsheet'}`
-| `purity` | Purity (%) | Purity (%), e.g. 99, >99, 80-90, ~90 | VARCHAR | False | False | False |
-| `concentration_percentage` | Concentration (%) | Concentration (%) | VARCHAR | False | False | False |
-| `substance_type` | Substance type | Substance type | VARCHAR | False | False | False |
+| `evaporation_temperatures` | Evaporation temperatures | Evaporation temperatures | XML | False | False | False |  | `{'custom_widget': 'Spreadsheet'}` |
+| `purity` | Purity (%) | Purity (%), e.g. 99, >99, 80-90, ~90 | VARCHAR | False | False | False |  |  |
+| `concentration_percentage` | Concentration (%) | Concentration (%) | VARCHAR | False | False | False |  |  |
+| `substance_type` | Substance type | Substance type | VARCHAR | False | False | False |  |  |
 
 #### Section: Storage
 
 | `amount_mg` | Amount [mg] | Amount [mg] | REAL | False | False | False |
 | `amount_ml` | Amount [ml] | Amount [ml] | REAL | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
 | `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
 | `storage_field` | Storage Field | Storage Field | VARCHAR | False | False | False |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Thyracont
 * **Code:** `THYRACONT`
 * **Generated code prefix:** `THYR`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Turbo Pump
 * **Code:** `TURBO_PUMP`
 * **Generated code prefix:** `TRBP`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Unclassified Simulation
 * **Code:** `UNCLASSIFIED_SIMULATION`
 * **Generated code prefix:** `UNSM`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |  |  |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |  |  |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |  |  |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |  |  |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Vacuum Oven
 * **Code:** `VACUUM_OVEN`
 * **Generated code prefix:** `VAOV`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
-| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |
+| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Vacuum Oven Settings
 * **Code:** `VACUUM_OVEN_SETTINGS`
 * **Generated code prefix:** `VAOS`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |
-| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `target_temperature_k` | Target temperature [K] | Target temperature [K] | REAL | False | False | False |  |  |
+| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Valve
 * **Code:** `VALVE`
 * **Generated code prefix:** `VALV`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'collectionType': 'COMPONENT_COLLECTION', 'ilog': true}`
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |
-| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |
-| `model` | Model | Model | VARCHAR | False | False | False |
-| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |
-| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `main_category` | Main category | Main category | CONTROLLEDVOCABULARY (COMPONENTMAINCATEGORYENUM) | False | False | False |  |  |
+| `sub_category` | Sub category | Sub category | CONTROLLEDVOCABULARY (COMPONENTSUBCATEGORYENUM) | False | False | False |  |  |
+| `model` | Model | Model | VARCHAR | False | False | False |  |  |
+| `serial_number` | Serial number | Serial number | VARCHAR | False | False | False |  |  |
+| `empa_id` | Empa ID | Empa ID | VARCHAR | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 
 #### Section: Settings
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |
+| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Valve Settings
 * **Code:** `VALVE_SETTINGS`
 * **Generated code prefix:** `VVST`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
 #### Parents:
-| Object Type| Minimum | Maximum |
+| Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | VALVE | 1 | 1 |
 
 #### Section: General information
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `pressure_mbar` | Pressure [mbar] | Pressure [mbar] | REAL | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Vibrational Spectroscopy
 * **Code:** `VIBRATIONAL_SPECTROSCOPY`
 * **Generated code prefix:** `VBSP`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |
-| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |
-| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |
-| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |
-| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |
-| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |
-| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False | |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `wfms_uuid` | WFMS UUID | WFMS UUID | VARCHAR | False | False | False |  |  |
+| `level_theory_method` | Level of theory (method) | Level of theory (method) | VARCHAR | False | False | False |  |  |
+| `level_theory_parameters` | Level of theory (parameters) | Level of theory (parameters) | JSON | False | False | False |  |  |
+| `input_parameters` | Input parameters | Input parameters | JSON | False | False | False |  |  |
+| `output_parameters` | Output parameters | Output parameters | JSON | False | False | False |  |  |
+| `codes` | Code(s) | Code(s) | OBJECT (All) | False | True | False |  |  |
+| `aiida_node` | AiiDA archive | AiiDA archive | OBJECT (All) | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Wafer
 * **Code:** `WAFER`
 * **Generated code prefix:** `WAFR`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `face` | Face | Face | VARCHAR | False | False | False |
-| `material` | Material | Material | VARCHAR | False | False | False |
-| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
-| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
-| `diameter_inch` | Diameter [inch] | Diameter [inch] | REAL | False | False | False |
-| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |
-| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |
-| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |
-| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
-| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
-| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}`
-| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `face` | Face | Face | VARCHAR | False | False | False |  |  |
+| `material` | Material | Material | VARCHAR | False | False | False |  |  |
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |  |  |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |  |  |
+| `diameter_inch` | Diameter [inch] | Diameter [inch] | REAL | False | False | False |  |  |
+| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |  |  |
+| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |  |  |
+| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |  |  |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |  |  |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  |  |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Wafer Substrate
 * **Code:** `WAFER_SUBSTRATE`
 * **Generated code prefix:** `WFSB`
-* **Semantic Annotation:**
+* **Semantic Annotation:** *(None)*
 * **Metadata:** `{'type': 'slab'}`
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `face` | Face | Face | VARCHAR | False | False | False |
-| `material` | Material | Material | VARCHAR | False | False | False |
-| `material_coating` | Material coating | Material coating | XML | False | False | False | | `{'custom_widget': 'Spreadsheet'}`
-| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |
-| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
-| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |
-| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |
-| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |
-| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
-| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
-| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
-| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `face` | Face | Face | VARCHAR | False | False | False |  |  |
+| `material` | Material | Material | VARCHAR | False | False | False |  |  |
+| `material_coating` | Material coating | Material coating | XML | False | False | False |  | `{'custom_widget': 'Spreadsheet'}` |
+| `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |  |  |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |  |  |
+| `height_mm` | Height [mm] | Height [mm] | REAL | False | False | False |  |  |
+| `width_mm` | Width [mm] | Width [mm] | REAL | False | False | False |  |  |
+| `thickness_mm` | Thickness [mm] | Thickness [mm] | REAL | False | False | False |  |  |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |  |  |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Wire
 * **Code:** `WIRE`
 * **Generated code prefix:** `WIRE`
-* **Semantic Annotation:**
-* **Metadata:**
+* **Semantic Annotation:** *(None)*
+* **Metadata:** *(None)*
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | Name | VARCHAR | False | False | False |
-| `description` | Description | Description | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
-| `material` | Material | Material | VARCHAR | False | False | False |
-| `purity` | Purity (%) | Purity (%), e.g. 99, >99, 80-90, ~90 | VARCHAR | False | False | False |
-| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |
-| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |
-| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |
-| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |
-| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |
-| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False | | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
-| `receive_date` | Receive date | Receive date | DATE | False | False | False |
-| `location` | Location | Location | OBJECT (All) | False | False | False | | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}`|
-| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False | | `{'object_subtypes': 'PERSON, GROUP'}` |
-| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |
-| `comments` | Comments | Comments | VARCHAR | False | False | False |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+| `material` | Material | Material | VARCHAR | False | False | False |  |  |
+| `purity` | Purity (%) | Purity (%), e.g. 99, >99, 80-90, ~90 | VARCHAR | False | False | False |  |  |
+| `diameter_mm` | Diameter [mm] | Diameter [mm] | REAL | False | False | False |  |  |
+| `shape` | Shape | Shape | CONTROLLEDVOCABULARY (SHAPE_ENUM) | False | False | False |  |  |
+| `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
+| `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
+| `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
+| `supplier` | Supplier | Supplier | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'GROUP, ORGANISATION'}` |
+| `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
+| `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
+| `synthesised_by` | Synthesised by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `supplier_own_name` | Supplier own name | Supplier own name | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
 
 ---
 
@@ -2657,41 +3296,56 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Observable](#observable)
     * [SXM dataset](#sxm-dataset)
 
+---
+
 ### DAT dataset
 
 * **Code:** `DAT_DATASET`
+* **Description:** DAT dataset
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Datatype | Mandatory | Multivalued | Unique | Description | Semantic Annotation
-| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | VARCHAR | False | False | False | Name |  |
-| `description` | Description | VARCHAR | False | False | False | Description |  |
-| `comments` | Comments | VARCHAR | False | False | False | Comments |  |
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Observable
 
 * **Code:** `OBSERVABLE`
+* **Description:** Observable
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Datatype | Mandatory | Multivalued | Unique | Description | Semantic Annotation
-| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | VARCHAR | False | False | False | Name |  |
-| `description` | Description | VARCHAR | False | False | False | Description |  |
-| `comments` | Comments | VARCHAR | False | False | False | Comments |  |
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `components` | Component(s) | Component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': '6_FOLD_EVAPORATOR, AFM_SENSOR, ANALYSER, BALANCE, BY_HAND, CHAMBER, CRYOSTAT, DC_EVAPORATOR, E_BEAM_HEATER, ELECTROCHEMICAL_CELL, ELECTRONICS, GLASSWARE, HOT_PLATE, ION_GAUGE, ION_PUMP, MECHANICAL_TRANSFER_PRESS, PBN_STAGE, PIPETTE, PLASMA_CLEANER, SCROLL_PUMP, SPIN_COATER, SPM_CONTROLLER, SPUTTER_GUN, STM_TIP, THYRACONT, TURBO_PUMP, VACUUM_OVEN, VALVE'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### SXM dataset
 
 * **Code:** `SXM_DATASET`
+* **Description:** SXM dataset
 
-#### Section:
+#### Section: *(Default / Unnamed)*
 
-| Property Code | Label | Datatype | Mandatory | Multivalued | Unique | Description | Semantic Annotation
-| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- |
-| `name` | Name | VARCHAR | False | False | False | Name |  |
-| `description` | Description | VARCHAR | False | False | False | Description |  |
-| `comments` | Comments | VARCHAR | False | False | False | Comments |  |
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False |  |  |
+| `description` | Description | Description | VARCHAR | False | False | False |  |  |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+
+[↑ Back to top](#openbis-data-model-documentation)
 
 ---
 
@@ -2714,155 +3368,240 @@ By mapping the detailed relationships between physical materials, hardware state
     * [Special Storage Conditions](#special-storage-conditions)
     * [Work Status](#work-status)
 
+---
+
 ### Budget currency
 
 * **Code:** `BUDGET_CURRENCY_ENUM`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| CHF | CHF | Swiss Franc
-| EUR | EUR | Euro
-| USD | USD | US Dollar
+| CHF | CHF | Swiss Franc |
+| EUR | EUR | Euro |
+| USD | USD | US Dollar |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Component - Main Category
 * **Code:** `COMPONENTMAINCATEGORYENUM`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| AUXILIARY | Auxiliary |
-| MICROSCOPE_CORE_COMPONENTS | Microscope Core Components |
-| SAMPLE_PREPARATION_HANDLING | Sample Preparation & Handling |
-| VACUUM_SYSTEM | Vacuum System |
+| AUXILIARY | Auxiliary |  |
+| MICROSCOPE_CORE_COMPONENTS | Microscope Core Components |  |
+| SAMPLE_PREPARATION_HANDLING | Sample Preparation & Handling |  |
+| VACUUM_SYSTEM | Vacuum System |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Component - Sub Category
 * **Code:** `COMPONENTSUBCATEGORYENUM`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| ANALYSER | Analyser |
-| AUXILIARY | Auxiliary |
-| CONTROL_DATA_ACQUISITION | Control & Data Acquisition |
-| GAUGE | Gauge |
-| MECHANICAL_COMPONENT | Mechanical Component |
-| PREPARATION_TOOLS | Preparation Tools |
-| PUMP | Pump |
-| STM | Scanning Tunneling Microscope |
-| TEMPERATURE_ENVIRONMENT_CONTROL | Temperature & Environment Control |
-| VACUUM_CHAMBER | Vacuum System |
+| ANALYSER | Analyser |  |
+| AUXILIARY | Auxiliary |  |
+| CONTROL_DATA_ACQUISITION | Control & Data Acquisition |  |
+| GAUGE | Gauge |  |
+| MECHANICAL_COMPONENT | Mechanical Component |  |
+| PREPARATION_TOOLS | Preparation Tools |  |
+| PUMP | Pump |  |
+| STM | Scanning Tunneling Microscope |  |
+| TEMPERATURE_ENVIRONMENT_CONTROL | Temperature & Environment Control |  |
+| VACUUM_CHAMBER | Vacuum System |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Default collection views
 * **Code:** `DEFAULT_COLLECTION_VIEWS`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| FORM_VIEW | Form view |
-| IMAGING_GALLERY_VIEW | Imaging Gallery view | Imaging gallery view for collections
-| LIST_VIEW | List view |
+| FORM_VIEW | Form view |  |
+| IMAGING_GALLERY_VIEW | Imaging Gallery view | Imaging gallery view for collections |
+| LIST_VIEW | List view |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Default dataset views
 * **Code:** `DEFAULT_DATASET_VIEWS`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| IMAGING_DATASET_VIEWER | Imaging dataset viewer | Imaging viewer type for dataset
+| IMAGING_DATASET_VIEWER | Imaging dataset viewer | Imaging viewer type for dataset |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Default object views
 * **Code:** `DEFAULT_OBJECT_VIEWS`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| IMAGING_DATASET_VIEWER | Imaging dataset viewer | Imaging viewer type for data
-| IMAGING_GALLERY_VIEW | Imaging Gallery view | Imaging gallery viewer for objects
+| IMAGING_DATASET_VIEWER | Imaging dataset viewer | Imaging viewer type for data |
+| IMAGING_GALLERY_VIEW | Imaging Gallery view | Imaging gallery viewer for objects |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Draft type
 * **Code:** `DRAFTTYPEENUM`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| POSTPRINT | Postprint |
-| PREPRINT | Preprint |
+| POSTPRINT | Postprint |  |
+| PREPRINT | Preprint |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### ILog base types
 * **Code:** `ILOG_BASE_TYPES`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| COMPONENT | Component |
-| INSTRUMENT | Instrument |
+| COMPONENT | Component |  |
+| INSTRUMENT | Instrument |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Vocabulary for tagging imaging previews
 * **Code:** `IMAGING_TAGS`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| DAT | dat | dat chart
-| GOOD_MEAS | + | +
-| PAPER_MEAS | ++ | ++
-| SPECTRA | spectra | spectra locator image
-| SPECTRUM | spectrum | spectrum
-| STML | STML | STML image
-| SXM | sxm | sxm image
-| THZSTML | THz-STML | THz-STML image
+| DAT | dat | dat chart |
+| GOOD_MEAS | + | + |
+| PAPER_MEAS | ++ | ++ |
+| SPECTRA | spectra | spectra locator image |
+| SPECTRUM | spectrum | spectrum |
+| STML | STML | STML image |
+| SXM | sxm | sxm image |
+| THZSTML | THz-STML | THz-STML image |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### nanotech@surfaces subgroups
 * **Code:** `NANOTECHSURFACESSUBGROUPENUM`
 
 | Term Code | Label | Description |
 | :--- | :--- | :--- |
-| ATOMISTIC_SIMULATIONS | Atomistic Simulations |
-| CARBON_NANOMATERIALS | Carbon Nanomaterials |
-| CHIRAL_SURFACES | Chiral Surfaces |
-| MATERIALS_TO_DEVICES | Materials to Devices |
-| QUANTUM_MAGNETISM | Quantum Magnetism |
-| RESEARCH_INFRASTRUCTURE | Research Infrastructure |
-| RESEARCH_MANAGEMENT | Research Management |
-| TWO_D_QUANTUM_MATERIALS | Two-Dimensional Quantum Materials |
+| ATOMISTIC_SIMULATIONS | Atomistic Simulations |  |
+| CARBON_NANOMATERIALS | Carbon Nanomaterials |  |
+| CHIRAL_SURFACES | Chiral Surfaces |  |
+| MATERIALS_TO_DEVICES | Materials to Devices |  |
+| QUANTUM_MAGNETISM | Quantum Magnetism |  |
+| RESEARCH_INFRASTRUCTURE | Research Infrastructure |  |
+| RESEARCH_MANAGEMENT | Research Management |  |
+| TWO_D_QUANTUM_MATERIALS | Two-Dimensional Quantum Materials |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Object Status
 * **Code:** `OBJECTSTATUSENUM`
 
-| Term Code | Label | Description
-| :--- | :--- | :---
-| ACTIVE | Active |
-| BROKEN | Broken |
-| DISPOSED | Disposed |
-| INACTIVE | Inactive |
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| ACTIVE | Active |  |
+| BROKEN | Broken |  |
+| DISPOSED | Disposed |  |
+| INACTIVE | Inactive |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Path Finding Method
 * **Code:** `PATHFINDINGMETHODENUM`
 
-| Term Code | Label | Description
-| :--- | :--- | :---
-| NEB | Nudged Elastic Band |
-| STRING | String Method |
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| NEB | Nudged Elastic Band |  |
+| STRING | String Method |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Shape
 * **Code:** `SHAPE_ENUM`
 
-| Term Code | Label | Description
-| :--- | :--- | :---
-| CYLINDRICAL | Cylindrical | Cyclindrical
-| RECTANGULAR | Rectangular | Rectangular
-| ROUND | Round | Round
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| CYLINDRICAL | Cylindrical | Cyclindrical |
+| RECTANGULAR | Rectangular | Rectangular |
+| ROUND | Round | Round |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Special Storage Conditions
 * **Code:** `SPECIALSTORAGECONDITIONSENUM`
 
-| Term Code | Label | Description
-| :--- | :--- | :---
-| DARK | Dark |
-| DRY | Dry |
-| FLAMMABLE | Flammable |
-| FREEZER | Freezer |
-| FRIDGE | Fridge |
-| NO_OXYGEN | No Oxygen |
-| POISONOUS | Poisonous | Poisonous
-| TIGHTLY_CLOSED | Tightly Closed | Tightly Closed
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| DARK | Dark |  |
+| DRY | Dry |  |
+| FLAMMABLE | Flammable |  |
+| FREEZER | Freezer |  |
+| FRIDGE | Fridge |  |
+| NO_OXYGEN | No Oxygen |  |
+| POISONOUS | Poisonous | Poisonous |
+| TIGHTLY_CLOSED | Tightly Closed | Tightly Closed |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
 
 ### Work Status
 * **Code:** `WORKSTATUSENUM`
 
-| Term Code | Label | Description
-| :--- | :--- | :---
-| ACTIVE | Active |
-| INACTIVE | Inactive |
+| Term Code | Label | Description |
+| :--- | :--- | :--- |
+| ACTIVE | Active |  |
+| INACTIVE | Inactive |  |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
+
+## 4. Collection Types
+
+* Currently in openBIS, there are the following collection types:
+    * [Experiment](#experiment)
+
+---
+
+### Experiment
+* **Code:** `EXPERIMENT`
+* **Description:** Experiment
+
+#### Section: General info
+
+| Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
+| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- | :--- |
+| `name` | Name | Name | VARCHAR | False | False | False | | |
+| `description` | Description | Description | VARCHAR | False | False | False | | |
+| `default_collection_view` | Default collection view | Default view for experiments of the type collection | CONTROLLEDVOCABULARY (DEFAULT_COLLECTION_VIEWS) | False | False | False | | |
+
+[↑ Back to top](#openbis-data-model-documentation)
+
+---
