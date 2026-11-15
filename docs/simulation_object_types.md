@@ -674,7 +674,6 @@ name: string
 method_family: enum
 method_modifiers: enum[]
 charge: number
-band_gap_ev: float (eV)
 converged: boolean
 ```
 
@@ -686,6 +685,7 @@ fermi_energy_ev: float[] (eV)
 spin_multiplicity: integer
 total_magnetization_bohr_magneton: float (Bohr magnetons)
 absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+band_gap_ev: float (eV), only when the global gap is established
 k_path: string
 electronic_gap_type: enum
 comments: text
@@ -1938,6 +1938,97 @@ large time-series arrays
 
 ---
 
+### Electronic Structure
+* **Code:** `ELECTRONIC_STRUCTURE`
+* **Generated code prefix:** `ELST`
+* **Description:** Electronic structure results, analysis and preparation stages.
+
+This category preserves complete state families and analysis tables that do not
+fit a single scalar energy, band, DOS, vibrational or SPM result. The required
+`ELECTRONIC_RESULT_TYPE` names the explicit subtype; it does not infer convergence
+or turn orbital preparation/hardware preparation into a completed calculation.
+Existing specialized categories remain authoritative where applicable.
+
+#### Properties
+
+| Code | Label | Description | Data Type | Mandatory | Multivalued | Unique |
+| :--- | :--- | :--- | :--- | :---: | :---: | :---: |
+| `name` | Name | Name | VARCHAR | True | False | False |
+| `electronic_result_type` | Electronic result type | Electronic result type | CONTROLLEDVOCABULARY (ELECTRONIC_RESULT_TYPE_ENUM) | True | False | False |
+| `simulation_description` | Simulation description | Simulation description | MULTILINE_VARCHAR | True | False | False |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |
+| `charge` | Charge | Charge | REAL | False | False | False |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |
+| `main_result_description` | Main result description | Main result description | MULTILINE_VARCHAR | False | False | False |
+| `main_result_value_numeric` | Main result value | Main result value | REAL | False | False | False |
+| `main_result_unit` | Main result unit | Main result unit | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |
+| `executables` | Executables | Executables | SAMPLE | False | True | False |
+| `aiida_node` | AiiDA node | AiiDA node | SAMPLE | False | False | False |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |
+
+#### Explicit ORCA subtypes
+
+| Stored operation | Electronic result type |
+| :--- | :--- |
+| `common_orbitals` | `ORBITAL_REFERENCE` |
+| `casscf` | `MANY_ELECTRON_STATES` |
+| `casci` | `MANY_ELECTRON_STATES` |
+| `correlation` | `CORRELATION_ENERGIES` |
+| `optical` | `OPTICAL_EXCITATIONS` |
+| `dyson` | `DYSON_TRANSITIONS` |
+| `kondo` | `KONDO_EXCHANGE` |
+| `orbital_reordering` | `ORBITAL_ORDERING` |
+| `orbital_catalog` | `ORBITAL_CATALOG` |
+| `energy_export` | `HAMILTONIAN_EXPORT` |
+| `energy_stage` | `QUANTUM_COMPUTING_STAGE` |
+| `dmrg` | `MOLECULAR_DMRG` |
+| `dmrg_sweeps` | `MOLECULAR_DMRG` |
+| `dmrg_convergence` | `MOLECULAR_DMRG` |
+| `dmrg_timeout_recovery` | `MOLECULAR_DMRG` |
+
+Scalar energy, geometry, spatial cubes/maps and vibrational exports retain their existing categories. The internal legacy result-role key is preserved for archive/recovery identity; it is not the openBIS object classification.
+
+### Model Hamiltonian
+* **Code:** `MODEL_HAMILTONIAN`
+* **Generated code prefix:** `MODH`
+* **Description:** Model Hamiltonian calculation or saved numerical model.
+
+The existing `MODEL` property identifies Spin Hamiltonian, Hubbard Hamiltonian,
+Tight-binding Hamiltonian, Wannier Hamiltonian, or an explicitly described general
+Hamiltonian. `METHOD_FAMILY` identifies the solver/approximation (ED, DMRG, TB or
+MFH_TB). ED is exact diagonalization, not an unspecified method. Abstract models
+need no invented atomic structure, ionic charge or total-spin quantum number.
+
+#### Parents and provenance
+
+Optional input atomistic/material concepts and source simulations retain their
+existing relationships. `AIIDA_NODE` links the original single-root archive;
+`AIIDA_SOURCE_UUID` identifies the saved result. Units and complete sector tables
+remain in that archive. Displayed one-electron levels are not total energies.
+
+#### Properties
+
+| Code | Label | Description | Data Type | Mandatory | Multivalued | Unique |
+| :--- | :--- | :--- | :--- | :---: | :---: | :---: |
+| `name` | Name | Name | VARCHAR | True | False | False |
+| `model` | Model | Model | VARCHAR | True | False | False |
+| `simulation_description` | Simulation description | Simulation description | MULTILINE_VARCHAR | True | False | False |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |
+| `charge` | Charge | Charge | REAL | False | False | False |
+| `main_result_description` | Main result description | Main result description | MULTILINE_VARCHAR | False | False | False |
+| `main_result_value_numeric` | Main result value | Main result value | REAL | False | False | False |
+| `main_result_unit` | Main result unit | Main result unit | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |
+| `executables` | Executables | Executables | SAMPLE | False | True | False |
+| `aiida_node` | AiiDA node | AiiDA node | SAMPLE | False | False | False |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |
+
 # UNCLASSIFIED_SIMULATION
 
 ## Object type
@@ -2169,13 +2260,13 @@ ORCA uses the existing scientific types, independently of its executable:
 | Optimized geometry | `GEOMETRY_OPTIMISATION` | Input and final `ATOMISTIC_MODEL`; constraints and total energy |
 | Fixed-geometry SCF | `ENERGY_CALCULATION` | Stored total energy in Hartree; charge and multiplicity |
 | RI-MP2 | `ENERGY_CALCULATION` | `METHOD_FAMILY=OTHER`, explicit RI-MP2 label; HF reference, correction and total remain in the archive |
-| SC/FIC/DLPNO-NEVPT2 and CASPT2 | `UNCLASSIFIED_SIMULATION` | `METHOD_FAMILY=CAS`; complete reference/correction/total state table, frozen-core model and checks remain together |
+| SC/FIC/DLPNO-NEVPT2 and CASPT2 | `ELECTRONIC_STRUCTURE` | `METHOD_FAMILY=CAS`; complete reference/correction/total state table, frozen-core model and checks remain together |
 | SCF projected orbital DOS | `DOS` | `PDOS=true`; symmetric Löwdin weights; alpha/beta channels remain distinct |
-| TDA/full-TDDFT optical states and native NTO analysis | `UNCLASSIFIED_SIMULATION` | `METHOD_FAMILY=DFT`; all excitation energies, length-gauge strengths, approximate UKS spin labels and unmodified NTO weights remain together |
+| TDA/full-TDDFT optical states and native NTO analysis | `ELECTRONIC_STRUCTURE` | `METHOD_FAMILY=DFT`; all excitation energies, length-gauge strengths, approximate UKS spin labels and unmodified NTO weights remain together |
 | NTO hole/particle cubes | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; NTO kind, state/pair identity and stored reduced cubes; remote full files stay external |
 | Harmonic IR/Raman | `VIBRATIONAL_SPECTROSCOPY` | Modes, Hessian and intensities remain in the archive |
 | SCF/QRO/UNO/CASSCF, Dyson or Kondo cubes and spatial maps | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; orbital kind in method label/comments and immutable source manifests |
-| QRO/UNO reference, verified CASSCF reference/state table, complete CASCI state table, Dyson transitions or Kondo exchange matrix | `UNCLASSIFIED_SIMULATION` | Explicit result-kind label; structured data remain intact in the archive |
+| QRO/UNO reference, verified CASSCF reference/state table, complete CASCI state table, Dyson transitions or Kondo exchange matrix | `ELECTRONIC_STRUCTURE` | Explicit result-kind label; structured data remain intact in the archive |
 
 One optical calculation remains one reviewed result, including dark states and
 all requested spin families. NTO weights are response-pseudodensity eigenvalues,
@@ -2191,7 +2282,7 @@ states; its weights are not spectral intensities. CASSCF cubes use the CAS
 method family. UNO/CASSCF natural occupations do not define an energy DOS; QRO
 energy labels are not recast as Kohn–Sham eigenvalues. Dyson
 and Kondo orbital/map results belong to SPM, while their state/transition/exchange
-sources retain separate provenance. `UNCLASSIFIED_SIMULATION` has no assigned
+sources retain separate provenance. `ELECTRONIC_STRUCTURE` has no assigned
 spin-multiplicity property: its spin context stays in its comments and archive.
 
 The export boundary is the AiiDA database and repository for the selected process
@@ -2222,3 +2313,67 @@ a live-server upload/import round trip. That remains a separate acceptance
 gate with an approved destination and the matching shared-exporter revision.
 The CASSCF/correlation implementation and native-pilot limits are recorded in
 [the ORCA stage validation guide](https://github.com/nanotech-empa/aiidalab-orca/blob/main/docs/release-readiness.md).
+
+### Stored model and additional ORCA results
+
+The following exports reuse existing types and vocabulary terms. No new object
+type is introduced for a solver or an application.
+
+| Stored result | Object type | Method family | Preserved content |
+| --- | --- | --- | --- |
+| PythTB periodic bands | `BAND_STRUCTURE` | `TB` / `MFH_TB` | Raw spin-resolved energies, k points/path, model parameters and structure |
+| PythTB finite levels and selected orbitals | `MODEL_HAMILTONIAN` | `TB` / `MFH_TB` | Eigenvalues and computed complex orbital coefficients |
+| PythTB mean-field site occupations | `CHARGE_ANALYSIS` | `MFH_TB` | Both spin channels, occupations, iterations and convergence diagnostics |
+| PythTB Wannier model | `MODEL_HAMILTONIAN` | `TB` / `MFH_TB` | Stored full/reduced Hamiltonians, centers, spreads, coefficients and validation ZIP |
+| Model Hamiltonians graph/Hubbard results | `MODEL_HAMILTONIAN` | `ED` / `DMRG` | Model, all solved sectors, energies, correlations and solver diagnostics |
+| ITensor AiiDA workflows | `MODEL_HAMILTONIAN` | `DMRG` | Stored sector energies, dynamical spectra, inputs and diagnostics |
+| ORCA native DMRG, sweeps and recovery | `ELECTRONIC_STRUCTURE` | `DMRG` | Complete root/attempt tables, energies and convergence diagnostics |
+| ORCA orbital reordering and energy export | `ELECTRONIC_STRUCTURE` | `CAS` | Stored orbital order and labelled energy/Hamiltonian data |
+| ORCA orbital catalog and energy stages | `ELECTRONIC_STRUCTURE` | `OTHER` | Saved catalogs, stage identity, sampled/full energies and hardware preparation records |
+
+Local PythTB, graph and Hubbard solvers run outside AiiDA. Preparing an export
+records their existing results as immutable data under one AiiDA recording
+process, explicitly labelled as such; it does not claim that AiiDA ran the solver.
+Preparing the same numerical bundle again reuses its UUID. For finite PythTB,
+levels and Wannier content share one Model Hamiltonian result: each source UUID has
+at most one result of a given object type. Each main process retains one
+`AIIDA_NODE`, one scalar `WFMS_UUID`, and one single-root archive.
+
+`BAND_GAP_EV` is optional: sampled bands do not necessarily establish a global
+gap, and absence is not zero. Neutral PythTB charge refers to its half-filled
+pi-electron model. One-electron levels and the mean-field energy proxy are not
+ab-initio total energies. Spin-model energies/frequencies are in meV; Hubbard
+and PythTB energies are in eV; native ORCA DMRG energies are in Hartree. Stored
+metadata retains these units without inappropriate conversion to a total energy.
+
+Abstract spin/Hubbard graphs do not create fabricated `ATOMISTIC_MODEL` objects,
+ionic charge or total-spin assignments. ED ground-manifold averages, fixed Sz
+sectors and individual DMRG candidates keep their distinct meanings. Workflow
+completion is not a convergence certificate: unestablished or failed convergence
+uses `CONVERGED=false` with diagnostics in the archive. Finished ORCA DMRG exit
+311 can be exported as an explicitly unconverged partial result; other failed or
+running processes are not made exportable.
+
+Only already stored arrays, files and selected computed orbitals are exported.
+Remote/stash files and local checkpoint directories remain references. Export
+never launches a solver or retrieves missing artifacts. The common review,
+executable mapping, duplicate check, preview and recovery controls apply.
+
+The Python simulation definitions are `src/simulation_schema.py`; their generated
+LinkML view is `schema/simulation_objects_schema.yaml`. The older laboratory
+catalogs `schema/openbis_objects.py` and `schema/openBIS_objects_schema.yaml`
+retain historical simulation classes and must not provision modern simulation
+objects. Laboratory definitions in those catalogs remain separate.
+
+### Model preview and classification (November 2026)
+
+Spin/Hubbard previews show the saved graph and available energy levels, with
+original site labels, spin sizes, drawing coordinates and energy units. They do
+not solve the model again. ITensor chain previews use stored graph/chain inputs;
+missing data are explicitly reported. Preview selection/upload remains available
+in the common export review. Existing published archives are never replaced.
+
+Automatic PythTB and Model Hamiltonians exports do not use Unclassified.
+Periodic electronic bands and mean-field charge results retain BAND_STRUCTURE
+and CHARGE_ANALYSIS respectively. ORCA state families, optical/Dyson spectra, Kondo exchange and preparation/quantum stages use ELECTRONIC_STRUCTURE with explicit subtypes. Supported automatic exporters never choose Unclassified; manual arbitrary archives retain the explicit Unclassified option. Do not silently relabel old published objects or
+create a second result merely because its classification changed.
