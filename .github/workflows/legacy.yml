@@ -1,0 +1,53 @@
+---
+name: Legacy Python 3.9 compatibility
+
+on:
+    pull_request:
+    push:
+        tags: ['v0.1.*']
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    legacy:
+        if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/')
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        env:
+            AIIDA_PATH: ${{ github.workspace }}/.aiida-legacy
+            PIP_CONSTRAINT: ${{ github.workspace }}/ci/legacy-constraints.txt
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/checkout@v4
+              with:
+                  repository: aiidalab/aiidalab-eln
+                  ref: 2e09cd578bf7b4aa6cfa068488f26c9ed89eeaa9
+                  path: .legacy-eln
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: '3.9'
+            - name: Build and install release candidates
+              run: |
+                  python -m pip install build pytest pytest-socket psutil
+                  python -m build --wheel
+                  python -m build --wheel --outdir dist .legacy-eln
+                  python -m pip install dist/*.whl
+                  python -m pip check
+                  python -m pip freeze > legacy-environment.txt
+            - name: Check installed packages outside the checkout
+              working-directory: ${{ runner.temp }}
+              run: |
+                  python -I -c 'import aiida, aiidalab_eln, aiida_openbis; assert aiida.__version__ == "2.6.3"; assert aiidalab_eln.__version__ == "0.1.5"'
+            - name: Provide the AiiDAlab home directory expected by widgets
+              run: sudo install -d -m 0755 /home/jovyan
+            - name: Run legacy regressions with mocked external services
+              run: python ci/check_legacy.py
+            - uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: legacy-validation
+                  path: |
+                      legacy-environment.txt
+                      dist/*

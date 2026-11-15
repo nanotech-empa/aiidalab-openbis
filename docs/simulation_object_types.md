@@ -1,0 +1,2379 @@
+# Simulation Object Types for openBIS ELN
+
+## Common principles
+
+Each simulation object type has its own openBIS object type.
+
+Each simulation object must have:
+
+```text
+ELN_PREVIEW
+```
+
+Each simulation object must have one provenance path:
+
+```text
+AiiDA simulation exported from the local database:
+    aiida_node → AIIDA_NODE object containing the .aiida archive
+
+Simulation uploaded manually with an AiiDA archive:
+    one record per main process:
+        aiida_node → AIIDA_NODE containing its regenerated single-root .aiida archive
+
+Simulation without an AiiDA archive:
+    input_output_bundle dataset containing relevant input/output files
+```
+
+Simulation objects link to executables, not directly to codes or computers.
+
+```text
+SIMULATION_OBJECT → EXECUTABLE → CODE
+SIMULATION_OBJECT → EXECUTABLE → COMPUTER
+```
+
+Therefore, `code` and `computer` should not be duplicated on simulation objects.
+
+Physical quantities use openBIS `REAL` properties so they can be searched and
+sorted numerically. The unit is fixed by the property code and label; exporters
+must convert values before saving them. The canonical units are Hartree for total
+energies, eV for electronic energies and barriers, Hartree/bohr for forces, Bohr
+magnetons for magnetization, volts, angstrom, femtoseconds, kelvin, and bar.
+
+### Atomistic-model search conventions
+
+For an AiiDA-generated `ATOMISTIC_MODEL`, the exporter uses the chemical
+formula as `NAME` (for example `CH4` or `C20H12AuCoO2`) and records the inferred
+integer `DIMENSIONALITY` together with the three
+`PERIODIC_BOUNDARY_CONDITIONS` flags. A structure search may therefore combine
+dimensionality with element-aware parsing of the name. Element filters are set
+membership tests, independent of formula ordering; for example, a 2D search
+requiring Au, C, O, and Co accepts formulas containing all four elements even
+when additional elements are present.
+
+
+### Imported-structure provenance
+
+The openBIS structure importer stores source identity in the standard AiiDA
+`eln` extra. The mapping contains the openBIS instance, object permID and type,
+selected representation, optional dataset and file identifiers, and an exact
+structure fingerprint. It also records the source object's explicitly linked
+openBIS parents and children as JSON-safe `relationships` entries containing
+`sample_uuid` and `data_type`. `StructureManagerWidget` preserves this metadata
+when a user edits or stores the imported geometry.
+
+When the same `StructureData` is selected from more than one ELN object, `eln`
+records the most recently selected origin and `eln_origins` preserves distinct
+previous origins. These are metadata-only extras: the importer does not clone or
+modify the immutable structure content and does not add inputs to a workflow.
+The metadata is also added when an ATOMISTIC_MODEL resolves to a StructureData
+UUID that is already present in the local AiiDA profile.
+
+For a `MOLECULE` source, the exporter links the resulting
+`ATOMISTIC_MODEL` back to that concept automatically. For an
+`ATOMISTIC_MODEL` source, the exporter restores its explicitly recorded
+`MOLECULE` parents. As a compatibility fallback for older imported structures,
+it can find the exact ATOMISTIC_MODEL by `WFMS_UUID` and read its live parents;
+it never guesses concepts from a formula. The export form preselects these
+molecule links for review and permits the user to remove them. For an
+`ATOMISTIC_MODEL` source, an unchanged manually uploaded structure is reused.
+If its `WFMS_UUID` is empty, the exporter fills it with the UUID of the first
+AiiDA `StructureData`. A changed geometry creates a new `ATOMISTIC_MODEL`;
+an existing, different `WFMS_UUID` is never overwritten.
+
+If the referenced `StructureData` UUID is already present in the active AiiDA
+profile, the importer reuses that node. Otherwise it locates a directly linked
+`AIIDA_NODE` archive and imports a thin archive containing only the requested
+`StructureData`, preserving its UUID.
+
+### AiiDA result identity
+
+Every AiiDA-generated simulation object records:
+
+```text
+AIIDA_SOURCE_UUID: UUID of the concrete WorkChain that produced the result
+```
+
+This is a conditional requirement for an AiiDA-generated object and is omitted
+for a non-AiiDA simulation. It is assigned by the exporter and is not editable
+by the user.
+
+`AIIDA_SOURCE_UUID` identifies the concrete result-producing WorkChain, rather
+than the AiiDA installation or the archive object. Importing an AiiDA archive on
+another installation preserves this UUID.
+
+The result role is already expressed by the simulation object type; an
+additional `AIIDA_RESULT_ROLE` property would duplicate that information.
+Within one openBIS space, the exporter therefore searches by object type and
+`AIIDA_SOURCE_UUID`. If it finds a match, it reuses the existing object
+instead of creating a duplicate. The same AiiDA result may still be published
+as a distinct simulation object in another openBIS space.
+
+Before export, the app searches every openBIS space visible to the user for the
+same simulation identity. Accessible simulation objects are shown and export is
+blocked until the user explicitly confirms that another `SIMULATION` object is
+intended. Confirmation overrides the normal same-space reuse for that export,
+but the new simulation links the same globally reused `AIIDA_NODE`; the archive
+is not uploaded twice. Multiple `AIIDA_NODE` records for one workflow UUID are
+reported as ambiguous provenance and block export instead of selecting one
+silently.
+
+This identity does not determine archive boundaries. The exporter
+creates or reuses one `AIIDA_NODE` for each main AiiDA WorkChain selected by
+the provenance traversal. Multiple result objects from that block share its
+`AIIDA_NODE`. For example, `ENERGY_CALCULATION` and `CHARGE_ANALYSIS`
+created from one `Cp2kScfWorkChain` share one archive, while a preceding
+`Cp2kGeoOptWorkChain` has a separate archive. Shared inventory objects,
+including `AIIDA_NODE`, remain globally reusable.
+
+### Incomplete exports and explicit retries
+
+Existence of a simulation object alone does not mean that its export completed.
+For supported AiiDA workflows, the app checks the current openBIS objects,
+structure/result relationships and published dataset file inventories. This is
+a read-only check; no new scientific property or schema status flag is required.
+
+After an interrupted export, a persistent report identifies missing components,
+with a **Retry incomplete steps** button. Entering the same PK and clicking
+**Check** reconstructs the per-result status after a notebook/kernel restart:
+complete existing results remain collapsed, while incomplete or unverified
+results are visibly marked. Saved scientific properties are not presented as
+editable new results during recovery.
+
+A retry reuses existing objects and uploads only missing components:
+
+- One shared `.aiida` archive per existing main-WorkChain boundary.
+- Atomistic-model structure data and previews.
+- Simulation previews and required structure/source-result relationships.
+- Compact charge-analysis extracts and, for Bader, `ACF.dat`, `AVF.dat` and
+  `BCF.dat`. Already published files are not uploaded again.
+
+If an upload raises an exception, the app first reads the server inventory
+again. If the expected files are visible, the upload is considered delivered.
+If the inventory cannot be read, the status is **unverified**, not **missing**;
+the app does not blindly repeat that upload. This protocol supports explicit
+retries from one export interface; it is not a distributed transaction or a
+lock against concurrent exports from different kernels.
+
+The app reports success only after the final component checks pass. A missing
+preview is still reported as an incomplete export, but does not block importing
+the scientific AiiDA archive. A missing `.aiida` archive does block that import.
+The checks establish that expected files have been published, not a byte-level
+integrity check of every archive. Manual uploads with an AiiDA archive use the
+same verified-upload protocol for each derived archive, simulation, link and
+attachment. File-only manual uploads remain outside this recovery protocol.
+
+Valid existing archives are never replaced just because their stored extras
+predate newer local annotations. Updating local openBIS-reference extras is a
+separate final step: failure there produces an explicit warning that the remote
+export completed but the local metadata update failed.
+
+### One root per AiiDA archive
+
+An `AIIDA_NODE` identifies exactly one main process with the scalar
+`WFMS_UUID`. There is no multivalue UUID property or UUID list in comments.
+For an `ATOMISTIC_MODEL`, the same scalar property still identifies its
+structure node, not a workflow.
+
+Before writing to openBIS, manual upload opens the supplied `.aiida` through
+AiiDA's read-only SQLite ZIP backend. Main processes are `ProcessNode` records
+without an incoming `CALL_CALC` or `CALL_WORK` link **inside that archive**.
+An archive with no process roots is rejected as a simulation archive.
+
+If the file has N roots, select **Unclassified Simulation**: the app shows N
+separate editable property forms, initialized from the shared parameters and
+named after their respective main workflows. The user reviews every record
+and explicitly confirms before saving. Preview, other attachments, executables
+and selected parents are shared; scientific properties can be edited separately.
+Changing the source file or shared settings requires a fresh review.
+
+The app generates **N single-root archives** directly from the archive backend,
+without importing or modifying anything in the user's AiiDA database. Each
+preserves the root's call tree, data and UUIDs. Shared inputs retain the same
+UUID in different archives. Traversal does not follow data creators or process
+callers backwards into other main workflows.
+
+Only these N derived archives are uploaded, each attached to its matching
+`AIIDA_NODE`. **The original uploaded archive is not also stored on openBIS.**
+The user's original file is untouched. Other input/output attachments remain
+datasets of the respective simulation objects.
+
+Each manual simulation links its archive and stores its root in
+`AIIDA_SOURCE_UUID`; type + source UUID + target space identify it for retry.
+Retry reuses existing objects, preserves their reviewed properties and uploads
+only missing files. Unknown server inventory blocks speculative replacement.
+After a kernel restart, upload the same source and attachments and review
+again to resume. Concurrent exports from independent sessions are not locked.
+
+Automatic exports retain one archive per main-workflow boundary, shared by
+its classified results. Those results use `AIIDA_SOURCE_UUID` for the actual
+result-producing process, which may differ from the archive's `WFMS_UUID`.
+
+Import verifies that the archive has exactly one main process matching
+`WFMS_UUID` before importing. AiiDA UUID deduplication then restores its graph
+without duplicating shared nodes; a viewer is offered if installed.
+
+The preproduction `AIIDA_ROOT_UUIDS` assignment is no longer provisioned.
+Existing development-server records/schema require an explicit audited cleanup
+or re-export before retiring that assignment; deploying this code does not
+silently delete server properties, archives or experiments.
+
+## AiiDA export resolution
+
+The exporter resolves provenance in three steps:
+
+1. A CODE name in openBIS must occur in the AiiDA Code label after converting
+   both values to lowercase and removing punctuation and whitespace. The AiiDA
+   Code description is not used for CODE matching.
+2. A COMPUTER name in openBIS must occur in either the AiiDA Computer label or
+   its description after the same normalization. The label is checked first.
+3. An EXECUTABLE is identified by the AiiDA Code UUID when available, with its
+   CODE, COMPUTER, executable path, plugin entry point, full label, and inferred
+   version recorded as provenance.
+
+If more than one equally specific object matches, automatic resolution stops.
+When automatic matching fails, the export widget allows the user to select an
+existing CODE or COMPUTER explicitly, or create a new one in the appropriate
+collection. New COMPUTER objects require an ORGANISATION location. Exact-name
+duplicates are refused.
+
+A missing EXECUTABLE can likewise be mapped to an existing object or explicitly
+confirmed for creation. User selections are keyed by AiiDA UUID, and newly
+created EXECUTABLE objects record those UUIDs for automatic reuse. This preflight
+finishes before any AiiDA archive or simulation object is uploaded.
+
+## Global method families
+
+Controlled vocabulary:
+
+```text
+DFT
+TB
+MFH-TB
+DMRG
+CAS
+CASSCF
+ForceField
+MLPotential
+other
+```
+
+## Global method modifiers
+
+Controlled vocabulary:
+
+```text
+hybrid
+vdW
+DFT+U
+spin_collinear
+spin_orbit
+spin_non_collinear
+```
+
+`method_modifiers` is a multi-value field.
+
+Examples:
+
+```text
+[]
+["vdW"]
+["hybrid", "vdW"]
+["hybrid", "spin_orbit"]
+["DFT+U", "spin_collinear"]
+```
+
+`spin_collinear` and `spin_non_collinear` should not be used together.
+
+---
+
+# ENERGY_CALCULATION
+
+## Object type
+
+`ENERGY_CALCULATION`
+
+## Definition
+
+Simulation that computes the energy of a fixed `ATOMISTIC_MODEL`,
+`MOLECULE`, or `CRYSTAL_CONCEPT` without intentionally modifying its
+geometry.
+
+## Suggested method families
+
+```text
+DFT
+DFTB
+TB
+MFH-TB
+DMRG
+CAS
+CASSCF
+ForceField
+MLPotential
+```
+
+## Parent objects
+
+Required (one or more of):
+
+```text
+ATOMISTIC_MODEL[]
+MOLECULE[]
+CRYSTAL_CONCEPT[]
+```
+
+Relations:
+
+```text
+ATOMISTIC_MODEL → ENERGY_CALCULATION
+MOLECULE → ENERGY_CALCULATION
+CRYSTAL_CONCEPT → ENERGY_CALCULATION
+```
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+image of the input ATOMISTIC_MODEL, MOLECULE, or CRYSTAL_CONCEPT
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: float
+total_energy_hartree: float (Hartree)
+converged: boolean
+```
+
+## Optional properties
+
+```text
+method_label: string
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+fermi_energy_ev: float[] (eV)
+electronic_gap_ev: float[] (eV)
+comments: text
+```
+
+## Required linked content
+
+```text
+parents: ATOMISTIC_MODEL[], MOLECULE[], and/or CRYSTAL_CONCEPT[]
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+```
+
+---
+
+# GEOMETRY_OPTIMISATION
+
+## Object type
+
+`GEOMETRY_OPTIMISATION`
+
+## Definition
+
+Simulation that optimizes the geometry of an `ATOMISTIC_MODEL`, optionally including optimization of the simulation cell.
+
+## Suggested method families
+
+```text
+DFT
+DFTB
+CASSCF
+ForceField
+MLPotential
+```
+
+## Parent objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+Relation:
+
+```text
+ATOMISTIC_MODEL → GEOMETRY_OPTIMISATION
+```
+
+## Child objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+Relation:
+
+```text
+GEOMETRY_OPTIMISATION → ATOMISTIC_MODEL
+```
+
+The child `ATOMISTIC_MODEL` represents the optimized geometry.
+
+Optional, when the final electronic step contains charge-population tables:
+
+```text
+CHARGE_ANALYSIS
+```
+
+Relation:
+
+```text
+GEOMETRY_OPTIMISATION → CHARGE_ANALYSIS
+optimized ATOMISTIC_MODEL → CHARGE_ANALYSIS
+```
+
+The charge-analysis object shares the geometry optimization's `AIIDA_NODE` and
+stores only a compact final charge-table extract as `RAW_DATA`.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+image of the optimized ATOMISTIC_MODEL
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+constrained: boolean
+cell_optimization: boolean
+final_energy_hartree: float (Hartree)
+converged: boolean
+```
+
+## Optional properties
+
+```text
+method_label: string
+constraints_description: text
+cell_constraints: string
+final_max_force_hartree_per_bohr: float (Hartree/bohr)
+number_of_steps: integer
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+fermi_energy_ev: float[] (eV)
+electronic_gap_ev: float[] (eV)
+comments: text
+```
+
+## Required linked content
+
+```text
+parent: input ATOMISTIC_MODEL
+child: optimized ATOMISTIC_MODEL
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+trajectory
+intermediate geometries
+forces on all atoms
+```
+
+---
+
+# BAND_STRUCTURE
+
+## Object type
+
+`BAND_STRUCTURE`
+
+## Definition
+
+Simulation that computes the electronic band structure of an `ATOMISTIC_MODEL`
+or `CRYSTAL_CONCEPT`.
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+```
+
+## Parent objects
+
+Required (one or more of):
+
+```text
+ATOMISTIC_MODEL
+CRYSTAL_CONCEPT
+```
+
+Relations:
+
+```text
+ATOMISTIC_MODEL → BAND_STRUCTURE
+CRYSTAL_CONCEPT → BAND_STRUCTURE
+```
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+band-structure plot
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+converged: boolean
+```
+
+## Optional properties
+
+```text
+method_label: string
+fermi_energy_ev: float[] (eV)
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+band_gap_ev: float (eV), only when the global gap is established
+k_path: string
+electronic_gap_type: enum
+comments: text
+```
+
+## `electronic_gap_type` vocabulary
+
+```text
+direct
+indirect
+unknown
+```
+
+## Required linked content
+
+```text
+parent: ATOMISTIC_MODEL and/or CRYSTAL_CONCEPT
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+full band arrays
+full k-point arrays
+full eigenvalue arrays
+full projected-band arrays
+```
+
+---
+
+# BAND_UNFOLDING
+
+## Object type
+
+`BAND_UNFOLDING`
+
+## Definition
+
+Electronic spectral weights unfolded from a supercell calculation onto a
+primitive-cell k-path. This is distinct from `BAND_STRUCTURE`: the latter is a
+direct band calculation, while this object records an unfolding result.
+
+The same object type is used for QE/BandUPpy and CP2K sparse-atomic-orbital
+unfolding. The implementation is recorded explicitly.
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+```
+
+## Parent objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+The parent is the supercell structure used as input to the unfolding workflow.
+Reference-cell structures generated internally remain in the AiiDA archive and
+are not created as extra openBIS objects solely for unfolding.
+
+Relation:
+
+```text
+ATOMISTIC_MODEL → BAND_UNFOLDING
+```
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+For QE this includes `pw.x` and BandUPpy; for CP2K it includes CP2K and the
+unfolding executable when it is represented by a distinct AiiDA Code.
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+unfolded-band spectral-weight plot
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+unfolding_implementation: enum
+supercell_matrix: text containing a JSON matrix
+k_path: string
+converged: boolean
+```
+
+## Optional properties
+
+```text
+method_label: string
+fermi_energy_ev: float[] (eV)
+energy_min_ev: float (eV relative to the stored reference)
+energy_max_ev: float (eV relative to the stored reference)
+projection_description: text
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+comments: text
+```
+
+## `unfolding_implementation` vocabulary
+
+```text
+BANDUPPY
+CP2K_SPARSE_AO
+OTHER
+```
+
+## AiiDA mapping
+
+- `QeBanduppyUnfoldingWorkChain` maps to `BANDUPPY`.
+- A `Cp2kScfWorkChain` with `unfolding_retrieved` maps to `CP2K_SPARSE_AO`.
+- Charge, spin, exchange-correlation method, hybrid/vdW modifiers, supercell
+  matrix, k-path, reference/Fermi level, and plotted energy window are extracted
+  automatically when available.
+- `AIIDA_SOURCE_UUID` is the UUID of the concrete unfolding-producing WorkChain.
+
+## Required linked content
+
+```text
+parent: input supercell ATOMISTIC_MODEL
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full unfolded-band arrays
+full spectral-weight arrays
+full k-point arrays
+full eigenvalue arrays
+projection matrices and sparse-overlap data
+input and output files
+restart files
+stdout/stderr
+```
+
+---
+
+
+# CHARGE_ANALYSIS
+
+## Object type
+
+`CHARGE_ANALYSIS`
+
+## Definition
+
+Simulation or post-processing analysis that computes atomic, orbital, fragment, or spatial charge information for a fixed `ATOMISTIC_MODEL`.
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+CAS
+CASSCF
+```
+
+## Parent objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+Relation:
+
+```text
+ATOMISTIC_MODEL → CHARGE_ANALYSIS
+```
+
+Optional, if the charge analysis derives from a previous calculation:
+
+```text
+ENERGY_CALCULATION
+GEOMETRY_OPTIMISATION
+```
+
+Relations:
+
+```text
+ENERGY_CALCULATION → CHARGE_ANALYSIS
+GEOMETRY_OPTIMISATION → CHARGE_ANALYSIS
+```
+
+For charge tables printed by the final electronic step of a geometry
+optimization, the required `ATOMISTIC_MODEL` parent is the optimized structure.
+
+A final population analysis from a geometry optimization and a later post-SCF
+charge analysis are distinct scientific results, even when their numerical values
+are nearly identical. Each keeps the source UUID and `AIIDA_NODE` of the WorkChain
+that produced it. Suggested names should make the provenance clear, for example
+`Final geometry population analysis` and `Post-SCF charge analysis with Bader`.
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+The list may include both the executable used for the underlying electronic-structure calculation and the executable used for the charge analysis.
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+image of the input ATOMISTIC_MODEL, preferably coloured or annotated by charge if available
+```
+
+Required if AiiDA-generated:
+
+```text
+RAW_DATA
+```
+
+Content:
+
+```text
+compact text extract containing the computed Mulliken, Hirshfeld, and/or Löwdin
+population tables; if Bader analysis is present, also ACF.dat, AVF.dat, and BCF.dat
+```
+
+The extract exposes the numerical charge results directly on `CHARGE_ANALYSIS`.
+The complete calculation output remains available from the linked `.aiida` archive
+and is not duplicated.
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files, including a file containing the computed charges
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+charge_analysis_method: string
+converged: boolean
+```
+
+## Optional properties
+
+```text
+method_label: string
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+fermi_energy_ev: float[] (eV)
+electronic_gap_ev: float[] (eV)
+comments: text
+```
+
+## Required linked content
+
+```text
+parent: ATOMISTIC_MODEL
+optional parent: ENERGY_CALCULATION
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+full charge tables
+full volumetric charge files
+```
+
+---
+
+# DOS
+
+## Object type
+
+`DOS`
+
+## Definition
+
+Simulation or post-processing analysis that computes the electronic density of
+states of an `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT`.
+
+If projected density of states is included, set:
+
+```text
+PDOS = true
+```
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+```
+
+## Parent objects
+
+Required (one or more of):
+
+```text
+ATOMISTIC_MODEL
+MOLECULE
+CRYSTAL_CONCEPT
+```
+
+Relations:
+
+```text
+ATOMISTIC_MODEL → DOS
+MOLECULE → DOS
+CRYSTAL_CONCEPT → DOS
+```
+
+Optional, if the DOS derives from a previous calculation:
+
+```text
+ENERGY_CALCULATION
+```
+
+Relation:
+
+```text
+ENERGY_CALCULATION → DOS
+```
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+DOS or PDOS plot
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files, including a file containing the DOS/PDOS data
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+PDOS: boolean
+converged: boolean
+```
+
+## Required if `PDOS = true`
+
+```text
+projection_description: text
+```
+
+## Optional properties
+
+```text
+method_label: string
+fermi_energy_ev: float[] (eV)
+energy_min_ev: float (eV)
+energy_max_ev: float (eV)
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+electronic_gap_ev: float[] (eV)
+comments: text
+```
+
+## AiiDA mapping
+
+A `Cp2kPdosWorkChain` creates one `DOS` object with `PDOS = true`. Its atom- and
+selection-projected arrays remain in the linked AiiDA archive. When the workflow
+also computes molecular-orbital overlaps, this is recorded in
+`projection_description` and the overlap executable is linked, but no separate
+simulation object is created for the overlap post-processing step.
+
+## Required linked content
+
+```text
+parents: ATOMISTIC_MODEL, MOLECULE, and/or CRYSTAL_CONCEPT
+optional parent: ENERGY_CALCULATION
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+full DOS arrays
+full PDOS arrays
+full projection arrays
+```
+
+---
+
+# MINIMUM_ENERGY_PATH
+
+## Object type
+
+`MINIMUM_ENERGY_PATH`
+
+## Definition
+
+One computed path between two endpoint `ATOMISTIC_MODEL` objects. It may be
+obtained from a nudged-elastic-band calculation, a constrained replica chain,
+or another explicitly described path method.
+
+`REACTION_BARRIER` is deliberately not redefined here. Its eventual scope
+(for example free-energy barriers obtained from molecular dynamics, umbrella
+sampling, or metadynamics) must be agreed separately. A MEP nevertheless
+contains its forward and backward barrier values as compact summaries of the
+stored energy profile.
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+ForceField
+MLPotential
+```
+
+## Parent objects
+
+Required:
+
+```text
+initial ATOMISTIC_MODEL
+final ATOMISTIC_MODEL
+```
+
+Relations:
+
+```text
+initial ATOMISTIC_MODEL → MINIMUM_ENERGY_PATH
+final ATOMISTIC_MODEL → MINIMUM_ENERGY_PATH
+```
+
+Optional:
+
+```text
+preceding MINIMUM_ENERGY_PATH
+```
+
+The optional preceding path records scientific-block provenance, for example
+replica chain → NEB or NEB → continued NEB. Each block keeps its own
+`AIIDA_NODE` and therefore its own minimally scoped `.aiida` archive.
+
+Intermediate images are intentionally not registered as additional
+`ATOMISTIC_MODEL` objects. They remain available from the linked AiiDA archive
+or, for a non-AiiDA result, from the input/output bundle.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+energy profile plot along the reaction coordinate
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files, including a file containing the reaction-path energies
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+mep_method: enum
+relative_energies_ev: float[] (eV, relative to the initial endpoint)
+forward_barrier_ev: float (eV)
+backward_barrier_ev: float (eV)
+converged: boolean
+number_of_images: integer
+```
+
+## Optional properties
+
+```text
+method_label: string
+neb_variant: enum
+other_method_description: text
+collective_variables: text
+constraints_description: text
+reaction_coordinate_description: text
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+comments: text
+```
+
+## `mep_method` vocabulary
+
+```text
+NEB
+REPLICA_CHAIN
+OTHER
+```
+
+`neb_variant` is required when `mep_method = NEB`:
+
+```text
+NEB
+CI_NEB
+```
+
+`collective_variables` is required for `REPLICA_CHAIN` and records the
+definitions, targets, increments, and actual values when available.
+`other_method_description` is required for `OTHER`. Constraints are stored
+for both NEB and replica-chain calculations when present.
+
+## Required linked content
+
+```text
+parents: initial ATOMISTIC_MODEL, final ATOMISTIC_MODEL
+optional parent: preceding MINIMUM_ENERGY_PATH
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+The `ELN_PREVIEW` is the final energy-profile plot. For an AiiDA-generated
+result it is proposed automatically and may be replaced by the user before
+export.
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+full path arrays
+all intermediate geometries
+all force arrays
+```
+
+## AiiDA mapping
+
+- `Cp2kReplicaWorkChain` → `mep_method = REPLICA_CHAIN`
+- `Cp2kNebWorkChain` → `mep_method = NEB`
+- A continuation is a new `MINIMUM_ENERGY_PATH`, linked to the preceding MEP.
+- A preceding geometry optimization remains a separate simulation/archive block.
+
+---
+
+# SPM_SIMULATION
+
+## Object type
+
+`SPM_SIMULATION`
+
+## Definition
+
+Simulation that computes a scanning probe microscopy observable for an `ATOMISTIC_MODEL`.
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+```
+
+## Parent objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+Relation:
+
+```text
+ATOMISTIC_MODEL → SPM_SIMULATION
+```
+
+Optional, if the SPM simulation derives from a previous electronic-structure calculation:
+
+```text
+ENERGY_CALCULATION
+```
+
+Relation:
+
+```text
+ENERGY_CALCULATION → SPM_SIMULATION
+```
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+simulated SPM image or representative SPM map
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files, including the simulated SPM image/map data
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+spm_mode: enum[]
+converged: boolean
+```
+
+One object can describe several observables produced by the same workflow and
+AiiDA archive. For example, a single calculation can contain STM and STS maps,
+or orbital maps together with STM and STS maps.
+
+## Optional properties
+
+```text
+method_label: string
+bias_voltages_v: float[] (V)
+heights_angstrom: float[] (angstrom above the topmost atom)
+isovalues_au: float[] (a.u.)
+p_tip_ratios: float[]
+tip_model: string
+scan_area_angstrom2: float (angstrom^2)
+image_modes: enum[]
+orbital_energies_ev: float[] (eV relative to the workflow reference energy)
+afm_amplitude_angstrom: float (angstrom)
+afm_probe_type: string
+afm_tip_charge_e: float (elementary charge)
+afm_scan_z_min_angstrom: float (absolute grid coordinate)
+afm_scan_z_max_angstrom: float (absolute grid coordinate)
+afm_scan_z_step_angstrom: float
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+comments: text
+```
+
+`bias_voltages_v`, `heights_angstrom`, and `isovalues_au` contain every value
+represented by the exported calculation. `p_tip_ratios` stores the p-orbital
+fractions, while `tip_model` gives an explicit corresponding summary (for
+example, ratio `0.8` is `20% s + 80% p`; multiple ratios are separated by
+semicolons). Orbital energies remain separate from ordinary requested bias
+voltages. AFM z limits are absolute scan-grid coordinates and are not interpreted
+as heights above the topmost atom. For AFM, `tip_model` identifies the
+probe-particle model and its electronic tip/probe summary; the dedicated AFM
+fields retain the probe species, charge, amplitude, and scan range. Complete
+force-field and cantilever parameters remain reproducibly available in the
+linked AiiDA archive.
+
+The suggested ELN preview contains maps nearest -0.5 V and +0.5 V when those
+biases are covered by an STM result, HOMO and LUMO maps for every available spin
+channel for orbital results, and the AFM frequency-shift plane nearest a 15
+angstrom probe-particle tip coordinate. The user may replace every suggestion.
+
+## `spm_mode` vocabulary
+
+```text
+STM
+STS
+AFM
+ORBITALS
+other
+```
+
+## `image_modes` vocabulary
+
+```text
+constant height
+constant isovalue
+three-dimensional grid
+other
+```
+
+## AiiDA mapping
+
+- `Cp2kStmWorkChain` -> one `SPM_SIMULATION`, normally with `STM` and `STS`.
+- `Cp2kOrbitalsWorkChain` -> one `SPM_SIMULATION`, normally with `ORBITALS`,
+  `STM`, and `STS`.
+- `Cp2kAfmWorkChain` -> one `SPM_SIMULATION` with `AFM`.
+- The scan area is the norm of the cross product of the two in-plane grid/cell
+  vectors. CP2K STM/orbital vectors are converted from Bohr before calculating
+  the area.
+- Large map and grid arrays remain in the linked AiiDA archive; openBIS stores
+  only searchable summary metadata and an `ELN_PREVIEW`.
+
+## Required linked content
+
+```text
+parent: ATOMISTIC_MODEL
+optional parent: ENERGY_CALCULATION
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+full volumetric grids
+full cube files
+full raw SPM arrays
+```
+
+---
+
+# VIBRATIONAL_SPECTROSCOPY
+
+## Object type
+
+`VIBRATIONAL_SPECTROSCOPY`
+
+## Definition
+
+Simulation that computes vibrational properties of an `ATOMISTIC_MODEL`.
+
+## Suggested method families
+
+```text
+DFT
+TB
+ForceField
+MLPotential
+```
+
+## Parent objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+Relation:
+
+```text
+ATOMISTIC_MODEL → VIBRATIONAL_SPECTROSCOPY
+```
+
+## Child objects
+
+None required.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+vibrational spectrum, phonon band structure, phonon DOS, IR spectrum, Raman spectrum, or representative vibrational plot
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files, including vibrational frequencies, spectra, or phonon data
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+vibrational_mode: enum
+converged: boolean
+```
+
+## Optional properties
+
+```text
+method_label: string
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+comments: text
+```
+
+## `vibrational_mode` vocabulary
+
+```text
+Phonons
+Phonons + IR
+Phonons + Raman
+Phonons + IR + Raman
+```
+
+## AiiDA mapping
+
+The QE app launches one `VibroWorkChain`. Export one
+`VIBRATIONAL_SPECTROSCOPY` object for that workchain. Its mode records all
+results present in the shared vibrational data: `Phonons`, `Phonons + IR`,
+`Phonons + Raman`, or `Phonons + IR + Raman`. Do not split that single workflow
+into separate phonon, IR, and Raman objects.
+
+## Required linked content
+
+```text
+parent: ATOMISTIC_MODEL
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+full force-constant matrices
+full dynamical matrices
+full normal-mode eigenvectors
+full phonon arrays
+full spectra arrays
+```
+
+---
+
+# MOLECULAR_DYNAMICS
+
+## Object type
+
+`MOLECULAR_DYNAMICS`
+
+## Definition
+
+Simulation that propagates an `ATOMISTIC_MODEL` in time to generate a molecular dynamics trajectory.
+
+## Suggested method families
+
+```text
+DFT
+TB
+ForceField
+MLPotential
+```
+
+## Parent objects
+
+Required:
+
+```text
+ATOMISTIC_MODEL
+```
+
+Relation:
+
+```text
+ATOMISTIC_MODEL → MOLECULAR_DYNAMICS
+```
+
+Optional, if the MD starts from a previously optimized geometry:
+
+```text
+GEOMETRY_OPTIMISATION
+```
+
+Relation:
+
+```text
+GEOMETRY_OPTIMISATION → MOLECULAR_DYNAMICS
+```
+
+## Child objects
+
+Optional:
+
+```text
+ATOMISTIC_MODEL
+```
+
+Relation:
+
+```text
+MOLECULAR_DYNAMICS → ATOMISTIC_MODEL
+```
+
+The child `ATOMISTIC_MODEL` may represent the final structure or a representative snapshot from the trajectory.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+representative MD snapshot, trajectory snapshot, or time-series plot
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files, including the trajectory or trajectory reference
+```
+
+## Required properties
+
+```text
+name: string
+method_family: enum
+method_modifiers: enum[]
+charge: number
+time_step_fs: float (fs)
+total_time_fs: float (fs)
+completed: boolean
+```
+
+## Optional properties
+
+```text
+method_label: string
+ensemble: enum
+temperature_k: float (K)
+pressure_bar: float (bar)
+thermostat: string
+barostat: string
+spin_multiplicity: integer
+total_magnetization_bohr_magneton: float (Bohr magnetons)
+absolute_magnetization_bohr_magneton: float (Bohr magnetons)
+comments: text
+```
+
+## `ensemble` vocabulary
+
+```text
+NVE
+NVT
+NPT
+other
+```
+
+## Required linked content
+
+```text
+parent: initial ATOMISTIC_MODEL
+optional parent: GEOMETRY_OPTIMISATION
+optional child: final or representative ATOMISTIC_MODEL
+executables: EXECUTABLE[]
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+full trajectory
+all trajectory frames
+velocities
+forces on all atoms
+large time-series arrays
+```
+
+---
+
+### Electronic Structure
+* **Code:** `ELECTRONIC_STRUCTURE`
+* **Generated code prefix:** `ELST`
+* **Description:** Electronic structure results, analysis and preparation stages.
+
+This category preserves complete state families and analysis tables that do not
+fit a single scalar energy, band, DOS, vibrational or SPM result. The required
+`ELECTRONIC_RESULT_TYPE` names the explicit subtype; it does not infer convergence
+or turn orbital preparation/hardware preparation into a completed calculation.
+Existing specialized categories remain authoritative where applicable.
+
+#### Properties
+
+| Code | Label | Description | Data Type | Mandatory | Multivalued | Unique |
+| :--- | :--- | :--- | :--- | :---: | :---: | :---: |
+| `name` | Name | Name | VARCHAR | True | False | False |
+| `electronic_result_type` | Electronic result type | Electronic result type | CONTROLLEDVOCABULARY (ELECTRONIC_RESULT_TYPE_ENUM) | True | False | False |
+| `simulation_description` | Simulation description | Simulation description | MULTILINE_VARCHAR | True | False | False |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |
+| `charge` | Charge | Charge | REAL | False | False | False |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |
+| `main_result_description` | Main result description | Main result description | MULTILINE_VARCHAR | False | False | False |
+| `main_result_value_numeric` | Main result value | Main result value | REAL | False | False | False |
+| `main_result_unit` | Main result unit | Main result unit | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |
+| `executables` | Executables | Executables | SAMPLE | False | True | False |
+| `aiida_node` | AiiDA node | AiiDA node | SAMPLE | False | False | False |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |
+
+#### Explicit ORCA subtypes
+
+| Stored operation | Electronic result type |
+| :--- | :--- |
+| `common_orbitals` | `ORBITAL_REFERENCE` |
+| `casscf` | `MANY_ELECTRON_STATES` |
+| `casci` | `MANY_ELECTRON_STATES` |
+| `correlation` | `CORRELATION_ENERGIES` |
+| `optical` | `OPTICAL_EXCITATIONS` |
+| `dyson` | `DYSON_TRANSITIONS` |
+| `kondo` | `KONDO_EXCHANGE` |
+| `orbital_reordering` | `ORBITAL_ORDERING` |
+| `orbital_catalog` | `ORBITAL_CATALOG` |
+| `energy_export` | `HAMILTONIAN_EXPORT` |
+| `energy_stage` | `QUANTUM_COMPUTING_STAGE` |
+| `dmrg` | `MOLECULAR_DMRG` |
+| `dmrg_sweeps` | `MOLECULAR_DMRG` |
+| `dmrg_convergence` | `MOLECULAR_DMRG` |
+| `dmrg_timeout_recovery` | `MOLECULAR_DMRG` |
+
+Scalar energy, geometry, spatial cubes/maps and vibrational exports retain their existing categories. The internal legacy result-role key is preserved for archive/recovery identity; it is not the openBIS object classification.
+
+### Model Hamiltonian
+* **Code:** `MODEL_HAMILTONIAN`
+* **Generated code prefix:** `MODH`
+* **Description:** Model Hamiltonian calculation or saved numerical model.
+
+The existing `MODEL` property identifies Spin Hamiltonian, Hubbard Hamiltonian,
+Tight-binding Hamiltonian, Wannier Hamiltonian, or an explicitly described general
+Hamiltonian. `METHOD_FAMILY` identifies the solver/approximation (ED, DMRG, TB or
+MFH_TB). ED is exact diagonalization, not an unspecified method. Abstract models
+need no invented atomic structure, ionic charge or total-spin quantum number.
+
+#### Parents and provenance
+
+Optional input atomistic/material concepts and source simulations retain their
+existing relationships. `AIIDA_NODE` links the original single-root archive;
+`AIIDA_SOURCE_UUID` identifies the saved result. Units and complete sector tables
+remain in that archive. Displayed one-electron levels are not total energies.
+
+#### Properties
+
+| Code | Label | Description | Data Type | Mandatory | Multivalued | Unique |
+| :--- | :--- | :--- | :--- | :---: | :---: | :---: |
+| `name` | Name | Name | VARCHAR | True | False | False |
+| `model` | Model | Model | VARCHAR | True | False | False |
+| `simulation_description` | Simulation description | Simulation description | MULTILINE_VARCHAR | True | False | False |
+| `method_family` | Method family | Method family | CONTROLLEDVOCABULARY (SIMULATION_METHOD_FAMILY_ENUM) | True | False | False |
+| `method_modifiers` | Method modifiers | Method modifiers | CONTROLLEDVOCABULARY (SIMULATION_METHOD_MODIFIER_ENUM) | False | True | False |
+| `method_label` | Method label | Method label | VARCHAR | False | False | False |
+| `converged` | Converged | Converged | BOOLEAN | True | False | False |
+| `charge` | Charge | Charge | REAL | False | False | False |
+| `main_result_description` | Main result description | Main result description | MULTILINE_VARCHAR | False | False | False |
+| `main_result_value_numeric` | Main result value | Main result value | REAL | False | False | False |
+| `main_result_unit` | Main result unit | Main result unit | VARCHAR | False | False | False |
+| `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |
+| `executables` | Executables | Executables | SAMPLE | False | True | False |
+| `aiida_node` | AiiDA node | AiiDA node | SAMPLE | False | False | False |
+| `aiida_source_uuid` | AiiDA source UUID | AiiDA source UUID | VARCHAR | False | False | False |
+
+# UNCLASSIFIED_SIMULATION
+
+## Object type
+
+`UNCLASSIFIED_SIMULATION`
+
+## Definition
+
+Fallback simulation object for computational results that do not yet fit one of the defined simulation object types.
+
+Use only when the simulation cannot be cleanly classified as:
+
+```text
+ENERGY_CALCULATION
+GEOMETRY_OPTIMISATION
+BAND_STRUCTURE
+BAND_UNFOLDING
+CHARGE_ANALYSIS
+DOS
+MINIMUM_ENERGY_PATH
+SPM_SIMULATION
+VIBRATIONAL_SPECTROSCOPY
+MOLECULAR_DYNAMICS
+```
+
+## Suggested method families
+
+```text
+DFT
+TB
+MFH-TB
+DMRG
+CAS
+CASSCF
+ForceField
+MLPotential
+other
+```
+
+## Parent objects
+
+Required if applicable (one or more of):
+
+```text
+ATOMISTIC_MODEL[]
+MOLECULE[]
+CRYSTAL_CONCEPT[]
+```
+
+When no `ATOMISTIC_MODEL` is available as input, link the simulation directly to
+the applicable molecule concept, crystal concept, or both.
+
+Relations:
+
+```text
+ATOMISTIC_MODEL → UNCLASSIFIED_SIMULATION
+MOLECULE → UNCLASSIFIED_SIMULATION
+CRYSTAL_CONCEPT → UNCLASSIFIED_SIMULATION
+```
+
+Optional, if the unclassified simulation derives from another simulation:
+
+```text
+ENERGY_CALCULATION
+GEOMETRY_OPTIMISATION
+BAND_STRUCTURE
+BAND_UNFOLDING
+CHARGE_ANALYSIS
+DOS
+MINIMUM_ENERGY_PATH
+SPM_SIMULATION
+VIBRATIONAL_SPECTROSCOPY
+MOLECULAR_DYNAMICS
+UNCLASSIFIED_SIMULATION
+```
+
+## Child objects
+
+Optional:
+
+```text
+ATOMISTIC_MODEL[]
+```
+
+Relation:
+
+```text
+UNCLASSIFIED_SIMULATION → ATOMISTIC_MODEL
+```
+
+Use only if the simulation produces new atomistic models.
+
+## Object references
+
+Required if known:
+
+```text
+executables: EXECUTABLE[]
+```
+
+Required if AiiDA-generated:
+
+```text
+aiida_node: AIIDA_NODE
+```
+
+## Required datasets
+
+```text
+ELN_PREVIEW
+```
+
+Content:
+
+```text
+representative image, plot, structure snapshot, or workflow summary image
+```
+
+Required if non-AiiDA:
+
+```text
+input_output_bundle
+```
+
+Content:
+
+```text
+tar.gz or zip with relevant input/output files
+```
+
+## Required properties
+
+```text
+name: string
+simulation_description: text
+converged: boolean
+```
+
+## Optional properties
+
+```text
+method_family: enum
+method_modifiers: enum[]
+method_label: string
+charge: number
+main_result_description: text
+main_result_value_numeric: float
+main_result_unit: string
+comments: text
+```
+
+## Required linked content
+
+```text
+parents: ATOMISTIC_MODEL[], MOLECULE[], and/or CRYSTAL_CONCEPT[], if applicable
+children: ATOMISTIC_MODEL[], if produced
+executables: EXECUTABLE[], if known
+ELN_PREVIEW: image dataset
+aiida_node: AIIDA_NODE, if AiiDA
+input_output_bundle: dataset, if non-AiiDA
+```
+
+## Do not duplicate if `aiida_node` exists
+
+```text
+full input files
+full output files
+full input dictionaries
+full output dictionaries
+basis-set details
+pseudopotential details
+cutoff details
+k-point mesh
+SCF iteration history
+occupations
+restart files
+stdout/stderr
+raw numerical arrays
+large intermediate files
+```
+
+# AiiDAlab export behavior
+
+For AiiDA-backed exports, the app renders an ELN preview suggestion for every
+simulation result that will be represented in openBIS. The user can review each
+suggestion and replace it with a dropped PNG or JPEG image before the export.
+The generated suggestion is used when no replacement is supplied.
+
+A simulation result is identified by its object type together with
+`AIIDA_SOURCE_UUID`. It is created at most once within an openBIS space. If the
+same result already exists elsewhere in the selected space, the app reuses it
+and links to its existing collection. Exporting the same AiiDA result to a
+different user space creates a separate simulation object there. Shared
+inventory objects, including `ATOMISTIC_MODEL`, `AIIDA_NODE`, `CODE`,
+`COMPUTER`, and `EXECUTABLE`, continue to be reused globally.
+
+New `EXECUTABLE` records are placed in the dedicated **Executables**
+collection:
+
+```text
+/LAB205_SOFTWARE/COMPUTATIONAL_SIMULATIONS/EXECUTABLE_COLLECTION
+```
+
+New `COMPUTER` records are placed according to their scope:
+
+- local Empa desktops and laptops:
+  `/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_LOCAL_IT_HARDWARE`
+- external computers and HPC resources:
+  `/LAB205_EQUIPMENT/COMPUTING_EQUIPMENT/COMPUTING_EQUIPMENT_EXTERNAL_AND_HPC_RESOURCES`
+
+Existing computer records are never moved by the exporter.
+
+## ORCA molecular-result exports
+
+
+An app hands its geometry/SCF workflow UUID to the common export interface.
+The interface reviews and exports the whole entry: connected completed analyses
+at the exact final geometry, including independently submitted ORCA workflows.
+Preview, publication and retry inspection share the same scope. A new optimized
+geometry starts another entry. A changed result set requires refreshing the
+review before publication. Experiment/molecule selections apply to the whole
+entry. Each main workflow retains its own single-root archive and scalar
+`WFMS_UUID`; this aggregation creates no synthetic AiiDA parent or new schema.
+
+ORCA uses the existing scientific types, independently of its executable:
+
+| Result | Object type | Notes |
+| --- | --- | --- |
+| Optimized geometry | `GEOMETRY_OPTIMISATION` | Input and final `ATOMISTIC_MODEL`; constraints and total energy |
+| Fixed-geometry SCF | `ENERGY_CALCULATION` | Stored total energy in Hartree; charge and multiplicity |
+| RI-MP2 | `ENERGY_CALCULATION` | `METHOD_FAMILY=OTHER`, explicit RI-MP2 label; HF reference, correction and total remain in the archive |
+| SC/FIC/DLPNO-NEVPT2 and CASPT2 | `ELECTRONIC_STRUCTURE` | `METHOD_FAMILY=CAS`; complete reference/correction/total state table, frozen-core model and checks remain together |
+| SCF projected orbital DOS | `DOS` | `PDOS=true`; symmetric Löwdin weights; alpha/beta channels remain distinct |
+| TDA/full-TDDFT optical states and native NTO analysis | `ELECTRONIC_STRUCTURE` | `METHOD_FAMILY=DFT`; all excitation energies, length-gauge strengths, approximate UKS spin labels and unmodified NTO weights remain together |
+| NTO hole/particle cubes | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; NTO kind, state/pair identity and stored reduced cubes; remote full files stay external |
+| Harmonic IR/Raman | `VIBRATIONAL_SPECTROSCOPY` | Modes, Hessian and intensities remain in the archive |
+| SCF/QRO/UNO/CASSCF, Dyson or Kondo cubes and spatial maps | `SPM_SIMULATION` | `SPM_MODE=ORBITALS`; orbital kind in method label/comments and immutable source manifests |
+| QRO/UNO reference, verified CASSCF reference/state table, complete CASCI state table, Dyson transitions or Kondo exchange matrix | `ELECTRONIC_STRUCTURE` | Explicit result-kind label; structured data remain intact in the archive |
+
+One optical calculation remains one reviewed result, including dark states and
+all requested spin families. NTO weights are response-pseudodensity eigenvalues,
+not occupations or necessarily probabilities; full-TDDFT weights can exceed one.
+NTO cubes form a separate SPM result with immutable state/pair provenance.
+Neither optical states nor NTOs are substituted for CASCI/Dyson/Kondo vectors.
+
+One multiroot CASCI or CASSCF calculation is one reviewed result, retaining every
+root. It is not reduced to a scalar ground-state energy. CASSCF exports retain
+the optimization mode, normalized state weights, optimized-reference UUID and
+saved-orbital readback result. State averaging keeps distinct spin-labelled
+states; its weights are not spectral intensities. CASSCF cubes use the CAS
+method family. UNO/CASSCF natural occupations do not define an energy DOS; QRO
+energy labels are not recast as Kohn–Sham eigenvalues. Dyson
+and Kondo orbital/map results belong to SPM, while their state/transition/exchange
+sources retain separate provenance. `ELECTRONIC_STRUCTURE` has no assigned
+spin-multiplicity property: its spin context stays in its comments and archive.
+
+The export boundary is the AiiDA database and repository for the selected process
+and established provenance blocks. Archives include stored retrieved files,
+compact arrays, reduced cubes and any wavefunctions already preserved there.
+Remote/stashed files are represented by their provenance records only. Export
+never opens a remote transport, retrieves an additional file, computes a cube,
+submits a job or changes a file-retention policy. External content remains an
+external dependency after import; an archive is not a guarantee that a remote
+wavefunction can be recovered on another machine.
+
+No new object/property/vocabulary definition or server migration is introduced
+by this adapter. Future searchable active-space, state-manifold or transition
+metadata require a separate reviewed schema change, synchronized across this
+normative document, `simulation_object_types.md`, Python/LinkML models and the
+provisioner. XPS/research workflows without an adapter remain unsupported.
+
+The whole-entry export creates or reuses the related records together. For a
+complete ORCA analysis workspace, import its source geometry, orbital reference
+and state records together with the orbital/map records.
+Each main workflow keeps a separate single-root archive; selecting only the
+last map does not implicitly import every earlier calculation. Shared AiiDA
+UUIDs reconnect the records when their archives are imported together.
+
+Local regression checks cover ORCA mappings, the common review, archive scope,
+duplicate handling and interrupted-export recovery. They do not establish
+a live-server upload/import round trip. That remains a separate acceptance
+gate with an approved destination and the matching shared-exporter revision.
+The CASSCF/correlation implementation and native-pilot limits are recorded in
+[the ORCA stage validation guide](https://github.com/nanotech-empa/aiidalab-orca/blob/main/docs/release-readiness.md).
+
+### Stored model and additional ORCA results
+
+The following exports reuse existing types and vocabulary terms. No new object
+type is introduced for a solver or an application.
+
+| Stored result | Object type | Method family | Preserved content |
+| --- | --- | --- | --- |
+| PythTB periodic bands | `BAND_STRUCTURE` | `TB` / `MFH_TB` | Raw spin-resolved energies, k points/path, model parameters and structure |
+| PythTB finite levels and selected orbitals | `MODEL_HAMILTONIAN` | `TB` / `MFH_TB` | Eigenvalues and computed complex orbital coefficients |
+| PythTB mean-field site occupations | `CHARGE_ANALYSIS` | `MFH_TB` | Both spin channels, occupations, iterations and convergence diagnostics |
+| PythTB Wannier model | `MODEL_HAMILTONIAN` | `TB` / `MFH_TB` | Stored full/reduced Hamiltonians, centers, spreads, coefficients and validation ZIP |
+| Model Hamiltonians graph/Hubbard results | `MODEL_HAMILTONIAN` | `ED` / `DMRG` | Model, all solved sectors, energies, correlations and solver diagnostics |
+| ITensor AiiDA workflows | `MODEL_HAMILTONIAN` | `DMRG` | Stored sector energies, dynamical spectra, inputs and diagnostics |
+| ORCA native DMRG, sweeps and recovery | `ELECTRONIC_STRUCTURE` | `DMRG` | Complete root/attempt tables, energies and convergence diagnostics |
+| ORCA orbital reordering and energy export | `ELECTRONIC_STRUCTURE` | `CAS` | Stored orbital order and labelled energy/Hamiltonian data |
+| ORCA orbital catalog and energy stages | `ELECTRONIC_STRUCTURE` | `OTHER` | Saved catalogs, stage identity, sampled/full energies and hardware preparation records |
+
+Local PythTB, graph and Hubbard solvers run outside AiiDA. Preparing an export
+records their existing results as immutable data under one AiiDA recording
+process, explicitly labelled as such; it does not claim that AiiDA ran the solver.
+Preparing the same numerical bundle again reuses its UUID. For finite PythTB,
+levels and Wannier content share one Model Hamiltonian result: each source UUID has
+at most one result of a given object type. Each main process retains one
+`AIIDA_NODE`, one scalar `WFMS_UUID`, and one single-root archive.
+
+`BAND_GAP_EV` is optional: sampled bands do not necessarily establish a global
+gap, and absence is not zero. Neutral PythTB charge refers to its half-filled
+pi-electron model. One-electron levels and the mean-field energy proxy are not
+ab-initio total energies. Spin-model energies/frequencies are in meV; Hubbard
+and PythTB energies are in eV; native ORCA DMRG energies are in Hartree. Stored
+metadata retains these units without inappropriate conversion to a total energy.
+
+Abstract spin/Hubbard graphs do not create fabricated `ATOMISTIC_MODEL` objects,
+ionic charge or total-spin assignments. ED ground-manifold averages, fixed Sz
+sectors and individual DMRG candidates keep their distinct meanings. Workflow
+completion is not a convergence certificate: unestablished or failed convergence
+uses `CONVERGED=false` with diagnostics in the archive. Finished ORCA DMRG exit
+311 can be exported as an explicitly unconverged partial result; other failed or
+running processes are not made exportable.
+
+Only already stored arrays, files and selected computed orbitals are exported.
+Remote/stash files and local checkpoint directories remain references. Export
+never launches a solver or retrieves missing artifacts. The common review,
+executable mapping, duplicate check, preview and recovery controls apply.
+
+The Python simulation definitions are `src/simulation_schema.py`; their generated
+LinkML view is `schema/simulation_objects_schema.yaml`. The older laboratory
+catalogs `schema/openbis_objects.py` and `schema/openBIS_objects_schema.yaml`
+retain historical simulation classes and must not provision modern simulation
+objects. Laboratory definitions in those catalogs remain separate.
+
+### Model preview and classification (November 2026)
+
+Spin/Hubbard previews show the saved graph and available energy levels, with
+original site labels, spin sizes, drawing coordinates and energy units. They do
+not solve the model again. ITensor chain previews use stored graph/chain inputs;
+missing data are explicitly reported. Preview selection/upload remains available
+in the common export review. Existing published archives are never replaced.
+
+Automatic PythTB and Model Hamiltonians exports do not use Unclassified.
+Periodic electronic bands and mean-field charge results retain BAND_STRUCTURE
+and CHARGE_ANALYSIS respectively. ORCA state families, optical/Dyson spectra, Kondo exchange and preparation/quantum stages use ELECTRONIC_STRUCTURE with explicit subtypes. Supported automatic exporters never choose Unclassified; manual arbitrary archives retain the explicit Unclassified option. Do not silently relabel old published objects or
+create a second result merely because its classification changed.

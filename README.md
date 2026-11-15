@@ -1,8 +1,24 @@
 # D2.1 - Metadata schema to store and access microscopy data
 
-> **Legacy Python 3.9 / AiiDA 2.6.3:** use [v0.1.1](https://github.com/nanotech-empa/aiidalab-openbis/releases/tag/v0.1.1). See the [Empa legacy compatibility guide](https://github.com/nanotech-empa/aiida-nanotech-empa/blob/master/docs/legacy-python39-aiida263.md) for the matching package versions and installation constraints. Use a tagged version to preserve this runtime.
+> **Legacy Python 3.9 / AiiDA 2.6.3:** use [v0.1.2](https://github.com/nanotech-empa/aiidalab-openbis/releases/tag/v0.1.2). See the [Empa legacy compatibility guide](https://github.com/nanotech-empa/aiida-nanotech-empa/blob/master/docs/legacy-python39-aiida263.md) for the matching package versions and installation constraints. Use a tagged version to preserve this runtime.
 
 Common metadata schema to store and access microscopy data from simulations and experiments in a single platform.
+
+## Supported runtime
+
+This integrated version requires **Python >=3.12** and **AiiDA >=2.8,<3**.
+Python 3.9–3.11 and AiiDA versions below 2.8 are no longer supported or tested.
+The previous branch-specific backwards-compatibility window is closed here.
+The AiiDA 3 upper bound is retained from the existing requirements.
+
+The integrated runtime has been exercised with Python 3.12.11, AiiDA 2.8.0,
+AiiDAlab 26.5.2 and ipywidgets 8.1.8. Other dependency pins are unchanged;
+the packaging branch's `aiidalab-eln>=0.1.4` requirement is included.
+This support floor is a maintainer policy, not a claim that every older
+combination necessarily fails or every future version has been tested.
+
+See [integration notes](docs/runtime_integration.md) for the source branches,
+validation scope and remaining production checks.
 
 ## Authors
 - Aliaksandr Yakutovich
@@ -40,3 +56,24 @@ This repository contains all the files needed for setting up and interact with t
 The [PREMISE](https://ord-premise.github.io/) project is supported by the [Open Research Data Program](https://ethrat.ch/en/eth-domain/open-research-data/) of the ETH Board.
 
 ![image](https://github.com/ord-premise/metadata-batteries/assets/45081142/74640b5c-ee94-41e1-9acd-fa47da866fe8)
+
+## Software attribution and scientific acknowledgements
+
+Please credit [aiidalab-openbis](https://github.com/nanotech-empa/aiidalab-openbis) and its
+[contributors](https://github.com/nanotech-empa/aiidalab-openbis/graphs/contributors),
+and identify the release or immutable commit used. Existing author,
+contributor and funding acknowledgements remain authoritative.
+
+Package metadata declares MIT, but this revision has no top-level licence
+file. Confirm the applicable notices with the maintainers before copying
+or distributing code; this citation guidance does not supply a licence.
+
+For research using this app, acknowledge the [AiiDA team](https://github.com/nanotech-empa/.github/blob/main/CITATION_GUIDANCE.md#aiida)
+and [AiiDAlab team](https://github.com/nanotech-empa/.github/blob/main/CITATION_GUIDANCE.md#aiidalab), and cite the three AiiDA papers
+and both AiiDAlab platform papers listed in that guide.
+
+Preserve the Authors and PREMISE acknowledgements above. Also credit openBIS, pyBIS and the ELN integrations actually used.
+
+The [shared credit guide](https://github.com/nanotech-empa/.github/blob/main/CITATION_GUIDANCE.md) keeps software attribution, licence
+compliance and scientific citation requests separate. Scientific citation
+requests are not additional MIT licence conditions.

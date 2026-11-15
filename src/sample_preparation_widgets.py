@@ -10,7 +10,6 @@ import time
 import threading
 import os
 import logging
-import pathlib
 from traitlets import TraitError
 from . import custom_widgets as cw
 from bs4 import BeautifulSoup
@@ -40,13 +39,10 @@ OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects
 ]
 processes_project = OPENBIS_PROJECTS_PATHS.get("Process")
 
-if not os.path.exists("logs"):
-    os.mkdir("logs")
-
+utils.LOG_DIR.mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
-app_folder = pathlib.Path().resolve().parent
 logging.basicConfig(
-    filename=app_folder / "logs" / "aiidalab_openbis_interface.log",
+    filename=utils.LOG_FILE_PATH,
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
@@ -135,15 +131,11 @@ def validate_and_sort_process_steps(process_name, process_step_list, openbis_ses
             continue
 
         if step_obj is None:
-            errors.append(
-                f"Process step '{process_step_id}' was not found in openBIS."
-            )
+            errors.append(f"Process step '{process_step_id}' was not found in openBIS.")
             continue
 
         raw_step_name = (step_obj.props.get("name") or "").strip()
-        step_display_name = (
-            raw_step_name if raw_step_name else f"<{step_obj.permId}>"
-        )
+        step_display_name = raw_step_name if raw_step_name else f"<{step_obj.permId}>"
 
         icons_prefix, real_name = split_icons_and_name(raw_step_name)
 
@@ -169,14 +161,25 @@ def validate_and_sort_process_steps(process_name, process_step_list, openbis_ses
 
     if errors:
         bullet_errors = "\n".join(f"• {err}" for err in errors)
-        error_msg = (
-            f"Cannot load process template '{process_name}':\n\n{bullet_errors}"
-        )
+        error_msg = f"Cannot load process template '{process_name}':\n\n{bullet_errors}"
         return None, error_msg
 
     step_items.sort(key=lambda x: x[0])
     sorted_steps = [item[1] for item in step_items]
     return sorted_steps, None
+
+
+def set_accordion_children_titles(accordion, children, titles):
+    children = list(children)
+    titles = list(titles)
+
+    accordion.children = children
+    accordion.titles = tuple(
+        (titles[index] if index < len(titles) else "") or ""
+        for index in range(len(children))
+    )
+    if not children:
+        accordion.selected_index = None
 
 
 class SampleHistoryWidget(ipw.VBox):
@@ -209,7 +212,8 @@ class SampleHistoryWidget(ipw.VBox):
                         process_steps.append(parent_object)
             sample_parents = next_parents
         sample_history_children = []
-        for i, process_step in enumerate(process_steps):
+        sample_history_titles = []
+        for process_step in process_steps:
             process_step_widget = ProcessStepHistoryWidget(
                 self.openbis_session, process_step
             )
@@ -222,9 +226,11 @@ class SampleHistoryWidget(ipw.VBox):
             process_step_title = (
                 process_step_name + " (" + process_step_registration_date + ")"
             )
-            self.sample_history.set_title(i, process_step_title)
+            sample_history_titles.append(process_step_title)
 
-        self.sample_history.children = sample_history_children
+        set_accordion_children_titles(
+            self.sample_history, sample_history_children, sample_history_titles
+        )
         logger.info("Sample history loaded successfully.")
 
 
@@ -256,14 +262,10 @@ class ProcessStepHistoryWidget(ipw.VBox):
         self.comments_hbox = ipw.HBox(
             children=[self.comments_label, self.comments_html]
         )
-        
-        self.room_label = ipw.HTML(
-            value="<b>Room:</b>", layout=label_layout
-        )
+
+        self.room_label = ipw.HTML(value="<b>Room:</b>", layout=label_layout)
         self.room_html = ipw.HTML()
-        self.room_hbox = ipw.HBox(
-            children=[self.room_label, self.room_html]
-        )
+        self.room_hbox = ipw.HBox(children=[self.room_label, self.room_html])
 
         self.instrument_label = ipw.HTML(
             value="<b>Instrument:</b>", layout=label_layout
@@ -335,7 +337,7 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 )
                 instrument_name = f'<a href="{instrument_openbis_url}" target="_blank" rel="noopener noreferrer">{instrument_name}</a>'
                 self.instrument_html.value = instrument_name
-                
+
                 room_permid = instrument_object.props.get("location")
                 room_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=room_permid
@@ -347,8 +349,10 @@ class ProcessStepHistoryWidget(ipw.VBox):
                 room_name = f'<a href="{room_openbis_url}" target="_blank" rel="noopener noreferrer">{room_name}</a>'
                 self.room_html.value = room_name
                 break
-            
-            elif parent_code[0:4] == OPENBIS_OBJECT_CODES["Room"] and room_object is None:
+
+            elif (
+                parent_code[0:4] == OPENBIS_OBJECT_CODES["Room"] and room_object is None
+            ):
                 room_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=parent
                 )
@@ -368,31 +372,39 @@ class ProcessStepHistoryWidget(ipw.VBox):
         actions_ids = self.openbis_object.props["actions"]
         if actions_ids:
             actions_accordion_children = []
-            for i, act_id in enumerate(actions_ids):
+            actions_accordion_titles = []
+            for act_id in actions_ids:
                 act_object = utils.get_openbis_object(
                     self.openbis_session, sample_ident=act_id
                 )
                 act_widget = ActionHistoryWidget(self.openbis_session, act_object)
                 actions_accordion_children.append(act_widget)
-                act_title = act_widget.name
-                self.actions_accordion.set_title(i, act_title)
+                actions_accordion_titles.append(act_widget.name)
 
-            self.actions_accordion.children = actions_accordion_children
+            set_accordion_children_titles(
+                self.actions_accordion,
+                actions_accordion_children,
+                actions_accordion_titles,
+            )
 
     def load_observables(self):
         observables_ids = self.openbis_object.get_datasets(
             type="OBSERVABLE"
         ).df.permId.values
-        if observables_ids:
+        if len(observables_ids) > 0:
             observables_accordion_children = []
-            for i, obs_id in enumerate(observables_ids):
+            observables_accordion_titles = []
+            for obs_id in observables_ids:
                 obs_dataset = utils.get_openbis_dataset(self.openbis_session, obs_id)
                 obs_widget = ObservableHistoryWidget(self.openbis_session, obs_dataset)
                 observables_accordion_children.append(obs_widget)
-                obs_title = obs_dataset.props["name"]
-                self.observables_accordion.set_title(i, obs_title)
+                observables_accordion_titles.append(obs_dataset.props["name"])
 
-            self.observables_accordion.children = observables_accordion_children
+            set_accordion_children_titles(
+                self.observables_accordion,
+                observables_accordion_children,
+                observables_accordion_titles,
+            )
 
 
 class ActionHistoryWidget(ipw.VBox):
@@ -824,7 +836,7 @@ class RegisterPreparationWidget(ipw.VBox):
         )
 
         self.process_short_name = ""
-        
+
         self.select_project_widget = widgets.SelectProjectWidget(self.openbis_session)
 
         self.select_experiment_widget = widgets.SelectExperimentWidget(
@@ -893,7 +905,7 @@ class RegisterPreparationWidget(ipw.VBox):
             button_row,
             save_row,
         ]
-        
+
         self.select_project_widget.project_dropdown.observe(
             self.load_experiment_data, names="value"
         )
@@ -901,7 +913,7 @@ class RegisterPreparationWidget(ipw.VBox):
         self.select_experiment_widget.create_experiment_button.on_click(
             self.show_create_experiment_ui
         )
-        
+
         self.select_sample_dropdown.sample_dropdown.observe(
             self.load_sample_data, names="value"
         )
@@ -910,11 +922,11 @@ class RegisterPreparationWidget(ipw.VBox):
         self.processes_dropdown.observe(self.load_process_settings, names="value")
         self.add_process_step_button.on_click(self.add_process_step)
         self.save_button.on_click(self.save_process_steps)
-    
+
     def load_experiment_data(self, change):
         project_identifier = self.select_project_widget.project_dropdown.value
         self.select_experiment_widget.load_experiments(project_identifier)
-    
+
     def show_create_experiment_ui(self, b):
         if self.select_project_widget.project_dropdown.value == "-1":
             display(Javascript(data="alert('Select a project first.')"))
@@ -926,12 +938,18 @@ class RegisterPreparationWidget(ipw.VBox):
             self.select_project_widget.sort_date_cb.disabled = True
             self.select_project_widget.sort_name_cb.disabled = True
             self.select_experiment_widget.save_btn.on_click(self.save_new_experiment)
-            self.select_experiment_widget.cancel_btn.on_click(self.cancel_new_experiment)
-    
+            self.select_experiment_widget.cancel_btn.on_click(
+                self.cancel_new_experiment
+            )
+
     def save_new_experiment(self, b):
         project_identifier = self.select_project_widget.project_dropdown.value
-        new_experiment_name = self.select_experiment_widget.new_exp_name_textbox.value.strip()
-        new_experiment_description = self.select_experiment_widget.new_exp_description_textbox.value.strip()
+        new_experiment_name = (
+            self.select_experiment_widget.new_exp_name_textbox.value.strip()
+        )
+        new_experiment_description = (
+            self.select_experiment_widget.new_exp_description_textbox.value.strip()
+        )
 
         if project_identifier == "-1":
             display(Javascript(data="alert('Select a project.')"))
@@ -953,8 +971,12 @@ class RegisterPreparationWidget(ipw.VBox):
             )
             self.select_experiment_widget.hide_create_panel()
             project_identifier = self.select_project_widget.project_dropdown.value
-            self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
-            self.select_experiment_widget.experiment_dropdown.value = new_experiment.permId
+            self.select_experiment_widget.load_experiments(
+                project_identifier
+            )  # Reload the main DataFrame
+            self.select_experiment_widget.experiment_dropdown.value = (
+                new_experiment.permId
+            )
             display(Javascript(data="alert('Experiment successfully created!')"))
 
         except ValueError:
@@ -970,7 +992,9 @@ class RegisterPreparationWidget(ipw.VBox):
     def cancel_new_experiment(self, b):
         self.select_experiment_widget.hide_create_panel()
         project_identifier = self.select_project_widget.project_dropdown.value
-        self.select_experiment_widget.load_experiments(project_identifier)  # Reload the main DataFrame
+        self.select_experiment_widget.load_experiments(
+            project_identifier
+        )  # Reload the main DataFrame
         self.select_project_widget.project_dropdown.disabled = False
         self.select_project_widget.filter_my_projects_cb.disabled = False
         self.select_project_widget.sort_date_cb.disabled = False
@@ -1012,17 +1036,22 @@ class RegisterPreparationWidget(ipw.VBox):
                 != self.select_experiment_widget.experiment_dropdown.value
             ):
                 most_recent_parent_experiment = utils.get_openbis_collection(
-                    self.openbis_session,
-                    code=most_recent_parent.experiment.identifier
+                    self.openbis_session, code=most_recent_parent.experiment.identifier
                 )
-                
-                self.select_project_widget.project_dropdown.value = most_recent_parent_experiment.project.permId
-                
+
+                self.select_project_widget.project_dropdown.value = (
+                    most_recent_parent_experiment.project.permId
+                )
+
                 self.select_experiment_widget.experiment_dropdown.value = (
                     most_recent_parent.experiment.permId
                 )
-                
-                display(Javascript(data="alert('Project and Experiment were auto-updated based on the sample!')"))
+
+                display(
+                    Javascript(
+                        data="alert('Project and Experiment were auto-updated based on the sample!')"
+                    )
+                )
 
             for parent in most_recent_parent.parents:
                 parent_object = utils.get_openbis_object(
@@ -1072,7 +1101,14 @@ class RegisterPreparationWidget(ipw.VBox):
             sample_id=self.select_sample_dropdown.sample_dropdown.value,
         )
         processes_accordion_children.append(new_process_step_widget)
-        self.new_processes_accordion.children = processes_accordion_children
+        set_accordion_children_titles(
+            self.new_processes_accordion,
+            processes_accordion_children,
+            [
+                process_step.name_textbox.value
+                for process_step in processes_accordion_children
+            ],
+        )
 
     def load_process(self, b):
         openbis_processes = utils.get_openbis_objects(
@@ -1139,8 +1175,13 @@ class RegisterPreparationWidget(ipw.VBox):
                         process_step=process_step,
                     )
                     processes_accordion_children.append(new_process_step_widget)
-                    self.new_processes_accordion.children = (
-                        processes_accordion_children
+                    set_accordion_children_titles(
+                        self.new_processes_accordion,
+                        processes_accordion_children,
+                        [
+                            process_step.name_textbox.value
+                            for process_step in processes_accordion_children
+                        ],
                     )
             except Exception as e:
                 display(
@@ -1376,7 +1417,7 @@ class RegisterPreparationWidget(ipw.VBox):
                                                     action_properties_values[
                                                         prop_lower
                                                     ] = selected_value
-                                                    
+
                                                 selected_obj = utils.get_openbis_object(
                                                     self.openbis_session,
                                                     sample_ident=selected_value,
@@ -1734,7 +1775,10 @@ class RegisterPreparationWidget(ipw.VBox):
                     instrument_permid = process_widget.instrument_dropdown.value
                     room_permid = process_widget.room_dropdown.value
 
-                    if instrument_permid != "-1" and "Other Tools" not in instrument_permid:
+                    if (
+                        instrument_permid != "-1"
+                        and "Other Tools" not in instrument_permid
+                    ):
                         new_process_object_parents.append(instrument_permid)
                     else:
                         new_process_object_parents.append(room_permid)
@@ -1977,7 +2021,7 @@ class RegisterPreparationWidget(ipw.VBox):
 
                     # Existing logic from the bottom of your loop
                     current_sample = new_sample
-                
+
                 display(
                     Javascript(
                         data="alert('New process steps registered successfully.')"
@@ -2017,12 +2061,10 @@ class RegisterPreparationWidget(ipw.VBox):
             ]
 
             # Reset new processes accordion
-            processes_accordion_children = list(self.new_processes_accordion.children)
-            for index, process_step in enumerate(processes_accordion_children):
-                self.new_processes_accordion.set_title(index, "")
+            self.new_processes_accordion.children = []
+            self.new_processes_accordion.titles = ()
 
             self.process_short_name = ""
-            self.new_processes_accordion.children = []
 
             # Refresh sample dropdown and sample history
             self.select_sample_dropdown.load_samples()
@@ -2194,7 +2236,14 @@ class RegisterProcessWidget(ipw.VBox):
             allow_observables=False,
         )
         processes_accordion_children.append(new_process_step_widget)
-        self.new_processes_accordion.children = processes_accordion_children
+        set_accordion_children_titles(
+            self.new_processes_accordion,
+            processes_accordion_children,
+            [
+                process_step.name_textbox.value
+                for process_step in processes_accordion_children
+            ],
+        )
 
     def save_process_steps(self, b):
         collection_id = self.select_collection_dropdown.value
@@ -2488,7 +2537,10 @@ class RegisterProcessWidget(ipw.VBox):
 
                     new_process_step_parents = []
                     process_step_room = process_widget.room_dropdown.value
-                    if process_step_instrument != "-1" and "Other Tools" not in process_step_instrument:
+                    if (
+                        process_step_instrument != "-1"
+                        and "Other Tools" not in process_step_instrument
+                    ):
                         new_process_step_parents.append(process_step_instrument)
                     else:
                         new_process_step_parents.append(process_step_room)
@@ -2541,11 +2593,8 @@ class RegisterProcessWidget(ipw.VBox):
                 )
 
             # Reset new processes accordion
-            processes_accordion_children = list(self.new_processes_accordion.children)
-            for index, _ in enumerate(processes_accordion_children):
-                self.new_processes_accordion.set_title(index, "")
-
             self.new_processes_accordion.children = []
+            self.new_processes_accordion.titles = ()
 
             self.process_name_text.value = ""
             self.process_short_name_text.value = ""
@@ -2614,34 +2663,37 @@ class RegisterProcessStepWidget(ipw.VBox):
         self.description_hbox = ipw.HBox(
             children=[self.description_label, self.description_textbox]
         )
-        
+
         global LAB_ROOMS
-        
-        instruments_and_components_types = [*COMPONENTS_TYPES.values(), *INSTRUMENT_TYPES.values()]
+
+        instruments_and_components_types = [
+            *COMPONENTS_TYPES.values(),
+            *INSTRUMENT_TYPES.values(),
+        ]
         room_options = []
         if LAB_ROOMS:
             room_options = LAB_ROOMS.copy()
         else:
             locations_ids = set()
             for obj_type in instruments_and_components_types:
-                objs = utils.get_openbis_objects(
-                    self.openbis_session, type = obj_type
-                )
+                objs = utils.get_openbis_objects(self.openbis_session, type=obj_type)
                 for obj in objs:
-                    room_id = obj.props['location']
+                    room_id = obj.props["location"]
                     if room_id is not None:
                         locations_ids.add(room_id)
-                        
+
             for location_id in locations_ids:
-                location_obj = utils.get_openbis_object(self.openbis_session, sample_ident=location_id)
-                location_name = location_obj.props['name']
+                location_obj = utils.get_openbis_object(
+                    self.openbis_session, sample_ident=location_id
+                )
+                location_name = location_obj.props["name"]
                 location_type = location_obj.type.code
                 if location_type == OPENBIS_OBJECT_TYPES["Room"]:
                     if (location_name, location_id) not in room_options:
                         room_options.append((location_name, location_id))
-        
+
             LAB_ROOMS = room_options.copy()
-        
+
         room_options.sort(key=lambda x: x[0])
         room_options.insert(0, ("Select a room...", "-1"))
         self.room_label = ipw.HTML(value="<b>Room:</b>", layout=label_layout)
@@ -2757,7 +2809,7 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.actions_vbox,
                 self.remove_process_step_button,
             ]
-    
+
     def load_room_instruments(self, change):
         room_permid = change["new"]
 
@@ -2771,7 +2823,9 @@ class RegisterProcessStepWidget(ipw.VBox):
             self.openbis_session, collection=OPENBIS_COLLECTIONS_PATHS["Instrument"]
         )
         filtered_instruments = [
-            obj for obj in instrument_objects if obj.props.get("location") == room_permid
+            obj
+            for obj in instrument_objects
+            if obj.props.get("location") == room_permid
         ]
         instrument_options = [
             (obj.props["name"], obj.permId) for obj in filtered_instruments
@@ -2790,27 +2844,29 @@ class RegisterProcessStepWidget(ipw.VBox):
 
         if instrument_permid == "-1":
             return
-        
+
         elif instrument_permid == "Other Tools - " + self.room_dropdown.value:
             display(Javascript(data="alert('Loading components...')"))
             if instrument_permid not in INSTRUMENTS_ACTIONS:
                 not_attached_components = {}
                 for comp_type in COMPONENTS_TYPES.values():
-                    comp_objs = utils.get_openbis_objects(self.openbis_session, type=comp_type)
+                    comp_objs = utils.get_openbis_objects(
+                        self.openbis_session, type=comp_type
+                    )
                     for comp_obj in comp_objs:
                         if comp_obj.props["location"] == self.room_dropdown.value:
                             if comp_type not in not_attached_components:
                                 not_attached_components[comp_type] = []
                             not_attached_components[comp_type].append(comp_obj)
-                
+
                 INSTRUMENTS_COMPONENTS[instrument_permid] = {
                     k: list(v) for k, v in not_attached_components.items()
                 }
-            
+
             instrument_components = INSTRUMENTS_COMPONENTS[instrument_permid]
-            
+
             if instrument_permid not in INSTRUMENTS_ACTIONS:
-                instrument_actions = []        
+                instrument_actions = []
                 for action_label, action_type in ACTIONS_TYPES.items():
                     obj_type_props = (
                         utils.get_openbis_object_type(
@@ -2835,7 +2891,7 @@ class RegisterProcessStepWidget(ipw.VBox):
 
                 instrument_actions.insert(0, ("Action", "ACTION"))
                 INSTRUMENTS_ACTIONS[instrument_permid] = instrument_actions
-                
+
         else:
             # 2. Simplify Component Caching
             if instrument_permid not in INSTRUMENTS_COMPONENTS:
@@ -2890,11 +2946,11 @@ class RegisterProcessStepWidget(ipw.VBox):
             parent_obj = utils.get_openbis_object(self.openbis_session, parent_id)
             if parent_obj.type.code in [
                 OPENBIS_OBJECT_TYPES["Instrument"],
-                OPENBIS_OBJECT_TYPES["Instrument STM"]
+                OPENBIS_OBJECT_TYPES["Instrument STM"],
             ]:
                 self.instrument_dropdown.value = parent_obj.permId
                 break
-            
+
             if parent_obj.type.code == OPENBIS_OBJECT_TYPES["Room"]:
                 self.room_dropdown.value = parent_obj.permId
                 self.instrument_dropdown.value = "Other Tools - " + parent_obj.permId
@@ -2919,26 +2975,54 @@ class RegisterProcessStepWidget(ipw.VBox):
                 self.room_dropdown.disabled = True
                 self.instrument_dropdown.disabled = True
                 actions_accordion_children.append(new_action_widget)
-                self.actions_accordion.children = actions_accordion_children
+                set_accordion_children_titles(
+                    self.actions_accordion,
+                    actions_accordion_children,
+                    [
+                        action.get_action_title()
+                        for action in actions_accordion_children
+                    ],
+                )
 
     def change_process_step_title(self, change):
-        title = self.name_textbox.value
-        self.processes_accordion.set_title(self.process_step_index, title)
+        self._set_process_step_title(self.name_textbox.value)
+
+    def _set_process_step_title(self, title):
+        if self.process_step_index < len(self.processes_accordion.children):
+            self.processes_accordion.set_title(self.process_step_index, title)
+
+    def refresh_action_icon_prefix(self, pending_action=None):
+        actions = list(self.actions_accordion.children)
+        if pending_action is not None and pending_action not in actions:
+            actions.append(pending_action)
+
+        action_icons = "".join(getattr(action, "action_icon", "") for action in actions)
+        current_text = self.name_textbox.value or ""
+        body_text = current_text
+        if current_text.startswith("[") and "]" in current_text:
+            body_text = current_text[current_text.find("]") + 1 :].lstrip()
+
+        new_text = (
+            f"[{action_icons}] {body_text}".rstrip() if action_icons else body_text
+        )
+        self.name_textbox.value = new_text
+        self._set_process_step_title(new_text)
 
     def remove_process_step(self, b):
         processes_accordion_children = list(self.processes_accordion.children)
-        num_process_steps = len(processes_accordion_children)
         processes_accordion_children.pop(self.process_step_index)
 
         for index, process_step in enumerate(processes_accordion_children):
             if index >= self.process_step_index:
                 process_step.process_step_index -= 1
-                self.processes_accordion.set_title(
-                    process_step.process_step_index, process_step.name_textbox.value
-                )
 
-        self.processes_accordion.set_title(num_process_steps - 1, "")
-        self.processes_accordion.children = processes_accordion_children
+        process_titles = [
+            process_step.name_textbox.value
+            for process_step in processes_accordion_children
+        ]
+        set_accordion_children_titles(
+            self.processes_accordion, processes_accordion_children, process_titles
+        )
 
     def add_action(self, b):
         instrument_permid = self.instrument_dropdown.value
@@ -2955,7 +3039,11 @@ class RegisterProcessStepWidget(ipw.VBox):
             self.room_dropdown.disabled = True
             self.instrument_dropdown.disabled = True
             actions_accordion_children.append(new_action_widget)
-            self.actions_accordion.children = actions_accordion_children
+            set_accordion_children_titles(
+                self.actions_accordion,
+                actions_accordion_children,
+                [action.get_action_title() for action in actions_accordion_children],
+            )
 
     def add_observable(self, b):
         instrument_permid = self.instrument_dropdown.value
@@ -2970,7 +3058,18 @@ class RegisterProcessStepWidget(ipw.VBox):
                 process_step_widget=self,
             )
             observables_accordion_children.append(new_observable_widget)
-            self.observables_accordion.children = observables_accordion_children
+            set_accordion_children_titles(
+                self.observables_accordion,
+                observables_accordion_children,
+                [
+                    observable.observable_properties_widgets.children[0]
+                    .children[1]
+                    .value
+                    if observable.observable_properties_widgets.children
+                    else ""
+                    for observable in observables_accordion_children
+                ],
+            )
 
 
 class RegisterActionWidget(ipw.VBox):
@@ -3001,17 +3100,19 @@ class RegisterActionWidget(ipw.VBox):
                 if instrument_permid not in INSTRUMENTS_ACTIONS:
                     not_attached_components = {}
                     for comp_type in COMPONENTS_TYPES.values():
-                        comp_objs = utils.get_openbis_objects(self.openbis_session, type=comp_type)
+                        comp_objs = utils.get_openbis_objects(
+                            self.openbis_session, type=comp_type
+                        )
                         for comp_obj in comp_objs:
                             if comp_obj.props["location"] == self.room_dropdown.value:
                                 if comp_type not in not_attached_components:
                                     not_attached_components[comp_type] = []
                                 not_attached_components[comp_type].append(comp_obj)
-                
+
                 INSTRUMENTS_COMPONENTS[instrument_permid] = {
                     k: list(v) for k, v in not_attached_components.items()
                 }
-            
+
             else:
                 self.instrument_components = utils.find_instrument_components(
                     self.openbis_session, instrument_permid, COMPONENTS_TYPES.values()
@@ -3269,43 +3370,17 @@ class RegisterActionWidget(ipw.VBox):
     def load_action_properties(self, change):
         action_type = self.action_type_dropdown.value
         if action_type == "-1":
+            self.action_icon = ""
             self.action_properties_widgets.children = []
+            if self.process_step_widget is not None:
+                self.process_step_widget.refresh_action_icon_prefix()
             return
 
         icon_mapping = INTERFACE_CONFIG_INFO["actions_types_icons"]
         self.action_icon = icon_mapping.get(action_type, "⚙️")
-        current_text = self.process_step_widget.name_textbox.value
-
-        if current_text.startswith("[") and "]" in current_text:
-            close_idx = current_text.find("]")
-            current_icons_str = current_text[1:close_idx]
-
-            # 1. Safely break the string into a list of complete emojis
-            icons_list = []
-            for char in current_icons_str:
-                # If the character is a modifier (like \ufe0f or ZWJ), attach it to the previous emoji
-                if char in ("\ufe0f", "\u200d") and icons_list:
-                    icons_list[-1] += char
-                else:
-                    icons_list.append(char)
-
-            # 2. Safely replace or append the new icon based on the index
-            if self.action_index < len(icons_list):
-                icons_list[self.action_index] = self.action_icon
-            else:
-                # If adding a brand new action
-                icons_list.append(self.action_icon)
-
-            # 3. Join them back together and rebuild the text
-            new_icons_str = "".join(icons_list)
-            new_text = f"[{new_icons_str}]" + current_text[close_idx + 1 :]
-
-        else:
-            # Create the brackets if they don't exist yet
-            new_text = f"[{self.action_icon}] {current_text}"
-
-        self.process_step_widget.name_textbox.value = new_text
-        self.actions_accordion.set_title(self.action_index, self.action_icon)
+        if self.process_step_widget is not None:
+            self.process_step_widget.refresh_action_icon_prefix(pending_action=self)
+        self._set_action_title(self.action_icon)
 
         action_properties = (
             utils.get_openbis_object_type(self.openbis_session, type=action_type)
@@ -4269,32 +4344,22 @@ class RegisterActionWidget(ipw.VBox):
             comp_dropdown_widget.observe(add_component_ui, names="value")
 
         self.action_properties_widgets.children = action_properties_widgets
+        self._set_action_title(self.get_action_title())
 
     def change_action_title(self, change):
-        self.actions_accordion.set_title(self.action_index, f"{change['new']}")
+        self._set_action_title(self.get_action_title())
+
+    def _set_action_title(self, title):
+        if self.action_index < len(self.actions_accordion.children):
+            self.actions_accordion.set_title(self.action_index, title)
+
+    def get_action_title(self):
+        for widget in self.action_properties_widgets.children:
+            if widget.metadata.get("property_name", "") == "NAME":
+                return widget.children[1].value or self.action_icon
+        return self.action_icon
 
     def remove_action(self, b):
-        current_text = self.process_step_widget.name_textbox.value
-        icon = self.action_icon
-
-        if current_text.startswith("[") and "]" in current_text:
-            close_idx = current_text.find("]")
-            prefix = current_text[: close_idx + 1]
-            rest_of_text = current_text[close_idx + 1 :]
-
-            # If the icon is inside the brackets, remove it
-            if icon in prefix:
-                # Replace only one occurrence of the icon
-                new_prefix = prefix.replace(icon, "", 1)
-
-                # If removing the icon leaves the brackets completely empty, remove them entirely
-                if new_prefix == "[]":
-                    self.process_step_widget.name_textbox.value = rest_of_text.lstrip()
-                else:
-                    self.process_step_widget.name_textbox.value = (
-                        new_prefix + rest_of_text
-                    )
-
         children = list(self.actions_accordion.children)
         action_widgets = children.pop(self.action_index)
 
@@ -4307,18 +4372,10 @@ class RegisterActionWidget(ipw.VBox):
         for i in range(self.action_index, len(children)):
             children[i].action_index = i
 
-        self.actions_accordion.children = children
-        for i, action in enumerate(children):
-            action_name = ""
-            if self.action_properties_widgets.children:
-                for widget in action.action_properties_widgets.children:
-                    if widget.metadata.get("property_name", "") == "NAME":
-                        action_name += widget.children[1].value
-                        break
-            self.actions_accordion.set_title(i, action_name)
-
-        # Handle the accordion title edge case for the popped index
-        self.actions_accordion.set_title(len(children), "")
+        action_titles = [action.get_action_title() for action in children]
+        set_accordion_children_titles(self.actions_accordion, children, action_titles)
+        if self.process_step_widget is not None:
+            self.process_step_widget.refresh_action_icon_prefix()
 
 
 class RegisterObservableWidget(ipw.VBox):
@@ -4482,7 +4539,11 @@ class RegisterObservableWidget(ipw.VBox):
         ]
 
     def change_observable_title(self, change):
-        self.observables_accordion.set_title(self.observable_index, f"{change['new']}")
+        self._set_observable_title(f"{change['new']}")
+
+    def _set_observable_title(self, title):
+        if self.observable_index < len(self.observables_accordion.children):
+            self.observables_accordion.set_title(self.observable_index, title)
 
     def remove_observable(self, b):
         children = list(self.observables_accordion.children)
@@ -4491,15 +4552,16 @@ class RegisterObservableWidget(ipw.VBox):
         for i in range(self.observable_index, len(children)):
             children[i].observable_index = i
 
-        self.observables_accordion.children = children
-
-        for index, observable in enumerate(children):
+        observable_titles = []
+        for observable in children:
             observable_name = ""
-            if self.observable_properties_widgets.children:
+            if observable.observable_properties_widgets.children:
                 for widget in observable.observable_properties_widgets.children:
                     if widget.metadata.get("property_name", "") == "NAME":
                         observable_name += widget.children[1].value
                         break
-            self.observables_accordion.set_title(index, observable_name)
+            observable_titles.append(observable_name)
 
-        self.observables_accordion.set_title(len(children), "")
+        set_accordion_children_titles(
+            self.observables_accordion, children, observable_titles
+        )

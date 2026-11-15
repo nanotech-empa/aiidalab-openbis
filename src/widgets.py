@@ -1,12 +1,15 @@
-import ipywidgets as ipw
-from src import utils
-from IPython.display import display, Javascript
-import pandas as pd
-import os
-import rdkit
-from rdkit.Chem import AllChem, Draw, rdMolDescriptors
-import shutil
+import html
 import io
+import os
+import shutil
+
+import ipywidgets as ipw
+import pandas as pd
+import rdkit
+from IPython.display import Javascript, display
+from rdkit.Chem import AllChem, Draw, rdMolDescriptors
+
+from . import chemical_search, molecule_creation, utils
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -16,14 +19,10 @@ OPENBIS_OBJECT_TYPES, _ = (
 MATERIALS_CONCEPTS_TYPES = INTERFACE_CONFIG_INFO["slabs_concepts_types"]
 INSTRUMENTS_TYPES = INTERFACE_CONFIG_INFO["instruments_types"]
 
-SIMULATION_TYPES = utils.read_json("config/openbis_config.json")["Simulations"]["Types"]
-OPENBIS_COLLECTIONS_PATHS = utils.read_json("config/openbis_config.json")[
-    "Collections"
-]["Paths"]
-
-OPENBIS_PROJECTS_PATHS = utils.read_json("config/openbis_config.json")["Projects"][
-    "Paths"
-]
+OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
+SIMULATION_TYPES = OPENBIS_CONFIG["Simulations"]["Types"]
+OPENBIS_COLLECTIONS_PATHS = OPENBIS_CONFIG["Collections"]["Paths"]
+OPENBIS_PROJECTS_PATHS = OPENBIS_CONFIG["Projects"]["Paths"]
 institutions_project = OPENBIS_PROJECTS_PATHS.get("Institution")
 people_project = OPENBIS_PROJECTS_PATHS.get("Person")
 locations_project = OPENBIS_PROJECTS_PATHS.get("Location")
@@ -99,11 +98,22 @@ class AtomModelWidget(ipw.VBox):
 
     def load_atom_models(self):
         atom_models = utils.get_openbis_objects(
-            self.openbis_session, type=OPENBIS_OBJECT_TYPES["Atomistic Model"]
+            self.openbis_session,
+            type=OPENBIS_OBJECT_TYPES["Atomistic Model"],
+            props=["name"],
         )
-        atom_model_options = [
-            (f"{obj.props['name']}", obj.permId) for obj in atom_models
-        ]
+        atom_model_frame = getattr(atom_models, "df", None)
+        if atom_model_frame is not None:
+            atom_model_options = []
+            for record in atom_model_frame.to_dict(orient="records"):
+                name = record.get("NAME")
+                if name is None or pd.isna(name) or not str(name).strip():
+                    name = record["permId"]
+                atom_model_options.append((str(name), str(record["permId"])))
+        else:
+            atom_model_options = [
+                (f"{obj.props['name']}", obj.permId) for obj in atom_models
+            ]
         atom_model_options.sort()
         atom_model_options.insert(0, ("Select atomistic model...", "-1"))
         self.atom_model_dropdown.options = atom_model_options
@@ -140,7 +150,7 @@ class AtomModelWidget(ipw.VBox):
         )
 
         select_reacprod_concepts_title = ipw.HTML(
-            value="<span style='font-weight: bold; font-size: 18px;'>Select reaction product concepts</span>"
+            value="<span style='font-weight: bold; font-size: 18px;'>Select product molecules</span>"
         )
 
         select_slab_title = ipw.HTML(
@@ -161,7 +171,7 @@ class AtomModelWidget(ipw.VBox):
             description="Add",
             disabled=False,
             button_style="success",
-            tooltip="Add reaction product concept",
+            tooltip="Add product molecule",
             layout=ipw.Layout(width="150px", height="25px"),
         )
 
@@ -183,6 +193,10 @@ class AtomModelWidget(ipw.VBox):
         name_label = ipw.Label(value="Name")
         name_textbox = ipw.Text()
         name_hbox = ipw.HBox([name_label, name_textbox])
+
+        description_label = ipw.Label(value="Description")
+        description_textbox = ipw.Textarea()
+        description_hbox = ipw.HBox([description_label, description_textbox])
 
         wfms_uuid_label = ipw.Label(value="WFMS UUID")
         wfms_uuid_textbox = ipw.Text()
@@ -226,6 +240,7 @@ class AtomModelWidget(ipw.VBox):
             children=[
                 atom_model_props_title,
                 name_hbox,
+                description_hbox,
                 wfms_uuid_hbox,
                 cell_hbox,
                 dimensionality_hbox,
@@ -399,12 +414,20 @@ class AtomModelWidget(ipw.VBox):
 
         def save_new_atom_model(b):
             atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
-            atom_models_objs = utils.get_openbis_objects(
-                self.openbis_session, type=atom_model_type
+            wfms_uuid = wfms_uuid_textbox.value.strip()
+            existing = (
+                list(
+                    utils.get_openbis_objects(
+                        self.openbis_session,
+                        type=atom_model_type,
+                        where={"WFMS_UUID": wfms_uuid},
+                    )
+                    or []
+                )
+                if wfms_uuid
+                else []
             )
-            wfms_uuid = wfms_uuid_textbox.value
-            atom_models_uuids = [obj.props["wfms_uuid"] for obj in atom_models_objs]
-            if wfms_uuid in atom_models_uuids:
+            if existing:
                 display(Javascript(data="alert('Atomistic model already in openBIS!')"))
             else:
                 pbc = [pbc_x_checkbox.value, pbc_y_checkbox.value, pbc_z_checkbox.value]
@@ -415,6 +438,7 @@ class AtomModelWidget(ipw.VBox):
 
                 atom_model_props = {
                     "name": name_textbox.value,
+                    "description": description_textbox.value,
                     "wfms_uuid": wfms_uuid,
                     "cell": cell_json,
                     "dimensionality": dimensionality_intbox.value,
@@ -468,29 +492,20 @@ class AtomModelWidget(ipw.VBox):
                     parents=atom_model_parents,
                 )
 
-                # Atomistic model preview
-                for filename in atom_model_preview_uploader.value:
-                    file_info = atom_model_preview_uploader.value[filename]
-                    utils.write_file(file_info["content"], filename)
-                    utils.create_openbis_dataset(
-                        self.openbis_session,
-                        type="ELN_PREVIEW",
-                        sample=atom_model_obj,
-                        files=[filename],
-                    )
-                    os.remove(filename)
-
-                # Atomistic model datasets
-                for filename in atom_model_datasets_uploader.value:
-                    file_info = atom_model_datasets_uploader.value[filename]
-                    utils.write_file(file_info["content"], filename)
-                    utils.create_openbis_dataset(
-                        self.openbis_session,
-                        type="ATTACHMENT",
-                        sample=atom_model_obj,
-                        files=[filename],
-                    )
-                    os.remove(filename)
+                utils.upload_datasets(
+                    self.openbis_session,
+                    atom_model_obj,
+                    atom_model_preview_uploader,
+                    props={},
+                    dataset_type="ELN_PREVIEW",
+                )
+                utils.upload_datasets(
+                    self.openbis_session,
+                    atom_model_obj,
+                    atom_model_datasets_uploader,
+                    props={},
+                    dataset_type="ATTACHMENT",
+                )
 
                 self.create_new_atom_model_widgets.children = []
                 self.atom_model_dropdown.options = self.load_atom_models()
@@ -524,51 +539,390 @@ class AtomModelWidget(ipw.VBox):
 
 
 class MoleculeWidget(ipw.VBox):
-    def __init__(self, openbis_session, parent_accordion, object_index):
+    def __init__(
+        self,
+        openbis_session,
+        parent_accordion,
+        object_index,
+        collection_key="Precursor Molecule",
+        role="molecule",
+        structure=None,
+    ):
         super().__init__()
         self.openbis_session = openbis_session
         self.parent_accordion = parent_accordion
         self.object_index = object_index
+        self.collection_key = collection_key
+        self.role = role
         self.title = ""
+        self.structure = structure
+        self.generated_cdxml = b""
+        self.generated_png = b""
+        self.generated_representation = None
 
         molecules_objects = utils.get_openbis_objects(
             self.openbis_session,
-            collection=OPENBIS_COLLECTIONS_PATHS["Precursor Molecule"],
+            collection=OPENBIS_COLLECTIONS_PATHS[collection_key],
             type=OPENBIS_OBJECT_TYPES["Molecule"],
         )
         dropdown_list = []
+        self._labels_by_permid = {}
         for obj in molecules_objects:
-            mol_name = obj.props["name"]
-            mol_empa_number = obj.props["empa_number"]
-            dropdown_list.append((f"{mol_empa_number} ({mol_name})", obj.permId))
+            name = obj.props.get("name") or str(obj.permId)
+            empa_number = obj.props.get("empa_number")
+            label = (
+                f"{empa_number} ({name})"
+                if collection_key == "Precursor Molecule" and empa_number
+                else str(name)
+            )
+            self._labels_by_permid[str(obj.permId)] = label
+            dropdown_list.append((label, obj.permId))
 
-        # Sort by EMPA number (assuming it’s numeric)
-        dropdown_list.sort(key=lambda x: int(x[0].split()[0]), reverse=True)
+        if collection_key == "Precursor Molecule":
+            # Keep the established newest/highest EMPA-number-first ordering.
+            def precursor_sort_key(item):
+                first_word = str(item[0]).split(maxsplit=1)[0]
+                try:
+                    return int(first_word)
+                except ValueError:
+                    return -1
 
-        dropdown_list.insert(0, ("Select a molecule...", "-1"))
+            dropdown_list.sort(key=precursor_sort_key, reverse=True)
+        else:
+            dropdown_list.sort(key=lambda item: item[0].casefold())
+        placeholder = (
+            "Select a product molecule..."
+            if collection_key == "Product Molecule"
+            else "Select a molecule..."
+        )
+        dropdown_list.insert(0, (placeholder, "-1"))
         self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
         self.details_vbox = ipw.VBox()
+        self.collection = OPENBIS_COLLECTIONS_PATHS[collection_key]
+        self.structure_search = chemical_search.MoleculeStructureSearchWidget(
+            self.openbis_session,
+            self.collection,
+            on_select=self._select_search_result,
+            on_search_complete=self._search_completed,
+            on_query_change=self._search_query_changed,
+        )
+        self.structure_search_accordion = ipw.Accordion(
+            children=[self.structure_search],
+            selected_index=None,
+        )
+        self.structure_search_accordion.set_title(0, "Find by SMILES or CDXML")
+        self.create_generated_box = ipw.VBox()
+
+        self.cdxml_generator_accordion = None
+        if structure is not None:
+            self.open_cdxml_generator_button = ipw.Button(
+                description="Open CDXML generator",
+                button_style="info",
+                tooltip="Review inferred bonds and generate periodic CDXML",
+            )
+            self.cdxml_generator_status = ipw.HTML(
+                "For planar C/H structures with one bonded periodic direction. "
+                "Ambiguous long bonds and radicals remain under user control."
+            )
+            self.cdxml_generator_box = ipw.VBox(
+                [self.cdxml_generator_status, self.open_cdxml_generator_button]
+            )
+            self.cdxml_generator_accordion = ipw.Accordion(
+                children=[self.cdxml_generator_box],
+                selected_index=None,
+            )
+            self.cdxml_generator_accordion.set_title(
+                0, "Generate CDXML from AiiDA structure"
+            )
+            self.open_cdxml_generator_button.on_click(self._open_cdxml_generator)
 
         self.remove_molecule_button = ipw.Button(
             description="Remove",
             disabled=False,
             button_style="danger",
-            tooltip="Remove molecule",
+            tooltip=f"Remove {role}",
             layout=ipw.Layout(width="150px", height="25px"),
         )
 
-        self.molecule_sketch = ipw.Image(
-            layout=ipw.Layout(width="300px", height="300px")
-        )
+        self.molecule_sketch = ipw.Image(format="png")
 
         self.dropdown.observe(self.load_details, names="value")
         self.remove_molecule_button.on_click(self.remove_molecule)
-        self.children = [
-            self.dropdown,
-            self.details_vbox,
-            self.molecule_sketch,
-            self.remove_molecule_button,
+        children = [self.dropdown]
+        if self.cdxml_generator_accordion is not None:
+            children.append(self.cdxml_generator_accordion)
+        children.extend(
+            [
+                self.structure_search_accordion,
+                self.create_generated_box,
+                self.details_vbox,
+                self.molecule_sketch,
+                self.remove_molecule_button,
+            ]
+        )
+        self.children = children
+
+    def _open_cdxml_generator(self, _button=None):
+        self.open_cdxml_generator_button.disabled = True
+        try:
+            from .cdxml_editor import PeriodicCdxmlEditor
+
+            self.cdxml_editor = PeriodicCdxmlEditor(
+                structure=self.structure,
+                on_export=self._use_generated_cdxml,
+            )
+            self.cdxml_generator_box.children = [self.cdxml_editor]
+        except Exception as exc:
+            self.open_cdxml_generator_button.disabled = False
+            self.cdxml_generator_status.value = (
+                "<span style='color:#b00020'><b>Could not open the CDXML "
+                f"generator:</b> {html.escape(str(exc))}</span>"
+            )
+
+    def _use_generated_cdxml(self, content, filename, png, representation):
+        self.generated_cdxml = bytes(content)
+        self.generated_png = bytes(png)
+        self.generated_representation = representation
+        self.structure_search.set_cdxml_query(content, filename)
+        self.create_generated_box.children = [
+            ipw.HTML("Search this generated CDXML before creating a MOLECULE record.")
         ]
+        self.structure_search_accordion.selected_index = 0
+
+    def _search_query_changed(self):
+        self.create_generated_box.children = []
+
+    def _set_creation_status(self, message, kind="info"):
+        colors = {"info": "#1f5a94", "ok": "#187b35", "error": "#b00020"}
+        self.creation_status.value = (
+            f"<span style='color:{colors[kind]}'>{html.escape(str(message))}</span>"
+        )
+
+    def _search_completed(self, query, hits):
+        if self.structure_search._generated_cdxml is None or not self.generated_cdxml:
+            self.create_generated_box.children = []
+            return
+        identity_hits = [
+            hit for hit in hits if hit.match_type in {"exact", "equivalent"}
+        ]
+        if identity_hits:
+            matches = ", ".join(
+                hit.record.name or hit.record.permid for hit in identity_hits
+            )
+            self.create_generated_box.children = [
+                ipw.HTML(
+                    "<span style='color:#187b35'><b>An identical or equivalent "
+                    "MOLECULE already exists.</b> Select it from the search results: "
+                    f"{html.escape(matches)}</span>"
+                )
+            ]
+            return
+
+        representation = self.generated_representation
+        if representation is None:
+            self.create_generated_box.children = []
+            return
+        representation_name = "CXSMILES" if representation.periodic else "SMILES"
+        representation_value = (
+            representation.cxsmiles
+            if representation.periodic
+            else representation.smiles
+        )
+        destination = (
+            "product molecule collection"
+            if self.collection_key == "Product Molecule"
+            else "precursor molecule collection"
+        )
+        self.new_molecule_name = ipw.Text(
+            description="Name",
+            placeholder="Required molecular concept name",
+            style={"description_width": "90px"},
+            layout=ipw.Layout(width="100%"),
+        )
+        self.new_molecule_description = ipw.Textarea(
+            description="Description",
+            style={"description_width": "90px"},
+            layout=ipw.Layout(width="100%", height="55px"),
+        )
+        self.new_molecule_comments = ipw.Textarea(
+            description="Comments",
+            style={"description_width": "90px"},
+            layout=ipw.Layout(width="100%", height="55px"),
+        )
+        self.reviewed_matches = ipw.Checkbox(
+            value=not bool(hits),
+            description="I reviewed the non-identity matches shown above",
+            indent=False,
+            layout=ipw.Layout(display="" if hits else "none", width="100%"),
+        )
+        self.create_generated_button = ipw.Button(
+            description="Create MOLECULE",
+            button_style="success",
+            icon="save",
+            tooltip=f"Create in the {destination}",
+        )
+        self.creation_status = ipw.HTML()
+        self.create_generated_button.on_click(self._create_generated_molecule)
+        self.create_generated_box.children = [
+            ipw.HTML(
+                "<hr><b>No identical molecular concept was found.</b> Create the "
+                f"reviewed structure in the {html.escape(destination)}.<br>"
+                f"Formula: <code>{html.escape(representation.formula)}</code><br>"
+                f"{representation_name}: "
+                f"<code>{html.escape(representation_value)}</code>"
+            ),
+            self.new_molecule_name,
+            self.new_molecule_description,
+            self.new_molecule_comments,
+            self.reviewed_matches,
+            self.create_generated_button,
+            self.creation_status,
+        ]
+
+    def _create_generated_molecule(self, _button=None):
+        if not self.new_molecule_name.value.strip():
+            self._set_creation_status(
+                "Enter a name before creating the MOLECULE.", "error"
+            )
+            return
+        if not self.reviewed_matches.value:
+            self._set_creation_status(
+                "Review the listed matches before creating a new record.", "error"
+            )
+            return
+        if (
+            self.structure_search.input_kind.value != "cdxml"
+            or self.structure_search._generated_cdxml is None
+        ):
+            self._set_creation_status(
+                "The active search is no longer the generated CDXML.", "error"
+            )
+            return
+
+        self.create_generated_button.disabled = True
+        created = None
+        try:
+            self._set_creation_status(
+                "Refreshing the collection and checking identity…"
+            )
+            self.structure_search.index.refresh(progress=self._set_creation_status)
+            query = self.structure_search._query()
+            current_hits = self.structure_search.index.search(
+                query,
+                min_similarity=0.75,
+                limit=max(1, len(self.structure_search.index.records)),
+            )
+            identity_hits = [
+                hit for hit in current_hits if hit.match_type in {"exact", "equivalent"}
+            ]
+            if identity_hits:
+                self._search_completed(query, tuple(current_hits))
+                return
+
+            filename, _content = self.structure_search._generated_cdxml
+            created = molecule_creation.create_molecule_from_cdxml(
+                self.openbis_session,
+                collection=self.collection,
+                name=self.new_molecule_name.value,
+                description=self.new_molecule_description.value,
+                comments=self.new_molecule_comments.value,
+                cdxml=self.generated_cdxml,
+                png=self.generated_png,
+                filename=filename,
+                expected_representation=self.generated_representation,
+            )
+        except molecule_creation.PartialMoleculeCreationError as exc:
+            self._set_creation_status(str(exc), "error")
+            return
+        except Exception as exc:
+            self._set_creation_status(
+                f"Creation failed before completion: {type(exc).__name__}: {exc}",
+                "error",
+            )
+            return
+        finally:
+            self.create_generated_button.disabled = False
+
+        permid = str(created.permId)
+        label = self.new_molecule_name.value.strip()
+        try:
+            self._labels_by_permid[permid] = label
+            current_values = {str(value) for _label, value in self.dropdown.options}
+            if permid not in current_values:
+                self.dropdown.options = list(self.dropdown.options) + [
+                    (label, created.permId)
+                ]
+            self.dropdown.value = created.permId
+            self.structure_search.index.refresh(progress=self._set_creation_status)
+            refreshed_hits = self.structure_search.index.search(
+                self.structure_search._query(),
+                min_similarity=0.75,
+                limit=max(1, len(self.structure_search.index.records)),
+            )
+            confirmed = any(
+                hit.record.permid == permid and hit.match_type == "exact"
+                for hit in refreshed_hits
+            )
+            if not confirmed:
+                raise RuntimeError("the new object was not found as an exact match")
+            self.structure_search.last_query = self.structure_search._query()
+            self.structure_search.last_hits = tuple(refreshed_hits)
+            self.structure_search._hits_by_permid = {
+                hit.record.permid: hit for hit in refreshed_hits
+            }
+            self.structure_search.results.options = [("Select a match...", "")] + [
+                (
+                    f"{hit.match_type} · Q{chemical_search.tanimoto_to_match_quality(hit.similarity)} "
+                    f"(T={100 * hit.similarity:.1f}%) · "
+                    f"{hit.record.empa_number or hit.record.name or hit.record.permid}",
+                    hit.record.permid,
+                )
+                for hit in refreshed_hits
+            ]
+            self.structure_search._set_status(
+                f"Created and indexed {label} as an exact match.", "ok"
+            )
+            try:
+                url = utils.generate_openbis_object_url(self.openbis_session, created)
+                link = (
+                    f" <a href='{html.escape(url, quote=True)}' target='_blank'>"
+                    "Open in openBIS</a>"
+                )
+            except Exception:
+                link = ""
+            self.create_generated_box.children = [
+                ipw.HTML(
+                    "<span style='color:#187b35'><b>MOLECULE created, indexed, "
+                    f"and selected:</b> {html.escape(permid)}.{link}</span>"
+                )
+            ]
+        except Exception as exc:
+            self.create_generated_box.children = [
+                ipw.HTML(
+                    "<span style='color:#b36b00'><b>The MOLECULE was created and "
+                    "selected, but index verification failed.</b> Do not create it "
+                    f"again. PermID: {html.escape(permid)}. "
+                    f"{html.escape(type(exc).__name__ + ': ' + str(exc))}</span>"
+                )
+            ]
+
+    def _select_search_result(self, permid):
+        values = {str(value): value for _label, value in self.dropdown.options}
+        value = values.get(str(permid))
+        if value is None:
+            hit = self.structure_search._hits_by_permid.get(str(permid))
+            label = (
+                hit.record.name if hit is not None and hit.record.name else str(permid)
+            )
+            self.dropdown.options = list(self.dropdown.options) + [(label, permid)]
+            value = permid
+        self.dropdown.value = value
+
+    def _set_molecule_sketch(self, content):
+        """Use the shared longest-side cap without changing stored PNG bytes."""
+        from aiidalab_widgets_empa.cdxml_rendering import set_png_widget
+
+        set_png_widget(self.molecule_sketch, bytes(content))
 
     def load_details(self, change):
         obj_permid = self.dropdown.value
@@ -581,10 +935,12 @@ class MoleculeWidget(ipw.VBox):
             obj_datasets = obj.get_datasets(type="ELN_PREVIEW")
             obj_props = obj.props.all()
             obj_name = obj_props.get("name", "")
-            obj_empa_number = obj_props.get("empa_number", "")
-            obj_empa_number_name = f"{obj_empa_number} ({obj_name})"
-            self.parent_accordion.set_title(self.object_index, obj_empa_number_name)
-            self.title = obj_name
+            selected_label = self._labels_by_permid.get(
+                str(obj_permid), obj_name or str(obj_permid)
+            )
+            if self.object_index < len(self.parent_accordion.children):
+                self.parent_accordion.set_title(self.object_index, selected_label)
+            self.title = selected_label
 
             obj_details_html = ipw.HTML()
             obj_details_string = (
@@ -603,110 +959,42 @@ class MoleculeWidget(ipw.VBox):
 
             if obj_datasets:
                 object_dataset = obj_datasets[0]
-                object_dataset.download(destination="images")
-                object_image_filepath = object_dataset.file_list[0]
-                self.molecule_sketch.value = utils.read_file(
-                    f"images/{object_dataset.permId}/{object_image_filepath}"
+                object_image_filepath = str(object_dataset.file_list[0])
+                self._set_molecule_sketch(
+                    chemical_search.download_dataset_file(
+                        object_dataset,
+                        object_image_filepath,
+                    )
                 )
-
-                # Erase file after downloading it
-                shutil.rmtree(f"images/{object_dataset.permId}")
             else:
-                self.molecule_sketch.value = b""
+                self._set_molecule_sketch(b"")
 
             self.details_vbox.children = [obj_details_html]
 
     def remove_molecule(self, b):
         molecules_accordion_children = list(self.parent_accordion.children)
-        num_molecules = len(molecules_accordion_children)
         molecules_accordion_children.pop(self.object_index)
 
         for index, molecule in enumerate(molecules_accordion_children):
-            if index >= self.object_index:
-                molecule.object_index -= 1
-                self.parent_accordion.set_title(molecule.object_index, molecule.title)
+            molecule.object_index = index
 
-        self.parent_accordion.set_title(num_molecules - 1, "")
         self.parent_accordion.children = molecules_accordion_children
+        self.parent_accordion.titles = tuple(
+            molecule.title for molecule in molecules_accordion_children
+        )
 
 
-class ReacProdConceptWidget(ipw.VBox):
+class ReacProdConceptWidget(MoleculeWidget):
+    """Compatibility alias for a product molecule selector."""
+
     def __init__(self, openbis_session, parent_accordion, object_index):
-        super().__init__()
-        self.openbis_session = openbis_session
-        self.parent_accordion = parent_accordion
-        self.object_index = object_index
-        self.title = ""
-
-        molecules_objects = utils.get_openbis_objects(
-            self.openbis_session,
-            collection=OPENBIS_COLLECTIONS_PATHS["Reaction Product"],
-            type=OPENBIS_OBJECT_TYPES["Reaction Product Concept"],
+        super().__init__(
+            openbis_session,
+            parent_accordion,
+            object_index,
+            collection_key="Product Molecule",
+            role="product molecule",
         )
-        dropdown_list = [(obj.props["name"], obj.permId) for obj in molecules_objects]
-        dropdown_list.insert(0, ("Select a reaction product concept...", "-1"))
-        self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
-        self.details_vbox = ipw.VBox()
-
-        self.remove_reacprod_concept_button = ipw.Button(
-            description="Remove",
-            disabled=False,
-            button_style="danger",
-            tooltip="Remove reaction product concept",
-            layout=ipw.Layout(width="150px", height="25px"),
-        )
-
-        self.dropdown.observe(self.load_details, names="value")
-        self.remove_reacprod_concept_button.on_click(self.remove_reacprod_concept)
-        self.children = [
-            self.dropdown,
-            self.details_vbox,
-            self.remove_reacprod_concept_button,
-        ]
-
-    def load_details(self, change):
-        obj_permid = self.dropdown.value
-        if obj_permid == "-1":
-            return
-        else:
-            obj = utils.get_openbis_object(
-                self.openbis_session, sample_ident=obj_permid
-            )
-            obj_props = obj.props.all()
-            obj_name = obj_props.get("name", "")
-            self.parent_accordion.set_title(self.object_index, obj_name)
-            self.title = obj_name
-
-            obj_details_html = ipw.HTML()
-            obj_details_string = (
-                "<div style='border: 1px solid grey; padding: 10px; margin: 10px;'>"
-            )
-            for key, value in obj_props.items():
-                if value:
-                    prop_type = utils.get_openbis_property_type(
-                        self.openbis_session, code=key
-                    )
-                    prop_label = prop_type.label
-                    obj_details_string += f"<p><b>{prop_label}:</b> {value}</p>"
-
-            obj_details_string += "</div>"
-            obj_details_html.value = obj_details_string
-            self.details_vbox.children = [obj_details_html]
-
-    def remove_reacprod_concept(self, b):
-        reacprod_concepts_accordion_children = list(self.parent_accordion.children)
-        num_reacprod_concepts = len(reacprod_concepts_accordion_children)
-        reacprod_concepts_accordion_children.pop(self.object_index)
-
-        for index, reacprod_concept in enumerate(reacprod_concepts_accordion_children):
-            if index >= self.object_index:
-                reacprod_concept.object_index -= 1
-                self.parent_accordion.set_title(
-                    reacprod_concept.object_index, reacprod_concept.title
-                )
-
-        self.parent_accordion.set_title(num_reacprod_concepts - 1, "")
-        self.parent_accordion.children = reacprod_concepts_accordion_children
 
 
 class SelectInstrumentWidget(ipw.VBox):
@@ -834,7 +1122,7 @@ class SelectExperimentWidget(ipw.VBox):
         self.experiment_dropdown = ipw.Dropdown(
             options=[("Select experiment...", "-1")],
             value="-1",
-            layout=ipw.Layout(width="500px")
+            layout=ipw.Layout(width="500px"),
         )
         self.create_experiment_button = ipw.Button(
             tooltip="Add new experiment",
@@ -915,13 +1203,14 @@ class SelectExperimentWidget(ipw.VBox):
         self.new_exp_name_hbox = ipw.HBox(
             [self.new_exp_name_label, self.new_exp_name_textbox]
         )
-        
+
         # Description Input
         self.new_exp_description_label = ipw.HTML(
             value="<b>Description:</b>", layout=ipw.Layout(width="80px")
         )
         self.new_exp_description_textbox = ipw.Text(
-            placeholder="Write experiment description...", layout=ipw.Layout(width="500px")
+            placeholder="Write experiment description...",
+            layout=ipw.Layout(width="500px"),
         )
         self.new_exp_description_hbox = ipw.HBox(
             [self.new_exp_description_label, self.new_exp_description_textbox]
@@ -961,25 +1250,39 @@ class SelectExperimentWidget(ipw.VBox):
     # 2. DATA LOADING METHODS
     # ==========================================
     def load_experiments(self, project_identifier):
-        """Fetches experiments from openBIS ONCE and stores them."""
+        """Fetch display properties in bulk for the selected project only."""
         experiments = utils.get_openbis_collections(
-            self.openbis_session, type="EXPERIMENT", project=project_identifier
+            self.openbis_session,
+            type="EXPERIMENT",
+            project=project_identifier,
+            props=["name"],
         )
-
         data = []
-        for exp in experiments:
-            name = exp.props["name"] if "name" in exp.props.all() else exp.code
-            display_name = name
-            registrator = getattr(exp.registrator, "userId", exp.registrator)
-
-            data.append(
-                {
-                    "display_name": display_name,
-                    "permId": exp.permId,
-                    "is_mine": registrator == self.current_user,
-                }
-            )
-
+        experiment_frame = getattr(experiments, "df", None)
+        if experiment_frame is not None:
+            for record in experiment_frame.to_dict(orient="records"):
+                code = str(record.get("identifier") or "").rstrip("/").split("/")[-1]
+                name = record.get("NAME")
+                if name is None or pd.isna(name) or not str(name).strip():
+                    name = code
+                data.append(
+                    {
+                        "display_name": name,
+                        "permId": str(record["permId"]),
+                        "is_mine": record.get("registrator") == self.current_user,
+                    }
+                )
+        else:
+            for exp in experiments:
+                name = exp.props["name"] if "name" in exp.props.all() else exp.code
+                registrator = getattr(exp.registrator, "userId", exp.registrator)
+                data.append(
+                    {
+                        "display_name": name,
+                        "permId": exp.permId,
+                        "is_mine": registrator == self.current_user,
+                    }
+                )
         self.raw_experiments_df = pd.DataFrame(data)
         self.update_experiment_dropdown(None)
 
@@ -1012,8 +1315,10 @@ class SelectExperimentWidget(ipw.VBox):
             df[["display_name", "permId"]].itertuples(index=False, name=None)
         )
         options.insert(0, ("Select experiment...", "-1"))
+        selected = self.experiment_dropdown.value
         self.experiment_dropdown.options = options
-
+        if selected not in {value for _label, value in options}:
+            self.experiment_dropdown.value = "-1"
 
     # ==========================================
     # 4. ACTION HANDLERS
@@ -1346,9 +1651,7 @@ class SelectProjectWidget(ipw.VBox):
         self.filter_my_projects_cb.observe(self.update_dropdown, names="value")
 
         # --- Layout Assembly ---
-        self.project_hbox = ipw.HBox(
-            [self.project_label, self.project_dropdown]
-        )
+        self.project_hbox = ipw.HBox([self.project_label, self.project_dropdown])
 
         self.sort_hbox = ipw.HBox(
             children=[
@@ -2285,10 +2588,8 @@ class CreateSubstanceWidget(ipw.VBox):
         self.supplier_dropdown.value = "-1"
         self.receive_date.value = None
 
-        for index, _ in enumerate(self.molecules_accordion.children):
-            self.molecules_accordion.set_title(index, "")
-
         self.molecules_accordion.children = []
+        self.molecules_accordion.titles = ()
 
         self.evaporation_temperatures_table.reset_table()
 

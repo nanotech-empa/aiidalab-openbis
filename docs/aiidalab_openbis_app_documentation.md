@@ -10,9 +10,11 @@ The main page is organized into the following tabs:
   - **Sample preparation** (`1_sample_preparation.ipynb`): Register starting samples, record sequential preparation steps, parallel actions, and real-time observables, or save reusable process templates.
   - **Sample measurement** (`2_sample_measurement.ipynb`): Configure and manage background watchdogs that monitor local AiiDAlab directories, parse new measurement files (e.g., Nanonis SPM files), and upload them to openBIS.
   - **Folder synchronisation (AFS)** (`6_synchronisation.ipynb`): Run continuous, one-way background synchronisation of raw measurement folders from the openBIS Advanced File Server (AFS) to local AiiDAlab storage.
+- **Simulations**
+  - **Import/export simulations**: Review stored AiiDA results and publish classified result objects, previews and their provenance archive.
 - **AI Agent**
-  - **Open openBIS chatbot** (`4_openbis_chatbot.ipynb`): Interact with an AI assistant connected to your openBIS instance.
-  - **Setup openBIS chatbot** (`5_setup_chatbot.ipynb`): Configure the LLM provider/model and Langfuse observability for tracking chatbot interactions.
+  - **Open openBIS chatbot** (`4_openbis_chatbot.ipynb`): Use the shared AiiDAlab assistant connected to your openBIS instance. The page also links to Fabio’s original chat (`4_openbis_chatbot_legacy.ipynb`) for comparison.
+  - **Setup openBIS chatbot** (`5_setup_chatbot.ipynb`): Configure the provider/model and Langfuse for Fabio’s legacy chatbot. The shared assistant uses its own Connection panel.
 
 ### End-to-End Measurement Pipeline
 
@@ -233,3 +235,47 @@ Use this tab to inspect and stop running measurement watchdogs.
 ## 6. Navigation
 
 - **Return to Main Menu (🏠):** Click the **Home (🏠)** button at the bottom of any notebook to return to the main page (`0_home.ipynb`).
+
+## 7. Shared assistant and legacy chatbot
+
+The shared chat uses the same assistant service as the scientific apps. Fabio’s
+legacy chat remains available independently; it has not been removed. The shared
+adapter reuses the laboratory query logic for typed objects and relationships.
+Legacy vector retrieval and archive import remain in their existing interfaces.
+
+Ask the assistant to search molecular concepts (`MOLECULE`, with ChemDraw sketches),
+materials, related simulations and AiiDA structures. Molecular concepts and physical
+`SUBSTANCE` samples have different roles. If a structure is absent, the assistant
+can search public sources through the connected provider, cite the source, and
+use the destination app's file/CDXML/AiiDA importer where available. Inspect the
+loaded structure and form values before preparing calculations.
+
+The assistant can explain export classification and guide the existing export
+review. Publishing to openBIS and importing archives use the existing GUI controls.
+Diagnostic output is hidden unless **Verbose** is checked. See the
+[agent guide](agents/README.md) for the current tools and limitations.
+
+## 8. Exporting simulations and model results
+
+Configure the destination instance in the ELN connection first. Use the dev
+instance for validation; the production URL in section 2 is not a test target.
+
+In PythTB, solve and plot the current model, then choose **Prepare openBIS
+export**. In Model Hamiltonians, solve the graph/Hubbard model or load a stored
+AiiDA result, then use the same action. In ORCA, use **Export to openBIS** in the
+Results navigation; native DMRG results also expose that action beside their
+stored result table. No scientific computation is launched by these actions.
+
+The shared form lets you select the collection and any applicable
+molecule/material concepts, review all result cards, previews and executable
+mapping, and explicitly publish. Preparing a local result saves an immutable
+AiiDA snapshot but does not upload to openBIS. It retains its UUID even if the
+connection fails, so it can be reviewed later. Editing the model requires a new
+solution and preparation; old saved snapshots remain valid historical results.
+
+The exporter checks the server for duplicates and resumes missing components
+after an interrupted upload. Importing the linked AiiDA archive restores the
+stored results and UUIDs; it does not install the originating apps or retrieve
+external checkpoints. See the [simulation guide](simulation_object_types.md)
+and [schema mappings](openBIS_schema_documentation.md#stored-model-and-additional-orca-results)
+for the scientific scope, units and convergence interpretation.

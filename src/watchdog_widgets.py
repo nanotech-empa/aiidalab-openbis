@@ -1,4 +1,5 @@
 import os
+import pathlib
 import ipywidgets as ipw
 import signal
 from IPython.display import display, Javascript
@@ -7,7 +8,6 @@ import ipyfilechooser
 import subprocess
 import logging
 import json
-import pathlib
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -16,13 +16,13 @@ OPENBIS_OBJECT_TYPES, _ = (
 )
 
 logger = logging.getLogger(__name__)
-APP_FOLDER = pathlib.Path(__file__).resolve().parent.parent
-LOGS_FOLDER = APP_FOLDER / "logs"
+APP_FOLDER = utils.APP_ROOT
+LOGS_FOLDER = utils.LOG_DIR
 MEASUREMENT_LOGS_FOLDER = LOGS_FOLDER / "measurements"
 LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
 MEASUREMENT_LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
-    filename=LOGS_FOLDER / "aiidalab_openbis_interface.log",
+    filename=utils.LOG_FILE_PATH,
     encoding="utf-8",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
