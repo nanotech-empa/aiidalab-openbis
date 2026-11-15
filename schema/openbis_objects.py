@@ -1,3 +1,10 @@
+"""Laboratory catalog, including historical simulation classes.
+
+Modern simulation definitions live in src/simulation_schema.py, with the
+generated LinkML view in simulation_objects_schema.yaml. Do not provision
+modern simulation objects from the legacy classes below.
+"""
+
 from pydantic import (
     BaseModel,
     Field,

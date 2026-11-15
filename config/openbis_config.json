@@ -46,7 +46,9 @@
             "SPM Simulation": "SPM_SIMULATION",
             "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
             "Molecular Dynamics": "MOLECULAR_DYNAMICS",
-            "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
+            "Electronic Structure": "ELECTRONIC_STRUCTURE",
+        "Model Hamiltonian": "MODEL_HAMILTONIAN",
+        "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
         }
     },
     "Simulation Export Types": {
@@ -60,6 +62,8 @@
         "SPM Simulation": "SPM_SIMULATION",
         "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
         "Molecular Dynamics": "MOLECULAR_DYNAMICS",
+        "Electronic Structure": "ELECTRONIC_STRUCTURE",
+        "Model Hamiltonian": "MODEL_HAMILTONIAN",
         "Unclassified Simulation": "UNCLASSIFIED_SIMULATION"
     },
     "Workchain Viewers": {
@@ -90,6 +94,8 @@
         "Geometry Optimisation": "GEOMETRY_OPTIMISATION",
         "PDOS": "PDOS",
         "Vibrational Spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
+        "Electronic Structure": "ELECTRONIC_STRUCTURE",
+        "Model Hamiltonian": "MODEL_HAMILTONIAN",
         "Unclassified Simulation": "UNCLASSIFIED_SIMULATION",
         "Code": "CODE",
         "Computer": "COMPUTER",

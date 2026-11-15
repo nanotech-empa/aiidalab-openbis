@@ -12,6 +12,12 @@ from aiida import orm
 
 
 WORKFLOWS = {
+    "orbital_reordering": "OrbitalReorderingWorkChain",
+    "orbital_catalog": "OrbitalCatalogWorkChain",
+    "energy_export": "EnergyExportWorkChain",
+    "dmrg_sweeps": "DmrgSweepConvergenceWorkChain",
+    "dmrg_convergence": "DmrgConvergenceWorkChain",
+    "dmrg_timeout_recovery": "DmrgTimeoutRecoveryWorkChain",
     "nto_cubes": "NtoCubesWorkChain",
     "geometry": "GeometryWorkChain",
     "reference": "ReferenceWorkChain",
@@ -27,6 +33,8 @@ WORKFLOWS = {
     "vibrations": "VibrationsWorkChain",
 }
 CALCULATIONS = {
+    "dmrg": "DmrgCalculation",
+    "energy_stage": "EnergyStageCalculation",
     "optical": "OpticalCalculation",
     "correlation": "CorrelationCalculation",
     "dyson_maps": "DysonMapsCalculation",
@@ -42,6 +50,14 @@ PROCESS_TYPES = {
 }
 LABELS = set(PROCESS_TYPES.values())
 RESULT_TITLES = {
+    "orbital_reordering": "Prepared orbital reference",
+    "orbital_catalog": "Stored orbital catalog",
+    "energy_export": "Active-space Hamiltonian and validation",
+    "energy_stage": "Quantum / classical energy stage",
+    "dmrg": "Native DMRG results",
+    "dmrg_sweeps": "Fixed-bond DMRG continuation",
+    "dmrg_convergence": "DMRG convergence study",
+    "dmrg_timeout_recovery": "Recovered DMRG results",
     "optical": "Optical excitations / NTO analysis",
     "nto_cubes": "NTO hole / particle cubes",
     "correlation": "Correlation energies",
@@ -71,6 +87,121 @@ SPATIAL = {
     "kondo_maps",
     "map_figure",
 }
+
+ELECTRONIC_RESULT_TYPES = {
+    "common_orbitals": "ORBITAL_REFERENCE",
+    "casscf": "MANY_ELECTRON_STATES",
+    "casci": "MANY_ELECTRON_STATES",
+    "correlation": "CORRELATION_ENERGIES",
+    "optical": "OPTICAL_EXCITATIONS",
+    "dyson": "DYSON_TRANSITIONS",
+    "kondo": "KONDO_EXCHANGE",
+    "orbital_reordering": "ORBITAL_ORDERING",
+    "orbital_catalog": "ORBITAL_CATALOG",
+    "energy_export": "HAMILTONIAN_EXPORT",
+    "energy_stage": "QUANTUM_COMPUTING_STAGE",
+    "dmrg": "MOLECULAR_DMRG",
+    "dmrg_sweeps": "MOLECULAR_DMRG",
+    "dmrg_convergence": "MOLECULAR_DMRG",
+    "dmrg_timeout_recovery": "MOLECULAR_DMRG",
+}
+
+EXTENDED = {
+    "orbital_reordering",
+    "orbital_catalog",
+    "energy_export",
+    "energy_stage",
+    "dmrg",
+    "dmrg_sweeps",
+    "dmrg_convergence",
+    "dmrg_timeout_recovery",
+}
+
+
+def export_ready(node):
+    """Include a preserved native DMRG sweep-budget result, labelled incomplete."""
+    if node.is_finished_ok:
+        return True
+    return (
+        getattr(node, "process_type", "") == "aiida.calculations:empa_orca.dmrg"
+        and node.is_finished
+        and node.exit_status == 311
+        and "results" in node.outputs
+    )
+
+
+def extended_definitions(node, op):
+    """Keep complete state/stage tables without inventing a scalar total energy."""
+    tables = {
+        key: node.outputs[key].get_dict()
+        for key in node.outputs
+        if isinstance(node.outputs[key], orm.Dict)
+    }
+    if not tables:
+        raise ValueError("The stored process contains no result metadata.")
+    dmrg = op.startswith("dmrg")
+    convergence = tables.get("convergence", {})
+    # Native sweep convergence alone is not bond-dimension convergence.
+    converged = bool(convergence.get("passed")) if op == "dmrg_convergence" else False
+    family = (
+        "DMRG"
+        if dmrg
+        else "CAS"
+        if op in {"orbital_reordering", "energy_export"}
+        else "OTHER"
+    )
+    stage = node.inputs.operation.value if op == "energy_stage" else op
+    if op == "energy_stage" and stage not in {
+        "validate",
+        "generate",
+        "sample-simulator",
+        "solve-full",
+        "solve-sampled",
+        "prepare-hardware",
+        "sample-hardware",
+    }:
+        raise ValueError("Unsupported stored energy stage.")
+    title = RESULT_TITLES[op] + (" / " + stage if op == "energy_stage" else "")
+    props = {
+        "name": node.label or title,
+        "aiida_source_uuid": str(node.uuid),
+        "method_family": family,
+        "electronic_result_type": ELECTRONIC_RESULT_TYPES[op],
+        "method_label": title,
+        "converged": converged,
+        "simulation_description": title
+        + ". Complete stored tables, checks and retained artifacts are in the linked AiiDA archive. External Hamiltonians, wavefunctions and checkpoints remain references. A completed stage does not establish physical convergence.",
+        "comments": json.dumps(
+            {
+                "result_kind": op,
+                "stage": stage,
+                "exit_status": node.exit_status,
+                "result_tables": {key: str(node.outputs[key].uuid) for key in tables},
+                "convergence": convergence,
+                "scope": "Stored AiiDA content only; no remote reads or scientific execution.",
+            },
+            sort_keys=True,
+        ),
+    }
+    if dmrg:
+        values = tables.get("final_results", tables.get("results", {})).get(
+            "energies_hartree", []
+        )
+        if values:
+            props.update(
+                main_result_description="Lowest stored DMRG root; full root family and convergence diagnostics remain in the archive.",
+                main_result_value_numeric=min(
+                    _finite(e, "DMRG energy") for e in values
+                ),
+                main_result_unit="Hartree",
+            )
+    return {
+        "unclassified": {
+            "object_type": "ELECTRONIC_STRUCTURE",
+            "title": title,
+            "properties": props,
+        }
+    }
 
 
 def operation(node):
@@ -121,6 +252,8 @@ def structure_uuid(node):
         creator = item.creator
         if creator is not None:
             pending.extend(data_nodes(creator.inputs))
+    if not identities and op in EXTENDED:
+        return None
     if len(identities) != 1:
         raise ValueError("The stored result does not identify one unique geometry.")
     result = identities.pop()
@@ -131,6 +264,8 @@ def structure_uuid(node):
 
 def structures(node, role):
     final = structure_uuid(node)
+    if final is None:
+        return [], []
     if role == "geometry_optimization":
         return [str(node.inputs.structure.uuid)], [final]
     return [final], []
@@ -188,8 +323,10 @@ def electronic_context(node):
 def definitions(node):
     """One record per result role/type; multi-root tables stay intact."""
     op = operation(node)
-    if not node.is_finished_ok:
+    if not export_ready(node):
         raise ValueError("Only successfully completed ORCA results can be exported.")
+    if op in EXTENDED:
+        return extended_definitions(node, op)
     settings = mapping(node.inputs, "settings") or mapping(
         node.inputs, "reference_settings"
     )
@@ -306,7 +443,7 @@ def definitions(node):
         else:
             add(
                 "unclassified",
-                "UNCLASSIFIED_SIMULATION",
+                "ELECTRONIC_STRUCTURE",
                 method + " corrected state energies",
                 method_family="CAS",
                 method_label=method,
@@ -328,7 +465,7 @@ def definitions(node):
                 raise ValueError("Invalid stored optical state.")
         add(
             "unclassified",
-            "UNCLASSIFIED_SIMULATION",
+            "ELECTRONIC_STRUCTURE",
             "Vertical optical excitations and NTO analysis",
             method_family="DFT",
             method_label=table["method"] + " / " + common["method_label"],
@@ -403,7 +540,7 @@ def definitions(node):
         }[op]
         add(
             "unclassified",
-            "UNCLASSIFIED_SIMULATION",
+            "ELECTRONIC_STRUCTURE",
             title,
             method_family="DFT" if op == "common_orbitals" else "CAS",
             method_label=title,
@@ -423,7 +560,8 @@ def definitions(node):
             or electronic.get("reference", "").lower() == "uks"
         ):
             props["method_modifiers"] = ["SPIN_COLLINEAR"]
-        if definition["object_type"] == "UNCLASSIFIED_SIMULATION":
+        if definition["object_type"] == "ELECTRONIC_STRUCTURE":
+            props["electronic_result_type"] = ELECTRONIC_RESULT_TYPES[op]
             mult = props.pop("spin_multiplicity", None)
             context = {
                 "result_kind": op,
@@ -490,7 +628,29 @@ def render_preview(source_uuid, role, path):
         return
     figure, axes = plt.subplots(figsize=(6, 4))
     try:
-        if role == "pdos":
+        if op in EXTENDED:
+            table = mapping(node.outputs, "final_results") or mapping(
+                node.outputs, "results"
+            )
+            energies = table.get("energies_hartree", [])
+            if energies:
+                axes.scatter(range(len(energies)), energies)
+                axes.set(
+                    xlabel="Stored root index",
+                    ylabel="Energy (Hartree)",
+                    title=RESULT_TITLES[op],
+                )
+            else:
+                axes.text(
+                    0.5,
+                    0.5,
+                    RESULT_TITLES[op] + "\nStored tables and artifacts in archive",
+                    ha="center",
+                    va="center",
+                    transform=axes.transAxes,
+                )
+                axes.set_axis_off()
+        elif role == "pdos":
             arrays = node.outputs.pdos.scf.character
             energies, spin = arrays.get_array("energies_ev"), arrays.get_array("spin")
             for channel in np.unique(spin):
@@ -660,10 +820,17 @@ def render_preview(source_uuid, role, path):
         plt.close(figure)
 
 
-def inventory(source_uuid):
+def inventory(source_uuid, adapter=None):
     """JSON-safe local inventory, including call-tree data and external references."""
     root = orm.load_node(source_uuid)
-    operation(root)
+    if adapter is None:
+        operation(root)
+        structure = structure_uuid(root)
+        results = definitions(root)
+    else:
+        results = adapter.definitions(root)
+        structures_in, _ = adapter.structures(root, next(iter(results)))
+        structure = structures_in[0] if structures_in else None
     processes = [str(root.uuid), *[str(n.uuid) for n in root.called_descendants]]
     stored, external, seen = [], [], set()
     for uid in processes:
@@ -688,8 +855,8 @@ def inventory(source_uuid):
                     stored.append({"uuid": identity, "filename": filename})
     return {
         "source_uuid": str(root.uuid),
-        "structure_uuid": structure_uuid(root),
-        "results": definitions(root),
+        "structure_uuid": structure,
+        "results": results,
         "stored_files": stored,
         "external_references": external,
         "policy": "Only data already stored in AiiDA; no remote retrieval, stashing or calculation.",
@@ -706,7 +873,7 @@ def related_results(source_uuid):
             continue
         seen.add(uid)
         node = orm.load_node(uid)
-        if supported(node) and node.is_finished_ok:
+        if supported(node) and export_ready(node):
             try:
                 if structure_uuid(node) != target:
                     continue

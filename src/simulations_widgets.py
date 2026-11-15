@@ -1319,6 +1319,12 @@ class ExportSimulationsWidget(ipw.VBox):
         self.select_experiment_widget = widgets.SelectExperimentWidget(
             self.openbis_session
         )
+        self.select_project_widget = widgets.SelectProjectWidget(self.openbis_session)
+        self.select_project_widget.project_dropdown.observe(
+            self._selected_project_changed, names="value"
+        )
+        # Destination creation is managed by the laboratory's experiment UI.
+        self.select_experiment_widget.create_experiment_button.layout.display = "none"
 
         self.simulation_source_selector = ipw.RadioButtons(
             options=[
@@ -1391,6 +1397,7 @@ class ExportSimulationsWidget(ipw.VBox):
 
         self.children = [
             self.select_experiment_title,
+            self.select_project_widget,
             self.select_experiment_widget,
             self.simulation_details_title,
             self.simulation_source_selector,
@@ -1407,6 +1414,15 @@ class ExportSimulationsWidget(ipw.VBox):
         ]
         if source_uuid is not None:
             self.set_source_uuid(source_uuid)
+
+    def _selected_project_changed(self, change):
+        """Load only the selected project's collections and clear old review state."""
+        selector = self.select_experiment_widget
+        selector.raw_experiments_df = None
+        selector.experiment_dropdown.options = [("Select experiment...", "-1")]
+        selector.experiment_dropdown.value = "-1"
+        if change["new"] != "-1":
+            selector.load_experiments(change["new"])
 
     def set_source_uuid(self, source_uuid):
         """Open the common review for the app entry, with no second source picker."""
@@ -2672,11 +2688,16 @@ class SimulationDetailsWidget(ipw.VBox):
 
     def _populate_inferred_molecules(self, workchain):
         """Show explicit openBIS molecule relations carried by the input structure."""
-        structure = (
-            orm.load_node(aiida_utils.orca_export.structure_uuid(workchain))
-            if aiida_utils.orca_export.supported(workchain)
-            else workchain.inputs.structure
-        )
+        adapter = aiida_utils.result_adapter(workchain)
+        if adapter is not None:
+            roles = adapter.definitions(workchain)
+            parents, children = adapter.structures(workchain, next(iter(roles)))
+            identifiers = parents or children
+            structure = orm.load_node(identifiers[0]) if identifiers else None
+        else:
+            structure = getattr(workchain.inputs, "structure", None)
+        if structure is None:
+            return
         inferred = aiida_utils.openbis_molecules_for_input_structure(
             self.openbis_session, structure
         )
@@ -2755,7 +2776,7 @@ class SimulationDetailsWidget(ipw.VBox):
                 "WorkChain was found.</p>"
             )
             return
-        if not workchain.is_finished_ok:
+        if not aiida_utils.export_ready(workchain):
             self.simulation_check_status.value = (
                 f"<p style='color:#b00020'>Workflow PK {workchain.pk} is not "
                 "finished successfully and cannot be exported.</p>"
@@ -3225,8 +3246,11 @@ class SimulationDetailsWidget(ipw.VBox):
         if uuid is None:
             return None
         workchain = orm.load_node(uuid)
-        if aiida_utils.orca_export.supported(workchain):
-            return orm.load_node(aiida_utils.orca_export.structure_uuid(workchain))
+        if (adapter := aiida_utils.result_adapter(workchain)) is not None:
+            roles = adapter.definitions(workchain)
+            parents, children = adapter.structures(workchain, next(iter(roles)))
+            identifiers = parents or children
+            return orm.load_node(identifiers[0]) if identifiers else None
         inputs = getattr(workchain, "inputs", None)
         return getattr(inputs, "structure", None)
 

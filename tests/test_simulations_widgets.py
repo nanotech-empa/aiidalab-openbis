@@ -28,12 +28,25 @@ def simulations_widgets(monkeypatch):
     sys.modules.pop("src.aiida_utils", None)
     sys.modules.pop("src.widgets", None)
     sys.modules.pop("src.simulations_widgets", None)
-    return importlib.import_module("src.simulations_widgets")
+    module = importlib.import_module("src.simulations_widgets")
+    return module
+
+
+def _stub_project_selector(monkeypatch, module):
+    class Project(module.ipw.VBox):
+        def __init__(self, session):
+            super().__init__()
+            self.project_dropdown = module.ipw.Dropdown(
+                options=[("Select", "-1"), ("Project", "project")]
+            )
+
+    monkeypatch.setattr(module.widgets, "SelectProjectWidget", Project)
 
 
 def test_export_workflow_starts_with_experiment_then_simulation(
     monkeypatch, simulations_widgets
 ):
+    _stub_project_selector(monkeypatch, simulations_widgets)
     ipw = simulations_widgets.ipw
 
     class FakeSelectExperimentWidget(ipw.VBox):
@@ -42,6 +55,15 @@ def test_export_workflow_starts_with_experiment_then_simulation(
             self.experiment_dropdown = ipw.Dropdown(
                 options=[("Select experiment...", "-1")], value="-1"
             )
+            self.create_experiment_button = ipw.Button()
+            self.loaded_projects = []
+
+        def load_experiments(self, project):
+            self.loaded_projects.append(project)
+            self.experiment_dropdown.options = [
+                ("Select", "-1"),
+                ("Collection", "collection"),
+            ]
 
     class FakeSimulationDetailsWidget(ipw.VBox):
         def __init__(self, _session, _used_aiida):
@@ -76,8 +98,9 @@ def test_export_workflow_starts_with_experiment_then_simulation(
     ]
     assert widget.used_aiida_checkbox is widget.simulation_source_selector
     assert widget.simulation_details_vbox.loaded_sources == [True]
-    assert list(widget.children[:5]) == [
+    assert list(widget.children[:6]) == [
         widget.select_experiment_title,
+        widget.select_project_widget,
         widget.select_experiment_widget,
         widget.simulation_details_title,
         widget.simulation_source_selector,
@@ -87,6 +110,12 @@ def test_export_workflow_starts_with_experiment_then_simulation(
     assert widget.save_simulations_button.tooltip == (
         "Export the reviewed simulation to openBIS"
     )
+    widget.select_project_widget.project_dropdown.value = "project"
+    assert widget.select_experiment_widget.loaded_projects == ["project"]
+    widget.select_experiment_widget.experiment_dropdown.value = "collection"
+    widget.select_project_widget.project_dropdown.value = "-1"
+    assert widget.select_experiment_widget.experiment_dropdown.value == "-1"
+    assert widget.simulation_details_vbox.target_experiments[-1] == "-1"
 
 
 def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_products(
@@ -147,6 +176,46 @@ def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_prod
     assert widget.children.index(
         widget.add_reacprod_concept_button
     ) < widget.children.index(widget.preview_suggestions_title)
+
+
+def test_project_selector_uses_bulk_fields_and_correct_owner(
+    monkeypatch, simulations_widgets
+):
+    class Projects:
+        df = pd.DataFrame(
+            [
+                {
+                    "code": "DEV",
+                    "identifier": "/LAB/DEV",
+                    "permId": "project-1",
+                    "registrationDate": "2026-11-14",
+                    "registrator": "current-user",
+                },
+                {
+                    "code": "OTHER",
+                    "identifier": "/LAB/OTHER",
+                    "permId": "project-2",
+                    "registrationDate": "2026-11-13",
+                    "registrator": "another-user",
+                },
+            ]
+        )
+
+        def __iter__(self):
+            raise AssertionError("Project wrappers would perform per-field requests")
+
+    monkeypatch.setattr(
+        simulations_widgets.widgets.utils, "get_openbis_projects", lambda _: Projects()
+    )
+    selector = simulations_widgets.widgets.SelectProjectWidget(
+        SimpleNamespace(_get_username=lambda: "current-user")
+    )
+    assert ("DEV from Space LAB", "project-1") in selector.project_dropdown.options
+    selector.filter_my_projects_cb.value = True
+    assert selector.project_dropdown.options == (
+        ("Select project...", "-1"),
+        ("DEV from Space LAB", "project-1"),
+    )
 
 
 def test_experiment_selector_uses_bulk_properties(monkeypatch, simulations_widgets):
@@ -2462,11 +2531,13 @@ def test_simulation_add_product_offers_checked_aiida_structure(
 def test_prefilled_shared_form_reviews_whole_entry_without_source_picker(
     monkeypatch, simulations_widgets
 ):
+    _stub_project_selector(monkeypatch, simulations_widgets)
     ipw = simulations_widgets.ipw
 
     class Experiment(ipw.VBox):
         def __init__(self, session):
             super().__init__()
+            self.create_experiment_button = ipw.Button()
             self.experiment_dropdown = ipw.Dropdown(
                 options=[("Select", "-1"), ("Chosen experiment", "experiment")]
             )

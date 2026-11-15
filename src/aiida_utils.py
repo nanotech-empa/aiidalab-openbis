@@ -24,7 +24,7 @@ from ase.io.jsonio import encode
 from ase.units import Bohr, Hartree
 
 from . import export_recovery as recovery
-from . import orca_export
+from . import model_export, orca_export
 from . import upload_diagnostics, utils
 
 OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
@@ -274,7 +274,7 @@ def get_all_preceding_main_workchains(node_uuid):
     # Helper function to check if a node is a MAIN workchain
     def is_main_workchain(n):
         return (
-            (isinstance(n, orm.WorkChainNode) or orca_export.supported(n))
+            (isinstance(n, orm.WorkChainNode) or result_adapter(n) is not None)
             and not n.base.links.get_incoming(link_type=LinkType.CALL_WORK).all()
             and not n.base.links.get_incoming(link_type=LinkType.CALL_CALC).all()
         )
@@ -4120,6 +4120,21 @@ def find_existing_simulation_result(
         )
         or []
     )
+    if not existing and object_type in {"MODEL_HAMILTONIAN", "ELECTRONIC_STRUCTURE"}:
+        legacy = list(
+            openbis_session.get_objects(
+                type="UNCLASSIFIED_SIMULATION",
+                space=target_space,
+                where={"AIIDA_SOURCE_UUID": str(source_uuid)},
+            )
+            or []
+        )
+        if legacy:
+            raise ValueError(
+                "This result was already exported as Unclassified Simulation. "
+                "Reclassify the existing record into its current category before "
+                "retrying; a duplicate result has not been created."
+            )
     if len(existing) > 1:
         logger.warning(
             "Multiple %s simulations reference %s in %s; using the newest "
@@ -5090,10 +5105,11 @@ def OrcaWorkChain_export(
     preview_overrides=None,
     property_overrides=None,
 ):
-    """Publish stored ORCA results through the established shared publisher."""
+    """Publish stored adapter results through the established shared publisher."""
     node = orm.load_node(workchain_uuid)
     results = []
-    for role, definition in orca_export.definitions(node).items():
+    adapter = result_adapter(node)
+    for role, definition in adapter.definitions(node).items():
         properties = dict(
             definition["properties"],
             aiida_node=aiida_node_id,
@@ -5103,7 +5119,7 @@ def OrcaWorkChain_export(
         properties = _apply_property_overrides(
             properties, property_overrides, node, role
         )
-        parent_ids, child_ids = orca_export.structures(node, role)
+        parent_ids, child_ids = adapter.structures(node, role)
         parents = [
             structure_to_atomistic_model(openbis_session, uid, uuids)
             for uid in parent_ids
@@ -5114,7 +5130,7 @@ def OrcaWorkChain_export(
             definition["object_type"],
             properties,
             parents,
-            lambda path, uid=str(node.uuid), role=role: orca_export.render_preview(
+            lambda path, uid=str(node.uuid), role=role: adapter.render_preview(
                 uid, role, path
             ),
             role,
@@ -5128,7 +5144,16 @@ def OrcaWorkChain_export(
     return tuple(results)
 
 
+def result_adapter(node):
+    """Select by exact process identity; abstract models need no geometry."""
+    for adapter in (orca_export, model_export):
+        if adapter.supported(node):
+            return adapter
+    return None
+
+
 workchain_exporters = {
+    **{label: OrcaWorkChain_export for label in model_export.LABELS},
     **{label: OrcaWorkChain_export for label in orca_export.LABELS},
     "NanoribbonWorkChain": NanoribbonWorkChain_export,
     "PwRelaxWorkChain": PwRelaxWorkChain_export,
@@ -5147,18 +5172,27 @@ workchain_exporters = {
 }
 
 
+def export_ready(node):
+    """Readiness includes explicitly preserved partial results, never running jobs."""
+    return (
+        orca_export.export_ready(node)
+        if orca_export.supported(node)
+        else node.is_finished_ok
+    )
+
+
 def is_exportable_process(node):
     """ORCA registrations require their entry-point identity, not just a label."""
     label = getattr(node, "process_label", "")
-    if label in orca_export.LABELS:
-        return orca_export.supported(node)
+    if label in orca_export.LABELS | model_export.LABELS:
+        return result_adapter(node) is not None
     return label in workchain_exporters
 
 
 def _result_property_definitions(workchain):
     """Return schema-valid automatic properties for each exported result role."""
-    if orca_export.supported(workchain):
-        return orca_export.definitions(workchain)
+    if (adapter := result_adapter(workchain)) is not None:
+        return adapter.definitions(workchain)
     process_label = workchain.process_label
     definitions = {}
 
@@ -5334,17 +5368,17 @@ def _result_property_definitions(workchain):
 
 def _preview_definitions(workchain):
     """Return the suggested preview renderers for one exportable workchain."""
-    if orca_export.supported(workchain):
+    if (adapter := result_adapter(workchain)) is not None:
         return [
             (
                 role,
                 item["title"],
                 role,
-                lambda path,
-                uid=str(workchain.uuid),
-                role=role: orca_export.render_preview(uid, role, path),
+                lambda path, uid=str(workchain.uuid), role=role: adapter.render_preview(
+                    uid, role, path
+                ),
             )
-            for role, item in orca_export.definitions(workchain).items()
+            for role, item in adapter.definitions(workchain).items()
         ]
     process_label = workchain.process_label
     if process_label == "NanoribbonWorkChain":
@@ -5558,7 +5592,7 @@ def _exportable_workchains(workchain, *, main_uuids=None):
     )
     for main_workchain_uuid in identifiers:
         main_workchain = orm.load_node(main_workchain_uuid)
-        if not main_workchain.is_finished_ok:
+        if not export_ready(main_workchain):
             continue
         candidates = (
             [main_workchain]
@@ -5747,7 +5781,7 @@ def export_workchain(
     pending_workchains = []
     for main_workchain_uuid in workchains_to_export:
         main_workchain = orm.load_node(main_workchain_uuid)
-        if not main_workchain.is_finished_ok:
+        if not export_ready(main_workchain):
             continue
         pending_workchains.append(main_workchain)
 

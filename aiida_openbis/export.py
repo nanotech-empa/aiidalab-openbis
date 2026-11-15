@@ -53,10 +53,32 @@ def make_export_widget(source_uuid):
 
 
 def plan_export(source_uuid):
-    """Inspect local ORCA data without connecting to openBIS."""
-    return _app_module("orca_export").inventory(source_uuid)
+    """Inspect stored ORCA or model data without connecting to openBIS."""
+    from aiida import orm
+
+    model = _app_module("model_export")
+    node = orm.load_node(source_uuid)
+    return _app_module("orca_export").inventory(
+        source_uuid, adapter=model if model.supported(node) else None
+    )
 
 
 def available_results(source_uuid):
     """List completed related calculations without an openBIS connection."""
+    from aiida import orm
+
+    model = _app_module("model_export")
+    node = orm.load_node(source_uuid)
+    if model.supported(node):
+        return [
+            {
+                "uuid": str(item.uuid),
+                "label": item.label or item.process_label,
+                "process_label": item.process_label,
+                "title": "Model Hamiltonian results",
+                "created": item.ctime.isoformat(),
+            }
+            for item in [node, *node.called_descendants]
+            if model.supported(item) and item.is_finished_ok
+        ]
     return _app_module("orca_export").related_results(source_uuid)

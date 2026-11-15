@@ -41,12 +41,26 @@ OBSOLETE_OBJECT_TYPES = (
 
 
 VOCABULARIES = {
+    "ELECTRONIC_RESULT_TYPE_ENUM": [
+        ("ORBITAL_REFERENCE", "Orbital reference"),
+        ("MANY_ELECTRON_STATES", "Many-electron states"),
+        ("CORRELATION_ENERGIES", "Correlation energies"),
+        ("OPTICAL_EXCITATIONS", "Optical excitations and NTO analysis"),
+        ("DYSON_TRANSITIONS", "Dyson transitions"),
+        ("KONDO_EXCHANGE", "Kondo exchange channels"),
+        ("MOLECULAR_DMRG", "Molecular DMRG"),
+        ("ORBITAL_ORDERING", "Orbital ordering"),
+        ("HAMILTONIAN_EXPORT", "Electronic Hamiltonian export"),
+        ("ORBITAL_CATALOG", "Orbital catalog"),
+        ("QUANTUM_COMPUTING_STAGE", "Quantum/classical computing stage"),
+    ],
     "SIMULATION_METHOD_FAMILY_ENUM": [
         ("DFT", "DFT"),
         ("DFTB", "DFTB"),
         ("TB", "TB"),
         ("MFH_TB", "MFH-TB"),
         ("DMRG", "DMRG"),
+        ("ED", "Exact diagonalization (ED)"),
         ("CAS", "CAS"),
         ("CASSCF", "CASSCF"),
         ("FORCEFIELD", "ForceField"),
@@ -152,6 +166,13 @@ PROPERTY_TYPES = {
             vocabulary="SIMULATION_METHOD_MODIFIER_ENUM",
         ),
         prop("METHOD_LABEL", "Method label", "VARCHAR"),
+        prop("MODEL", "Model", "VARCHAR"),
+        prop(
+            "ELECTRONIC_RESULT_TYPE",
+            "Electronic result type",
+            "CONTROLLEDVOCABULARY",
+            vocabulary="ELECTRONIC_RESULT_TYPE_ENUM",
+        ),
         prop("CHARGE", "Charge", "REAL"),
         prop("TOTAL_ENERGY_HARTREE", "Total energy (Hartree)", "REAL"),
         prop("CONVERGED", "Converged", "BOOLEAN"),
@@ -348,6 +369,9 @@ PROVENANCE = [
 
 # Existing simulation definitions may need explicitly additive assignments.
 ADDITIVE_OBJECT_TYPE_ASSIGNMENTS = {}
+# A path of computed bands need not establish the global gap. Missing is not
+# zero. This narrowly scoped relaxation preserves every existing stored value.
+OPTIONAL_ASSIGNMENTS = {("BAND_STRUCTURE", "BAND_GAP_EV")}
 SPIN = [
     assignment("SPIN_MULTIPLICITY", False, "Electronic properties"),
     assignment("TOTAL_MAGNETIZATION_BOHR_MAGNETON", False, "Electronic properties"),
@@ -376,6 +400,44 @@ def object_type(
 
 
 OBJECT_TYPES = {
+    "ELECTRONIC_STRUCTURE": object_type(
+        "ELST",
+        "Electronic structure",
+        [
+            assignment("NAME", True, "General information"),
+            assignment("ELECTRONIC_RESULT_TYPE", True, "Results"),
+            assignment("SIMULATION_DESCRIPTION", True, "Results"),
+            assignment("METHOD_FAMILY", True, "Method"),
+            assignment("METHOD_MODIFIERS", False, "Method"),
+            assignment("METHOD_LABEL", False, "Method"),
+            assignment("CHARGE", False, "Method"),
+            assignment("CONVERGED", True, "Results"),
+            assignment("MAIN_RESULT_DESCRIPTION", False, "Results"),
+            assignment("MAIN_RESULT_VALUE_NUMERIC", False, "Results"),
+            assignment("MAIN_RESULT_UNIT", False, "Results"),
+            assignment("COMMENTS", False, "General information"),
+        ]
+        + PROVENANCE,
+    ),
+    "MODEL_HAMILTONIAN": object_type(
+        "MODH",
+        "Model Hamiltonian",
+        [
+            assignment("NAME", True, "General information"),
+            assignment("MODEL", True, "Model"),
+            assignment("SIMULATION_DESCRIPTION", True, "Model"),
+            assignment("METHOD_FAMILY", True, "Method"),
+            assignment("METHOD_MODIFIERS", False, "Method"),
+            assignment("METHOD_LABEL", False, "Method"),
+            assignment("CONVERGED", True, "Results"),
+            assignment("CHARGE", False, "Model"),
+            assignment("MAIN_RESULT_DESCRIPTION", False, "Results"),
+            assignment("MAIN_RESULT_VALUE_NUMERIC", False, "Results"),
+            assignment("MAIN_RESULT_UNIT", False, "Results"),
+            assignment("COMMENTS", False, "General information"),
+        ]
+        + PROVENANCE,
+    ),
     "ENERGY_CALCULATION": object_type(
         "ENERGY",
         "Fixed-geometry energy calculation.",
@@ -418,7 +480,7 @@ OBJECT_TYPES = {
         [assignment("NAME", True, "General information")]
         + METHOD
         + [
-            assignment("BAND_GAP_EV", True, "Results"),
+            assignment("BAND_GAP_EV", False, "Results"),
             assignment("CONVERGED", True, "Results"),
             assignment("FERMI_ENERGY_EV", False, "Electronic properties"),
             assignment("K_PATH", False, "Results"),
@@ -703,12 +765,97 @@ def assignment_matches(
     )
 
 
+def optional_assignment_state(code, current):
+    """Compare after the explicitly allowed mandatory-to-optional relaxation."""
+    return {
+        prop_code: dict(row, mandatory=False)
+        if (code, prop_code) in OPTIONAL_ASSIGNMENTS
+        else row
+        for prop_code, row in current.items()
+    }
+
+
+def apply_optional_assignments(session):
+    """Relax only named assignments in place, preserving values and metadata."""
+    for object_code, property_code in sorted(OPTIONAL_ASSIGNMENTS):
+        obj = existing_or_none(session.get_object_type, object_code)
+        if obj is None:
+            continue
+        before = assignment_state(obj)
+        row = before.get(property_code)
+        if row is None or not row.get("mandatory"):
+            continue
+        kwargs = {
+            key: clean_assignment_value(row.get(key))
+            for key in (
+                "plugin",
+                "section",
+                "ordinal",
+                "initialValueForExistingEntities",
+                "showInEditView",
+                "showRawValueInForms",
+                "unique",
+                "patternType",
+                "pattern",
+            )
+        }
+        # pyBIS represents an unassigned plugin as an empty string, but its
+        # write API interprets that string as a plugin name to look up.
+        kwargs["plugin"] = kwargs["plugin"] or None
+        # assign_property uses ListUpdateActionAdd and silently ignores an
+        # existing assignment. Set the complete, unchanged assignment list;
+        # only the allowlisted mandatory flag differs. Never revoke properties
+        # or force removal (both could discard existing scientific values).
+        assignments = []
+        for code, current in before.items():
+            creation = {key: clean_assignment_value(current.get(key)) for key in kwargs}
+            plugin = creation.pop("plugin")
+            creation.update(
+                {
+                    "@type": "as.dto.property.create.PropertyAssignmentCreation",
+                    "propertyTypeId": {
+                        "@type": "as.dto.property.id.PropertyTypePermId",
+                        "permId": code,
+                    },
+                    "mandatory": False
+                    if code == property_code
+                    else bool(current["mandatory"]),
+                }
+            )
+            if plugin:
+                creation["pluginId"] = {
+                    "@type": "as.dto.plugin.id.PluginPermId",
+                    "permId": plugin,
+                }
+            assignments.append(creation)
+        request = obj._get_request_for_pa(assignments[0], "Set", force=False)
+        request["params"][1][0]["propertyAssignments"]["actions"][0]["items"] = (
+            assignments
+        )
+        session._post_request(session.as_v3, request)
+        after = assignment_state(session.get_object_type(object_code, use_cache=False))
+        expected = optional_assignment_state(object_code, before)
+        # Registration metadata may be refreshed by the server; all effective
+        # assignment settings must remain identical.
+        fields = {"mandatory", *kwargs}
+        if set(after) != set(before) or any(
+            clean_assignment_value(after[code].get(key))
+            != clean_assignment_value(expected[code].get(key))
+            for code in before
+            for key in fields
+        ):
+            raise RuntimeError(
+                f"Could not verify the narrow optional assignment for {object_code}.{property_code}"
+            )
+
+
 def audit(session) -> dict[str, Any]:
     errors = []
     vocabulary_actions = []
     property_actions = []
     object_actions = []
     additive_assignment_actions = []
+    optional_assignment_actions = []
 
     for code, terms in VOCABULARIES.items():
         existing = existing_or_none(session.get_vocabulary, code)
@@ -759,6 +906,12 @@ def audit(session) -> dict[str, Any]:
             object_actions.append((code, "create"))
             continue
         current = assignment_state(existing)
+        for property_code, row in current.items():
+            if (code, property_code) in OPTIONAL_ASSIGNMENTS and row.get("mandatory"):
+                optional_assignment_actions.append(
+                    (code, property_code, "make optional")
+                )
+        current = optional_assignment_state(code, current)
         desired_items = base_assignments(code, expected["assignments"])
         desired = {item["code"]: item for item in desired_items}
         additive_codes = {
@@ -836,6 +989,7 @@ def audit(session) -> dict[str, Any]:
         "property_types": property_actions,
         "object_types": object_actions,
         "additive_object_type_assignments": additive_assignment_actions,
+        "optional_object_type_assignments": optional_assignment_actions,
         "obsolete_object_types": obsolete_actions,
     }
 
@@ -869,6 +1023,22 @@ def synchronize_vocabulary(session, code: str, expected_terms):
         term: str(row.get("label") or term) for term, row in current.items()
     } == expected:
         return vocabulary
+
+    # Adding ED is safe for populated method vocabularies: preserve every
+    # existing term, label and reference. Other differences retain the guard.
+    labels = {term: str(row.get("label") or term) for term, row in current.items()}
+    if (
+        code == "SIMULATION_METHOD_FAMILY_ENUM"
+        and "ED" not in labels
+        and labels == {term: label for term, label in expected.items() if term != "ED"}
+    ):
+        session.new_term(
+            code="ED",
+            vocabularyCode=code,
+            label=expected["ED"],
+            description=expected["ED"],
+        ).save()
+        return session.get_vocabulary(code, use_cache=False)
 
     property_codes = [
         property_code
@@ -1085,6 +1255,7 @@ def apply_additive_object_type_assignments(session):
 
 
 def apply_schema(session):
+    apply_optional_assignments(session)
     for code, terms in VOCABULARIES.items():
         synchronize_vocabulary(session, code, terms)
 

@@ -1,4 +1,6 @@
 ---
+# Laboratory catalog. Historical simulation classes here are superseded by
+# simulation_objects_schema.yaml, generated from src/simulation_schema.py.
 id: https://w3id.org/linkml/examples/materialsML
 name: materialsML
 prefixes:
