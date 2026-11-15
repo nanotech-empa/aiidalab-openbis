@@ -145,7 +145,7 @@ def test_offline_chatbot_does_not_construct_agent_with_existing_llm_config():
     import json
     from unittest.mock import Mock
 
-    path = Path(__file__).resolve().parents[1] / "4_openbis_chatbot.ipynb"
+    path = Path(__file__).resolve().parents[1] / "4_openbis_chatbot_legacy.ipynb"
     cells = json.loads(path.read_text())["cells"]
     startup = next(
         "".join(cell.get("source", []))

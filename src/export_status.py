@@ -20,8 +20,8 @@ from .export_recovery import (
 
 def _structures(workchain, role, au):
     """Describe structure links already created by the existing exporters."""
-    if au.orca_export.supported(workchain):
-        parents, children = au.orca_export.structures(workchain, role)
+    if (adapter := au.result_adapter(workchain)) is not None:
+        parents, children = adapter.structures(workchain, role)
         return (
             [au.orm.load_node(uid) for uid in parents],
             [au.orm.load_node(uid) for uid in children],
@@ -183,7 +183,7 @@ def inspect_workchain_export(session, experiment_id, workchain_uuid):
         workchain = au.orm.load_node(workchain_uuid)
         for uuid in au.get_export_main_workchains(workchain.uuid):
             main = au.orm.load_node(uuid)
-            if not main.is_finished_ok:
+            if not au.export_ready(main):
                 continue
             archives = au._objects_by_property(
                 session, au.OPENBIS_OBJECT_TYPES["AiiDA Node"], "WFMS_UUID", uuid

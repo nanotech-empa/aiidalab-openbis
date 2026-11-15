@@ -1680,15 +1680,30 @@ class SelectProjectWidget(ipw.VBox):
     def load_projects(self):
         projects = utils.get_openbis_projects(self.openbis_session)
         records = []
-        for prj in projects:
-            records.append(
-                {
-                    "display_name": f"{prj.code} from Space {prj.space.code}",
-                    "permId": str(prj.permId),
-                    "registration_date": getattr(prj, "registrationDate", None),
-                    "is_mine": getattr(prj, "registrator", None) == self.current_user,
-                }
-            )
+        frame = getattr(projects, "df", None)
+        if frame is not None:
+            for row in frame.to_dict("records"):
+                parts = str(row["identifier"]).strip("/").split("/")
+                records.append(
+                    {
+                        "display_name": f"{row['code']} from Space {parts[0]}",
+                        "permId": str(row["permId"]),
+                        "registration_date": row.get("registrationDate"),
+                        "is_mine": row.get("registrator") == self.current_user,
+                    }
+                )
+        else:
+            for prj in projects:
+                registrator = getattr(prj, "registrator", None)
+                records.append(
+                    {
+                        "display_name": f"{prj.code} from Space {prj.space.code}",
+                        "permId": str(prj.permId),
+                        "registration_date": getattr(prj, "registrationDate", None),
+                        "is_mine": getattr(registrator, "userId", registrator)
+                        == self.current_user,
+                    }
+                )
 
         self.projects_df = pd.DataFrame(records)
         self.update_dropdown(change=None)

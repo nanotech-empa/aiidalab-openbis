@@ -341,6 +341,8 @@ def create_vectorDB(db_path, embedding_model, chunks):
 
 
 SIMULATION_TYPES = [
+    "MODEL_HAMILTONIAN",
+    "ELECTRONIC_STRUCTURE",
     "ATOMISTIC_MODEL",
     "BAND_STRUCTURE",
     "GEOMETRY_OPTIMISATION",

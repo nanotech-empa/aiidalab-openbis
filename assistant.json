@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "title": "Laboratory openBIS",
+  "notebook": "4_openbis_chatbot.ipynb",
+  "assistant": {
+    "embedded": true
+  },
+  "capabilities": [
+    "Shared chat and app-owned guidance",
+    "Inspect AiiDA and laboratory openBIS records",
+    "Prepare supported visible draft fields; use actual registered tools and GUI controls for execution"
+  ],
+  "workflow_guides": [
+    {
+      "id": "openbis.laboratory",
+      "title": "Laboratory openBIS operating guide",
+      "path": "docs/agents/README.md",
+      "topics": [
+        "aiidalab-openbis",
+        "openbis",
+        "export",
+        "esporta",
+        "submit",
+        "sottomissione"
+      ]
+    }
+  ]
+}

@@ -81,12 +81,106 @@ def geometry(aiida_profile_clean, tmp_path):
 
 
 def assert_schema(definitions):
+    assert all(
+        item["object_type"] != "UNCLASSIFIED_SIMULATION"
+        for item in definitions.values()
+    )
     for item in definitions.values():
         assignments = simulation_schema.OBJECT_TYPES[item["object_type"]]["assignments"]
         allowed = {a["code"].lower() for a in assignments}
         mandatory = {a["code"].lower() for a in assignments if a["mandatory"]}
         assert set(item["properties"]) <= allowed
         assert mandatory <= set(item["properties"])
+
+
+@pytest.mark.parametrize(
+    "op,calculation,outputs",
+    [
+        (
+            "dmrg",
+            True,
+            {
+                "results": {
+                    "energies_hartree": [-1.0, -0.9],
+                    "sweep_converged": True,
+                    "bond_dimension_convergence_established": False,
+                }
+            },
+        ),
+        (
+            "dmrg_convergence",
+            False,
+            {
+                "convergence": {"passed": True},
+                "final_results": {"energies_hartree": [-1.0]},
+            },
+        ),
+        (
+            "energy_export",
+            False,
+            {
+                "native_export": {"hamiltonian_sha256": "stored-id"},
+                "validation": {"passed": True},
+            },
+        ),
+        (
+            "energy_stage",
+            True,
+            {
+                "result": {
+                    "operation": "solve-sampled",
+                    "hamiltonian_sha256": "stored-id",
+                    "qpu_jobs_submitted": 0,
+                }
+            },
+        ),
+        ("orbital_catalog", False, {"catalog": {"kind": "QRO", "indices": [0, 1]}}),
+        (
+            "orbital_reordering",
+            False,
+            {"orbital_reference": {"kind": "REORDERED", "source_to_prepared": [1, 0]}},
+        ),
+    ],
+)
+def test_extended_results_keep_tables_and_no_fabricated_geometry(
+    aiida_profile_clean, op, calculation, outputs, tmp_path
+):
+    inputs = (
+        {"operation": orm.Str("solve-sampled").store()} if op == "energy_stage" else {}
+    )
+    node = process(
+        op,
+        inputs,
+        {key: orm.Dict(dict=value) for key, value in outputs.items()},
+        calculation,
+    )
+    definitions = orca_export.definitions(node)
+    assert_schema(definitions)
+    props = definitions["unclassified"]["properties"]
+    assert props["converged"] is (op == "dmrg_convergence")
+    assert "charge" not in props
+    assert orca_export.structures(node, "unclassified") == ([], [])
+    assert orca_export.inventory(node.uuid)["results"] == definitions
+    orca_export.render_preview(node.uuid, "unclassified", tmp_path / "result.png")
+    assert (tmp_path / "result.png").stat().st_size > 100
+
+
+def test_native_dmrg_partial_result_is_exportable_without_convergence_claim(
+    aiida_profile_clean,
+):
+    node = orm.CalcJobNode(process_type="aiida.calculations:empa_orca.dmrg")
+    node.set_process_label("DmrgCalculation")
+    node.store()
+    result = orm.Dict(dict={"energies_hartree": [-1.0], "sweep_converged": False})
+    result.base.links.add_incoming(node, LinkType.CREATE, "results")
+    result.store()
+    node.set_process_state("finished")
+    node.set_exit_status(311)
+    node.seal()
+    assert orca_export.export_ready(node)
+    definitions = orca_export.definitions(node)
+    assert_schema(definitions)
+    assert definitions["unclassified"]["properties"]["converged"] is False
 
 
 def test_geometry_schema_and_exact_structure_relationships(geometry):
@@ -437,7 +531,8 @@ def test_optical_states_and_nto_cubes_preserve_whole_entry_and_database_boundary
         assert_schema(orca_export.definitions(node))
         assert orca_export.structure_uuid(node) == str(geometry.outputs.structure.uuid)
     definition = orca_export.definitions(optics)["unclassified"]
-    assert definition["object_type"] == "UNCLASSIFIED_SIMULATION"
+    assert definition["object_type"] == "ELECTRONIC_STRUCTURE"
+    assert definition["properties"]["electronic_result_type"] == "OPTICAL_EXCITATIONS"
     assert definition["properties"]["method_family"] == "DFT"
     assert definition["properties"]["method_label"] == "TDDFT / PBE/def2-SVP"
     assert json.loads(definition["properties"]["comments"])["excitations_uuid"] == str(
