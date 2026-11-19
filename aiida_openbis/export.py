@@ -57,7 +57,10 @@ def plan_export(source_uuid):
     from aiida import orm
 
     model = _app_module("model_export")
+    native = _app_module("pythtb_export")
     node = orm.load_node(source_uuid)
+    if native.supported(node):
+        return _app_module("orca_export").inventory(source_uuid, adapter=native)
     return _app_module("orca_export").inventory(
         source_uuid, adapter=model if model.supported(node) else None
     )
@@ -68,7 +71,10 @@ def available_results(source_uuid):
     from aiida import orm
 
     model = _app_module("model_export")
+    native = _app_module("pythtb_export")
     node = orm.load_node(source_uuid)
+    if native.supported(node):
+        return native.related_results(source_uuid)
     if model.supported(node):
         return [
             {

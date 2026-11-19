@@ -2331,13 +2331,25 @@ type is introduced for a solver or an application.
 | ORCA orbital reordering and energy export | `ELECTRONIC_STRUCTURE` | `CAS` | Stored orbital order and labelled energy/Hamiltonian data |
 | ORCA orbital catalog and energy stages | `ELECTRONIC_STRUCTURE` | `OTHER` | Saved catalogs, stage identity, sampled/full energies and hardware preparation records |
 
-Local PythTB, graph and Hubbard solvers run outside AiiDA. Preparing an export
+Earlier notebook-local PythTB, graph and Hubbard solvers run outside AiiDA. Preparing an export
 records their existing results as immutable data under one AiiDA recording
 process, explicitly labelled as such; it does not claim that AiiDA ran the solver.
 Preparing the same numerical bundle again reuses its UUID. For finite PythTB,
 levels and Wannier content share one Model Hamiltonian result: each source UUID has
 at most one result of a given object type. Each main process retains one
 `AIIDA_NODE`, one scalar `WFMS_UUID`, and one single-root archive.
+
+Native PythTB (`aiida.calculations:empa_tb.calculate`) exports the original
+CalcJob UUID, Code/computer and immutable worker/request identities, without a
+replacement recording process. The common review includes only orbital CalcJobs
+whose reference-result and request inputs point to that exact model; sharing a
+structure/formula is insufficient. Bands/levels and MFH occupations retain the
+mapping above. Each orbital job uses MODEL_HAMILTONIAN for its selected site
+coefficients (not a cube grid), with its own single-root archive and reference
+to the source model. Stored unconverged exit302 remains CONVERGED=false. Effective
+model geometry/PBC is recorded separately from the original StructureData input;
+no new geometry node or retroactive link is invented during export. No scientific
+solver, remote/stash fetch, schema migration or server publication runs on prepare.
 
 `BAND_GAP_EV` is optional: sampled bands do not necessarily establish a global
 gap, and absence is not zero. Neutral PythTB charge refers to its half-filled

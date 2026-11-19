@@ -45,6 +45,17 @@ form selects project/collection, related material, result cards and archive.
 Only **Export** publishes. ORCA's result workspace and PythTB/Model Hamiltonians
 also offer **Prepare openBIS export**; local-model preparation records existing
 results with honest provenance rather than claiming the solver ran in AiiDA.
+Native PythTB localhost/remote results use their original AiiDA model CalcJob and
+exact referenced orbital and Wannier jobs. They are not notebook-local snapshots. Inspect
+original UUIDs, actual Code/computer, worker fingerprint, model inputs and saved
+convergence; orbital evaluation and Wannier localization reuse MFH without another SCF.
+Wannier exports include the native postprocessing identity, energy reference,
+localization diagnostics, stored Hamiltonian arrays and ZIP. Sharing a formula
+or geometry alone does not establish that two models belong to one export.
+Unknown runtime software versions must not be replaced with notebook versions.
+Preparation reads only stored repository data, never remote scratch, and never
+publishes. The native input and effective model PBC retain their separate identity.
+
 Reuse existing schema types/method vocabularies. DMRG already exists; abstract
 models use MODEL_HAMILTONIAN, with MODEL naming the Hamiltonian subtype and ED/DMRG identifying the solver, without invented atoms/charge/spin. A sampled
 band path cannot certify a global gap. Convergence must follow stored evidence.
