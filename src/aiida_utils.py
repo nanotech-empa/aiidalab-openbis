@@ -24,7 +24,7 @@ from ase.io.jsonio import encode
 from ase.units import Bohr, Hartree
 
 from . import export_recovery as recovery
-from . import model_export, orca_export
+from . import model_export, orca_export, pythtb_export
 from . import upload_diagnostics, utils
 
 OPENBIS_CONFIG = utils.read_json(utils.APP_ROOT / "config/openbis_config.json")
@@ -336,8 +336,10 @@ def get_export_main_workchains(node_uuid):
     extends a geometry entry through independently submitted workflows sharing
     that exact stored geometry, so include its connected completed analyses too.
     """
-    identifiers = set(get_all_preceding_main_workchains(node_uuid))
     node = orm.load_node(node_uuid)
+    if pythtb_export.supported(node):
+        return [row["uuid"] for row in pythtb_export.related_results(str(node.uuid))]
+    identifiers = set(get_all_preceding_main_workchains(node_uuid))
     if getattr(node, "process_type", "") in {
         "aiida.workflows:empa_orca.geometry",
         "aiida.workflows:empa_orca.reference",
@@ -5146,7 +5148,7 @@ def OrcaWorkChain_export(
 
 def result_adapter(node):
     """Select by exact process identity; abstract models need no geometry."""
-    for adapter in (orca_export, model_export):
+    for adapter in (orca_export, model_export, pythtb_export):
         if adapter.supported(node):
             return adapter
     return None
@@ -5154,6 +5156,7 @@ def result_adapter(node):
 
 workchain_exporters = {
     **{label: OrcaWorkChain_export for label in model_export.LABELS},
+    **{label: OrcaWorkChain_export for label in pythtb_export.LABELS},
     **{label: OrcaWorkChain_export for label in orca_export.LABELS},
     "NanoribbonWorkChain": NanoribbonWorkChain_export,
     "PwRelaxWorkChain": PwRelaxWorkChain_export,
@@ -5174,6 +5177,8 @@ workchain_exporters = {
 
 def export_ready(node):
     """Readiness includes explicitly preserved partial results, never running jobs."""
+    if pythtb_export.supported(node):
+        return pythtb_export.export_ready(node)
     return (
         orca_export.export_ready(node)
         if orca_export.supported(node)
@@ -5184,7 +5189,7 @@ def export_ready(node):
 def is_exportable_process(node):
     """ORCA registrations require their entry-point identity, not just a label."""
     label = getattr(node, "process_label", "")
-    if label in orca_export.LABELS | model_export.LABELS:
+    if label in orca_export.LABELS | model_export.LABELS | pythtb_export.LABELS:
         return result_adapter(node) is not None
     return label in workchain_exporters
 

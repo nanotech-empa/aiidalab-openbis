@@ -24,8 +24,9 @@ def test_supported_runtime_metadata():
         if line.strip()
         for req in [Requirement(line)]
     }
-    assert "2.8" in requirements["aiida-core"].specifier
-    assert "2.7" not in requirements["aiida-core"].specifier
+    assert "2.9.4" in requirements["aiida-core"].specifier
+    assert "2.9.3" not in requirements["aiida-core"].specifier
+    assert "2.8" not in requirements["aiida-core"].specifier
     assert "3.0" not in requirements["aiida-core"].specifier
     assert "0.1.4" in requirements["aiidalab-eln"].specifier
     assert "0.1.3" not in requirements["aiidalab-eln"].specifier
