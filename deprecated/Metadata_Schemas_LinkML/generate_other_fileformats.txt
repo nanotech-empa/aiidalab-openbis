@@ -1,8 +1,0 @@
-Generate Json-schema:
-gen-json-schema materialMLinfo.yaml > materialMLinfo.schema.json
-
-Generate Json-ld context:
-gen-jsonld-context materialMLinfo.yaml > materialMLinfo.context.jsonld
-
-Generate Json-ld file:
-linkml-convert -s materialMLinfo.yaml -t json-ld data.yaml > data.jsonld

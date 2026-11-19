@@ -39,7 +39,6 @@ validation scope and remaining production checks.
 * `schema` contains schema-related files based on [Pydantic](https://docs.pydantic.dev/latest/) classes.
 * `ai_agent` contains agentic AI tools.
 * `data` contains some examples of SPM measurements.
-* `deprecated` contains deprecated files that are to be removed.
 * `logs` contains log files.
 * `metadata` contains metadata files needed for the interfaces.
 * `nanonis_importer` contains NANONIS importer files.

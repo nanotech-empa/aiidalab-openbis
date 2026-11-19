@@ -1,8 +1,0 @@
-{
-    "Geometry optimisation": "GEOMETRY_OPTIMISATION",
-    "Band structure": "BAND_STRUCTURE",
-    "PDOS": "PDOS",
-    "Vibrational spectroscopy": "VIBRATIONAL_SPECTROSCOPY",
-    "Unclassified simulation": "UNCLASSIFIED_SIMULATION",
-    "STM simulation": "STM_SIMULATION"
-}
