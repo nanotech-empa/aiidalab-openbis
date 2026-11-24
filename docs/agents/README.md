@@ -88,3 +88,18 @@ Geometry, Band, DOS, Charge, SPM and Vibrational types remain in use. Unclassifi
 is a manual unknown-archive option, not a fallback for these supported apps.
 Previously published Unclassified records require explicit reviewed migration;
 re-export must not silently duplicate them under a new type.
+
+## Direct app destinations
+
+Read `workflow_pages` from `list_apps` and pass the requested key to `open_app`.
+Use the returned link directly; do not substitute the default notebook for
+another task. A source calculation remains separate from the chosen page.
+
+- `chat`: `4_openbis_chatbot.ipynb`.
+- `samples`: `1_sample_preparation.ipynb`.
+- `measurements`: `2_sample_measurement.ipynb`.
+- `simulations`: `3_import_export_simulations.ipynb`.
+- `laboratory`: `0_home.ipynb`.
+
+Only the `chat` destination has the shared conversation. The other pages use
+the existing laboratory GUI; return to Home/chat for assistant help.

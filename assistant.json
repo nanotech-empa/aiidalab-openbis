@@ -24,5 +24,49 @@
         "sottomissione"
       ]
     }
-  ]
+  ],
+  "workflow_pages": {
+    "chat": {
+      "notebook": "4_openbis_chatbot.ipynb",
+      "title": "Laboratory assistant",
+      "assistant": {
+        "embedded": true
+      }
+    },
+    "samples": {
+      "notebook": "1_sample_preparation.ipynb",
+      "title": "Sample preparation",
+      "assistant": {
+        "embedded": false
+      },
+      "aliases": [
+        "sample_preparation"
+      ]
+    },
+    "measurements": {
+      "notebook": "2_sample_measurement.ipynb",
+      "title": "Sample measurement",
+      "assistant": {
+        "embedded": false
+      }
+    },
+    "simulations": {
+      "notebook": "3_import_export_simulations.ipynb",
+      "title": "Import and export simulations",
+      "assistant": {
+        "embedded": false
+      },
+      "aliases": [
+        "export",
+        "import"
+      ]
+    },
+    "laboratory": {
+      "notebook": "0_home.ipynb",
+      "title": "Laboratory home",
+      "assistant": {
+        "embedded": false
+      }
+    }
+  }
 }
