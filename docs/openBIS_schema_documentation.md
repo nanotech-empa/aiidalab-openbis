@@ -1640,8 +1640,8 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | False | False | False |  |  |
 | `chemical_formula` | Chemical Formula | Chemical Formula | VARCHAR | False | False | False |  |  |
-| `amount_mg` | Amount [mg] | Amount [mg] | VARCHAR | False | False | False |  |  |
-| `amount_ml` | Amount [ml] | Amount [ml] | VARCHAR | False | False | False |  |  |
+| `amount_mg` | Amount [mg] | Amount [mg] | REAL | False | False | False |  |  |
+| `amount_ml` | Amount [ml] | Amount [ml] | REAL | False | False | False |  |  |
 | `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
 | `special_storage_conditions` | Special storage condition(s) | Special storage condition(s) | CONTROLLEDVOCABULARY (SPECIALSTORAGECONDITIONSENUM) | False | True | False |  |  |
 | `package_opening_date` | Package opening date | Package opening date | DATE | False | False | False |  |  |
@@ -1870,7 +1870,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
 | `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
-| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |  |  |
+| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | True | False |  |  |
 
 [↑ Back to top](#openbis-data-model-documentation)
 
@@ -1896,7 +1896,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `receive_date` | Receive date | Receive date | DATE | False | False | False |  |  |
 | `manufacturer` | Manufacturer | Manufacturer | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ORGANISATION, GROUP'}` |
 | `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
-| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | False | False |  |  |
+| `responsibles` | Responsible(s) | Responsible(s) | OBJECT (PERSON) | False | True | False |  |  |
 
 #### Section: Components
 
@@ -1911,7 +1911,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `mechanical_components` | Mechanical component(s) | Mechanical component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'COMPONENT'}` |
 | `stm_components` | STM component(s) | STM component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'STM_TIP, COMPONENT, ELECTRONICS'}` |
 | `control_data_acquisition` | Control and data acquisition component(s) | Control and data acquisition component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'SPM_CONTROLLER'}` |
-| `temperature_environment_control` | Temperature and environment control component(s) | Temperature and environment control component(s) | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'CRYOSTAT, COMPONENT'}` |
+| `temperature_environment_control` | Temperature and environment control component(s) | Temperature and environment control component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'CRYOSTAT, COMPONENT'}` |
 | `auxiliary_components` | Auxiliary component(s) | Auxiliary component(s) | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'COMPONENT, ANALYSER, ELECTRONICS'}` |
 
 #### Section: Materials
@@ -2893,7 +2893,7 @@ attaches its Nanonis SXM and DAT uploads as [`IMAGING_DATA`](#imaging-data).
 | `material` | Material | Material | VARCHAR | False | False | False |  |  |
 | `sample_plate` | Sample plate | Sample plate | VARCHAR | False | False | False |  |  |
 | `object_status` | Object type | Object type | CONTROLLEDVOCABULARY (OBJECTSTATUSENUM) | False | False | False |  |  |
-| `assembled_by` | Assembled by | Synthesised by | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
+| `assembled_by` | Assembled by | Synthesised by | OBJECT (All) | False | True | False |  | `{'object_subtypes': 'PERSON, GROUP'}` |
 | `assembled_date` | Assembled date | Assembled date | DATE | False | False | False |  |  |
 | `location` | Location | Location | OBJECT (All) | False | False | False |  | `{'object_subtypes': 'ROOM, INSTRUMENT, INSTRUMENT.STM, ORGANISATION'}` |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
