@@ -52,19 +52,12 @@ class SubstanceArgs(OpenBISObjectArgs):
     )
 
 
-class ReacProdConceptArgs(OpenBISObjectArgs):
-    sum_formula: Optional[str] = Field(
-        default="", description="Molecular sum formula, e.g. 'CH4'"
-    )
-    molecules: Optional[List[MoleculeArgs]] = Field(
+class ProductMoleculeArgs(OpenBISObjectArgs):
+    sum_formula: Optional[str] = Field(default="", description="Molecular sum formula")
+    cxsmiles: Optional[str] = Field(default="", description="Stored periodic CXSMILES")
+    precursors: List[MoleculeArgs] = Field(
         default_factory=list,
-        description="A list of one or more molecules that describe the reaction product.",
-    )
-
-
-class ReacProdArgs(OpenBISObjectArgs):
-    reacprod_concept: Optional[ReacProdConceptArgs] = Field(
-        default_factory=list, description="Reaction product theoretical concept."
+        description="Required MOLECULE parents of the product concept.",
     )
 
 
@@ -201,118 +194,64 @@ def crystal_found(obj, crystal):
     return True
 
 
+def molecule_matches(obj, query):
+    if obj is None or obj.type.code != "MOLECULE":
+        return False
+    properties = obj.props.all()
+    return (not query.permId or query.permId == obj.permId) and all(
+        str(properties.get(key, "")) == str(value)
+        for key, value in query.model_dump(exclude={"permId"}).items()
+        if value not in (None, "", 0)
+    )
+
+
 def substance_found(obj, substance):
-    if not obj:
+    if obj is None:
         return False
 
-    obj_props = obj.props.all()
-    obj_empa_number = int(obj_props.get("empa_number") or 0)
-    obj_batch = obj_props.get("batch") or ""
-    obj_molecules = obj_props.get("molecules") or []
-
-    if substance.empa_number > 0 and obj_empa_number != substance.empa_number:
-        return False
-
-    if substance.batch and obj_batch != substance.batch:
-        return False
-
-    if substance.molecules:
-        if not obj_molecules:
-            return False
-
-        for prompt_molecule in substance.molecules:
-            matched = False
-            for molecule_permId in obj_molecules:
-                molecule_obj = openbis_utils.get_openbis_object(molecule_permId)
-                molecule_props = molecule_obj.props.all()
-
-                if (
-                    prompt_molecule.smiles
-                    and prompt_molecule.smiles != molecule_props.get("smiles")
-                ):
-                    continue
-                if (
-                    prompt_molecule.sum_formula
-                    and prompt_molecule.sum_formula != molecule_props.get("sum_formula")
-                ):
-                    continue
-                if (
-                    prompt_molecule.iupac_name
-                    and prompt_molecule.iupac_name != molecule_props.get("iupac_name")
-                ):
-                    continue
-
-                matched = True
-                break
-
-            if not matched:
-                return False
-
-    return True
-
-
-def reacprod_concept_found(obj, reacprod_concept):
-    if not obj:
-        return False
-
-    obj_props = obj.props.all()
-    obj_name = obj_props.get("name")
-    obj_molecules = molecule_parents(obj)
-
-    if reacprod_concept.name and obj_name != reacprod_concept.name:
-        return False
-
-    if reacprod_concept.molecules:
-        if not obj_molecules:
-            return False
-
-        for prompt_molecule in reacprod_concept.molecules:
-            matched = False
-            for molecule_obj in obj_molecules:
-                molecule_props = molecule_obj.props.all()
-
-                if (
-                    prompt_molecule.smiles
-                    and prompt_molecule.smiles != molecule_props.get("smiles")
-                ):
-                    continue
-                if (
-                    prompt_molecule.sum_formula
-                    and prompt_molecule.sum_formula != molecule_props.get("sum_formula")
-                ):
-                    continue
-                if (
-                    prompt_molecule.iupac_name
-                    and prompt_molecule.iupac_name != molecule_props.get("iupac_name")
-                ):
-                    continue
-
-                matched = True
-                break
-
-            if not matched:
-                return False
-
-    return True
-
-
-def reacprod_found(obj, reac_prod):
-    if not obj:
-        return False
-
-    obj_props = obj.props.all()
-    obj_name = obj_props.get("name")
-
-    if reac_prod.name and obj_name != reac_prod.name:
-        return False
-
-    if reac_prod.reacprod_concept and not any(
-        reacprod_concept_found(product_molecule, reac_prod.reacprod_concept)
-        for product_molecule in molecule_parents(obj)
+    props = obj.props.all()
+    if substance.empa_number and str(props.get("empa_number")) != str(
+        substance.empa_number
     ):
         return False
+    if substance.batch and props.get("batch") != substance.batch:
+        return False
+    if not substance.molecules:
+        return True
 
-    return True
+    molecules = molecule_parents(obj)
+    references = props.get("molecules") or []
+    if isinstance(references, str):
+        references = [references]
+    molecules.extend(openbis_utils.get_openbis_object(ref) for ref in references)
+    return all(
+        any(molecule_matches(obj, wanted) for obj in molecules)
+        for wanted in substance.molecules
+    )
+
+
+def find_product_molecules(query):
+    filters = query.model_dump(exclude={"permId", "precursors"}, exclude_none=True)
+    arguments = {"permId": query.permId} if query.permId else {}
+    candidates = openbis_utils.get_openbis_objects(
+        type="MOLECULE",
+        collection=PRODUCT_MOLECULE_COLLECTION,
+        where={key: value for key, value in filters.items() if value},
+        props=["name"],
+        attrs=["parents", "children"],
+        **arguments,
+    )
+    if not query.precursors:
+        return list(candidates)
+    products = []
+    for obj in candidates:
+        parents = molecule_parents(obj)
+        if all(
+            any(molecule_matches(parent, wanted) for parent in parents)
+            for wanted in query.precursors
+        ):
+            products.append(obj)
+    return products
 
 
 def create_vectorDB(db_path, embedding_model, chunks):
@@ -464,43 +403,12 @@ def get_openbis_objects_by_description(description: str) -> List[Dict]:
 # Specific tools
 # Inventory
 @tool
-def get_reacprods_by_properties(reac_prod: ReacProdArgs) -> List[str]:
-    """
-    Search for reaction products in openBIS using one or more identifying attributes.
-
-    This tool retrieves reaction products permIDs by matching the given properties. These permIDs
-    can then be used to retrieve more information about the reaction products.
-
-    Unprovided fields will be ignored in the search.
-
-    Args:
-        reac_prod (ReacProdArgs): A data object describing the reaction product to search for. It may include:
-            - name (str, optional): Name
-            - reacprod_concept (ReacProdConceptArgs, optional): Theoretical version of the reaction product
-                The reaction product concept may include:
-                    - sum_formula (str, optional): Molecular sum formula
-                    - molecules (List[MoleculeArgs], optional): A list of one or more molecules that describe the substance.
-                        Each molecule may include:
-                            - name (str, optional): Name
-                            - smiles (str, optional): SMILES string, e.g. "CCO"
-                            - empa_number (str, optional): Empa identifier, e.g. 650
-                            - sum_formula (str, optional): Molecular sum formula, e.g. "CH4"
-                            - iupac_name (str, optional): IUPAC name, e.g. "benzene"
-
-    Returns:
-        List[str]: List of strings with the names and the permIDs in parenthesis of all
-        the reaction products in openBIS that match the input.
-    """
-
-    obj_type = "REACTION_PRODUCT"
-    objects = openbis_utils.get_openbis_objects(type=obj_type, props=["name"])
-    objects_data = []
-    for obj in objects:
-        load_obj_data = reacprod_found(obj, reac_prod)
-        if load_obj_data:
-            objects_data.append(f"Reaction Product {obj.props.name} ({obj.permId}).")
-
-    return objects_data
+def get_product_molecules_by_properties(product: ProductMoleculeArgs) -> List[str]:
+    """Find product MOLECULE records by stored properties or precursor links."""
+    return [
+        f"Product molecule {obj.props['name']} ({obj.permId})."
+        for obj in find_product_molecules(product)
+    ]
 
 
 @tool
@@ -844,76 +752,34 @@ def get_simulations_by_molecule(molecule: MoleculeArgs) -> List[str]:
 
 
 @tool
-def get_simulations_by_reacprod_concept(
-    reacprod_concept: ReacProdConceptArgs,
-) -> List[str]:
-    """
-    Get simulations linked to a product molecule from the product collection.
-
-    Args:
-        reacprod_concept (ReacProdConceptArgs): A data object describing the product molecule to search for. It may include:
-            - permId(optional, str): PermID, e.g., 20250922145817954-468
-            - name (optional, str): Name, e.g. 7AGNR
-            - molecules (List[MoleculeArgs], optional): A list of one or more molecule parents used to define the product molecule.
-              Each molecule may include:
-                - smiles (str, optional): SMILES string, e.g. "CCO"
-                - sum_formula (str, optional): Molecular sum formula, e.g. "CH4"
-                - iupac_name (str, optional): IUPAC name, e.g. "benzene"
-    Return:
-        List[str]: Summary of simulations linked to the input product molecule. If more than one
-        product molecule matches, the function returns their names and permIDs
-        in order for the user to pick the one that the user wants to search about.
-    """
-    objects_data = []
-    obj_type = "MOLECULE"
-    if reacprod_concept.permId:
-        obj = openbis_utils.get_openbis_object(reacprod_concept.permId)
-        if obj is None:
-            return ["No product molecule was found."]
-    else:
-        objects = openbis_utils.get_openbis_objects(
-            type=obj_type,
-            collection=PRODUCT_MOLECULE_COLLECTION,
-            props=["name"],
-            attrs=["children"],
-        )
-        reacprod_concept_objects = []
-        for obj in objects:
-            load_obj_data = reacprod_concept_found(obj, reacprod_concept)
-            if load_obj_data:
-                reacprod_concept_objects.append(obj)
-
-        if len(reacprod_concept_objects) == 0:
-            return ["No product molecule was found."]
-        elif len(reacprod_concept_objects) == 1:
-            obj = reacprod_concept_objects[0]
-        else:
-            for obj in reacprod_concept_objects:
-                objects_data.append(
-                    f"Product molecule {obj.props['name']} ({obj.permId})."
-                )
-            return objects_data
+def get_simulations_by_product_molecule(product: ProductMoleculeArgs) -> List[str]:
+    """Find simulations linked to a product MOLECULE in PRODUCT_COLLECTION."""
+    products = find_product_molecules(product)
+    if not products:
+        return ["No product molecule was found."]
+    if len(products) > 1:
+        return [
+            f"Product molecule {obj.props['name']} ({obj.permId})." for obj in products
+        ]
 
     simulations_summary = []
-    stack = [(obj, obj.props["name"], obj.permId)]
-
+    stack = [(products[0], None)]
+    seen = set()
     while stack:
-        current_obj, current_name, current_id = stack.pop()
-
-        for child in current_obj.children:
-            child_obj = openbis_utils.get_openbis_object(child)
-            child_name = child_obj.props["name"] or "No name"
-            child_id = child_obj.permId
-
-            if child_obj.type.code in SIMULATION_TYPES:
-                obj_type_label = auto_label(child_obj.type.code)
-                simulations_summary.append(
-                    f"- {obj_type_label}: {child_name} ({child_id}). It is child of {current_name} ({current_id})."
-                )
-
-            # push the child to stack so its children will also be explored
-            stack.append((child_obj, child_name, child_id))
-
+        obj, parent = stack.pop()
+        if obj.permId in seen:
+            continue
+        seen.add(obj.permId)
+        name = obj.props["name"] or "No name"
+        if parent is not None and obj.type.code in SIMULATION_TYPES:
+            label = auto_label(obj.type.code)
+            simulations_summary.append(
+                f"- {label}: {name} ({obj.permId}). It is child of {parent[0]} ({parent[1]})."
+            )
+        for ref in obj.children:
+            child = openbis_utils.get_openbis_object(ref)
+            if child is not None:
+                stack.append((child, (name, obj.permId)))
     return simulations_summary
 
 

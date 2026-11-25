@@ -1499,46 +1499,6 @@ class Sample(OpenBISObject):
         return "Sample"
 
 
-# Compatibility name for callers that still use the former concept label.
-# Product concepts and precursor concepts are both MOLECULE objects.
-ReactionProductConcept = Molecule
-
-
-class ReactionProduct(OpenBISObject):
-    reaction_temperature: TemperatureValue = Field(
-        default=None,
-        title="Reaction temperature",
-        description="Temperature at which the product was obtained",
-        metadata={"type": "JSON"},
-    )
-    reaction_yield: float = Field(
-        default=None,
-        title="Reaction yield",
-        description="Yield of the reaction product",
-        metadata={"type": "REAL"},
-    )
-    reaction_product_concept: ReactionProductConcept = Field(
-        default=None,
-        title="Product molecule",
-        description="Molecule concept associated with the reaction product",
-        metadata={"type": "PARENT"},
-    )
-    sample: Sample = Field(
-        default=None,
-        title="Sample",
-        description="Sample associated with the reaction product",
-        metadata={"type": "PARENT"},
-    )
-
-    @classmethod
-    def get_code(cls) -> str:
-        return "RPRE"
-
-    @classmethod
-    def get_label(cls) -> str:
-        return "Reaction Product"
-
-
 class DeviceSubstrate(OpenBISObject):
     location: Optional[Union["Room", "Instrument", "InstrumentSTM"]] = Field(
         default=None,

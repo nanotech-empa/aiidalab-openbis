@@ -3,6 +3,7 @@ from aiida_openbis.assistant_queries import (
     relationships,
     search_materials,
 )
+import pytest
 
 
 class Client:
@@ -72,15 +73,54 @@ def test_product_molecule_uses_configured_collection_and_molecule_parents():
     collection = config["Collections"]["Paths"]["Product Molecule"]
     client = Client(
         [
-            row("p", "MOLECULE", parents=["/SPACE/m"], experiment=collection),
+            row(
+                "p",
+                "MOLECULE",
+                parents=["/SPACE/m"],
+                experiment=collection,
+                CXSMILES="periodic-fixture",
+            ),
             row("other", "MOLECULE", parents=["/SPACE/m"], experiment="/OTHER"),
             row("m", "MOLECULE", SMILES="CC"),
         ]
     )
     found = search_materials(
-        client, records, kind="product_molecule", molecules=[{"smiles": "CC"}]
+        client,
+        records,
+        kind="product_molecule",
+        filters={"cxsmiles": "periodic-fixture"},
+        molecules=[{"smiles": "CC"}],
     )
     assert [r["permId"] for r in found["items"]] == ["p"]
+    assert client.calls[0]["collection"] == collection
+    assert client.calls[0]["type"] == "MOLECULE"
+    assert (
+        search_materials(client, records, kind="product_molecule", identifier="m")[
+            "items"
+        ]
+        == []
+    )
+
+
+def test_substance_parent_matches_physical_vial_and_retired_kind_is_rejected():
+    client = Client(
+        [
+            row("vial", "SUBSTANCE", parents=["concept"], EMPA_NUMBER="777"),
+            row("concept", "MOLECULE", SMILES="CC"),
+        ]
+    )
+    result = search_materials(
+        client,
+        records,
+        kind="substance",
+        filters={"empa_number": "777"},
+        molecules=[{"smiles": "CC"}],
+    )
+    assert [r["permId"] for r in result["items"]] == ["vial"]
+    calls = list(client.calls)
+    with pytest.raises(ValueError, match="Unsupported material kind"):
+        search_materials(client, records, kind="reaction_product")
+    assert client.calls == calls
 
 
 def test_crystal_concept_and_unresolved_permission_links():

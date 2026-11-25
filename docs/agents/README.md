@@ -12,13 +12,13 @@ that legacy module has a different credential/session/dependency lifecycle.
 Use openbis_status and openbis_schema for the configured connection and current
 schema. Never request or quote a token. openbis_search is the general paginated
 record tool. openbis_search_materials adds typed molecules, product molecules,
-substances, crystals/concepts, 2D materials, reaction products and samples.
+substances, crystals/concepts, 2D materials and samples.
 
-Product molecules are MOLECULE records in the configured Product Molecule
-collection; their MOLECULE parents describe precursors. Substance molecules are
-object-valued properties. Crystals reference CRYSTAL_CONCEPT. Reaction products
-link to product molecules. Preserve these distinctions rather than assuming
-every connection is a parent edge or restoring obsolete concept types.
+Use product_molecule for MOLECULE records in PRODUCT_COLLECTION. Their
+MOLECULE parents describe precursors. Precursors live in PRECURSOR_COLLECTION.
+Use substance for physical vials and batches. Their molecular identity can be
+recorded as a MOLECULE parent or an object-valued MOLECULES property. Crystals
+reference CRYSTAL_CONCEPT.
 
 Direct filters use server search semantics. Linked-molecule constraints compare
 stored properties exactly: equal SMILES text is not general chemical equivalence.

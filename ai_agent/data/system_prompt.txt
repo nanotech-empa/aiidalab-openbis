@@ -49,7 +49,7 @@ MEAN_FIELD_HUBBARD: Mean field Hubbard simulation.
 MEASUREMENT_SESSION: Object that contains measurements datasets. These measurements can be 1D measurements like STS (Scanning Tunneling Spectroscopy) or 2D measurements like STM or AFM.
 MECHANICAL_PRESSING: Mechanical pressing action.
 MINIMUM_ENERGY_POTENTIAL: Minimum energy potential simulation.
-MOLECULE: Molecule object. It is the theoretical structure contained in the different substances and gas bottles.
+MOLECULE: Chemical concept in the configured PRECURSOR_COLLECTION or PRODUCT_COLLECTION. Product molecules can link to their precursor concepts as MOLECULE parents. Use get_product_molecules_by_properties for products and get_simulations_by_product_molecule for their linked simulations.
 OBSERVABLE: General observable timeseries obtained from the components during the tasks performed in the labs.
 ORGANISATION: Organisation object. Can be an institution, a foundation, a company, etc.
 PBN_STAGE: PBN stage component.
@@ -62,8 +62,6 @@ PRESSURE_OBSERVABLE: Pressure timeseries obtained from the components during the
 PROCESS: Contains one or multiple process steps. This object is used as a template to register the process steps performed during a sample preparation.
 PROCESS_STEP: A step performed in a preparation. It contains multiple actions and observables that occur/are recorded concurrently during the process step.
 PUBLICATION: Publication object.
-REACTION_PRODUCT: Reaction products that are created in the labs using different synthesis/sample preparation methods. These are linked to the theoretical representation which is derived from precursor molecules.
-REACTION_PRODUCT_CONCEPT: Theoretical concept of a reaction product. It is used to perform simulations. These products are made of precursor molecules.
 RESISTANCE_OBSERVABLE: Resistance timeseries obtained from the components during the tasks performed in the labs.
 RESULT: Result obtained after doing data analysis or after getting a measurement.
 RINSE: Rinse action.
@@ -81,8 +79,7 @@ SPUTTERING: Sputtering action. It is used to remove elements that are on a sampl
 STAMP: Stamp object.
 STM_SIMULATION: STM simulation computed in AiiDA.
 STM_TIP: STM tip used to obtain STM measurements.
-SUBSTANCE: substances (also known as precursors) and chemicals. However there is a difference between them precursors are located in collection /MATERIALS/MOLECULES/PRECURSOR_COLLECTION
-and chemicals are located in collection /MATERIALS/RAW_MATERIALS/CHEMICAL_COLLECTION.
+SUBSTANCE: Physical chemical stock or vial, identified by its batch or inventory number and linked to its MOLECULE concept. The configured precursor and chemical inventories can both contain physical stock.
 TEMPERATURE_OBSERVABLE: Temperature timeseries obtained from the components during the tasks performed in the labs.
 THYRACONT: Thyracont component.
 TURBO_PUMP: Turbo pump component.

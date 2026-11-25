@@ -131,21 +131,6 @@ $.extend(CustomToolbarPluginViewTechnology.prototype, ELNLIMSPlugin.prototype, {
                 return toolbarModel;
             }
         },
-        "REACTION_PRODUCT_CONCEPT" : {
-            extraToolbar : function(mode, sample) {
-                var toolbarModel = [];
-                if(mode === FormMode.VIEW) {
-                    var $demoButton = FormUtil.getButtonWithIcon("fa fa-info-circle", function () {
-                        var src = getWFMSConnectionURL("", sample, "REACTION_PRODUCT_CONCEPT");
-                        var win = window.open(src, '_blank');
-                        win.focus();
-
-                    }, "AiiDALab");
-                    toolbarModel.push({component : $demoButton, tooltip: "AiiDALab"});
-                }
-                return toolbarModel;
-            }
-        },
     }
 });
 

@@ -12,6 +12,9 @@ class _Properties:
     def all(self):
         return dict(self._values)
 
+    def __getitem__(self, key):
+        return self._values.get(key)
+
 
 class _Object:
     def __init__(self, permid, object_type, properties=None, parents=None):
@@ -34,7 +37,7 @@ def chatbot_tools(monkeypatch):
     sys.modules.pop("ai_agent.tools", None)
 
 
-def test_product_and_reaction_product_match_molecule_parent_relations(chatbot_tools):
+def test_product_tools_use_product_collection_and_precursor_parents(chatbot_tools):
     tools, backend = chatbot_tools
     component = _Object(
         "component",
@@ -48,47 +51,74 @@ def test_product_and_reaction_product_match_molecule_parent_relations(chatbot_to
         {"name": "7AGNR", "sum_formula": "C42H18"},
         parents=["component", "sample"],
     )
-    reaction_product = _Object(
-        "reaction-product",
-        "REACTION_PRODUCT",
-        {"name": "grown ribbon"},
-        parents=["product", "sample"],
-    )
+    product.children = ["simulation"]
+    simulation = _Object("simulation", "GEOMETRY_OPTIMISATION", {"name": "relaxed"})
+    simulation.children = ["product"]
     backend.objects.update(
-        {
-            item.permId: item
-            for item in (component, unrelated, product, reaction_product)
-        }
+        {item.permId: item for item in (component, unrelated, product, simulation)}
     )
+    calls = []
 
-    query = tools.ReacProdConceptArgs(
-        name="7AGNR",
-        sum_formula="C42H18",
-        molecules=[tools.MoleculeArgs(smiles="C=C")],
-    )
+    def query_objects(**query):
+        calls.append(query)
+        assert query["type"] == "MOLECULE"
+        assert query["collection"].endswith("/PRODUCT_COLLECTION")
+        assert query["attrs"] == ["parents", "children"]
+        return (
+            [product] if query.get("permId", product.permId) == product.permId else []
+        )
+
+    backend.get_openbis_objects = query_objects
+    query = {
+        "name": "7AGNR",
+        "sum_formula": "C42H18",
+        "precursors": [{"smiles": "C=C"}],
+    }
 
     assert tools.molecule_parents(product) == [component]
-    assert tools.reacprod_concept_found(product, query)
-    assert tools.reacprod_found(
-        reaction_product,
-        tools.ReacProdArgs(name="grown ribbon", reacprod_concept=query),
+    assert tools.get_product_molecules_by_properties.invoke({"product": query}) == [
+        "Product molecule 7AGNR (product)."
+    ]
+    assert calls[0]["where"] == {"name": "7AGNR", "sum_formula": "C42H18"}
+    assert tools.get_simulations_by_product_molecule.invoke({"product": query}) == [
+        "- Geometry Optimisation: relaxed (simulation). It is child of 7AGNR (product)."
+    ]
+    assert (
+        tools.get_product_molecules_by_properties.invoke(
+            {"product": {"permId": "component"}}
+        )
+        == []
+    )
+    assert (
+        tools.get_product_molecules_by_properties.invoke(
+            {"product": {"precursors": [{"permId": "sample"}]}}
+        )
+        == []
     )
 
 
-def test_substance_matcher_still_resolves_molecule_property_ids(chatbot_tools):
+@pytest.mark.parametrize("use_parent", [False, True])
+def test_substance_matcher_resolves_molecule_property_ids_and_parents(
+    chatbot_tools, use_parent
+):
     tools, backend = chatbot_tools
     molecule = _Object("molecule", "MOLECULE", {"smiles": "CCO"})
     backend.objects[molecule.permId] = molecule
     substance = _Object(
         "substance",
         "SUBSTANCE",
-        {"empa_number": 42, "batch": "a", "molecules": [molecule.permId]},
+        {
+            "empa_number": 777,
+            "batch": "a",
+            "molecules": [] if use_parent else molecule.permId,
+        },
+        parents=[molecule.permId] if use_parent else [],
     )
 
     assert tools.substance_found(
         substance,
         tools.SubstanceArgs(
-            empa_number=42,
+            empa_number=777,
             batch="a",
             molecules=[tools.MoleculeArgs(smiles="CCO")],
         ),

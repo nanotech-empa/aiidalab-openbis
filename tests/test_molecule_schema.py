@@ -38,22 +38,19 @@ def test_linkml_molecule_parent_slot_is_multivalued_and_optional():
 def test_product_concept_uses_molecule_type_and_collection():
     import json
 
-    from schema.openbis_objects import AtomisticModel, ReactionProductConcept
+    from schema.openbis_objects import AtomisticModel
 
     config_path = Path(__file__).parents[1] / "config" / "openbis_config.json"
     config = json.loads(config_path.read_text())
 
-    assert ReactionProductConcept is Molecule
     assert "reaction_product_concepts" not in AtomisticModel.model_fields
     schema_path = Path(__file__).parents[1] / "schema" / "openBIS_objects_schema.yaml"
     schema = yaml.safe_load(schema_path.read_text())
     assert "ReactionProductConcept" not in schema["classes"]
-    assert schema["slots"]["reaction_product_concept"]["range"] == "Molecule"
-    assert (
-        schema["slots"]["reaction_product_concept"]["annotations"]["openbis_type"]
-        == "OBJECT (PARENT)"
-    )
-    assert config["OpenBIS Types"]["Reaction Product Concept"] == "MOLECULE"
+    assert "ReactionProduct" not in schema["classes"]
+    assert "reaction_product_concept" not in schema["slots"]
+    assert config["OpenBIS Types"]["Molecule"] == "MOLECULE"
+    assert "REACTION_PRODUCT" not in config["OpenBIS Types"].values()
     assert config["Collections"]["Paths"]["Precursor Molecule"].endswith(
         "/PRECURSOR_COLLECTION"
     )
@@ -79,6 +76,7 @@ def test_target_schema_documentation_covers_molecular_and_simulation_decisions()
         "MINIMUM_ENERGY_POTENTIAL",
         "PDOS",
         "POTENTIAL_ENERGY_CALCULATION",
+        "REACTION_PRODUCT",
         "SPM",
         "STM_SIMULATION",
     ):
@@ -94,6 +92,24 @@ def test_target_schema_documentation_covers_molecular_and_simulation_decisions()
         assert f"* **Code:** `{code}`" in documentation
         for term_code, label in terms:
             assert f"| {term_code} | {label} |" in documentation
+
+
+def test_target_documents_imaging_dataset_and_measurement_gallery():
+    documentation = (
+        Path(__file__).parents[1] / "docs" / "openBIS_schema_documentation.md"
+    ).read_text()
+    session = documentation.split("### Measurement Session\n", 1)[1].split("\n### ", 1)[
+        0
+    ]
+    assert "* **Code:** `MEASUREMENT_SESSION`" in session
+    assert "`DEFAULT_OBJECT_VIEW=IMAGING_GALLERY_VIEW`" in session
+    datasets = documentation.split("## 2. Data Set Types", 1)[1]
+    imaging = datasets.split("### Imaging data\n", 1)[1].split("\n### ", 1)[0]
+    assert "* **Code:** `IMAGING_DATA`" in imaging
+    assert "| `imaging_data_config` |" in imaging
+    assert "CONTROLLEDVOCABULARY (DEFAULT_DATASET_VIEWS) | True" in imaging
+    assert "`NanonisSxmAdaptor`" in imaging
+    assert "`NanonisDatAdaptor`" in imaging
 
 
 def test_target_schema_retains_new_equipment_documentation():

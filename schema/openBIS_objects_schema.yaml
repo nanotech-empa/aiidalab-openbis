@@ -1014,22 +1014,6 @@ classes:
             - drafts
             - grants
 
-    ReactionProduct:
-        title: Reaction Product
-        is_a: Thing
-        class_uri:
-        description: Reaction Product
-        annotations:
-            openbis_object: true
-            openbis_code: RPRE
-            openbis_label: Reaction Product
-        slots:
-            - reaction_temperature
-            - reaction_yield
-            - reaction_product_concept
-            - sample
-
-
     ResistanceObservable:
         title: Resistance Observable
         is_a: Observable
@@ -2124,13 +2108,6 @@ classes:
                 inlined_as_list: true
                 range: Publication
                 description: publications container
-
-            reaction_products:
-                multivalued: true
-                inlined_as_list: true
-                range: ReactionProduct
-                description: reaction products container
-
 
             results:
                 multivalued: true
@@ -5206,15 +5183,6 @@ slots:
         annotations:
             openbis_type: OBJECT
             openbis_label: Protocol
-
-    reaction_product_concept:
-        title: Product Molecule
-        range: Molecule
-        description: Product molecule concept
-        multivalued: false
-        annotations:
-            openbis_type: OBJECT (PARENT)
-            openbis_label: Product Molecule
 
     results:
         title: Results
