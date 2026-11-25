@@ -1471,8 +1471,6 @@ classes:
      # General info
             - material
             - face
-            - doping
-            - material_coating
             - dimensions
      # Documentation
      # - website (Dataset)
@@ -2956,16 +2954,6 @@ slots:
         annotations:
             openbis_type: VARCHAR
             openbis_label: DOI
-
-    doping:
-        title: Doping
-        description: Doping
-        range: string
-        slot_uri:
-        multivalued: false
-        annotations:
-            openbis_type: VARCHAR
-            openbis_label: Doping
 
     dopants:
         title: Dopants

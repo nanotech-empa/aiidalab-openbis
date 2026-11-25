@@ -1177,18 +1177,6 @@ class Wafer(OpenBISObject):
         description="Face orientation of the wafer substrate",
         metadata={"type": "VARCHAR"},
     )
-    doping: str = Field(
-        default=None,
-        title="Doping",
-        description="Doping type or level",
-        metadata={"type": "VARCHAR"},
-    )
-    material_coating: List[MaterialCoating] = Field(
-        default_factory=list,
-        title="Material coating",
-        description="Material coating details",
-        metadata={"type": "JSON"},
-    )
     dimensions: Dimensions = Field(
         default_factory=Dimensions,
         title="Dimensions",

@@ -35,6 +35,18 @@ def test_linkml_molecule_parent_slot_is_multivalued_and_optional():
     assert slot["annotations"]["openbis_type"] == "OBJECT (PARENT)"
 
 
+def test_wafer_catalog_matches_documented_exclusions():
+    from schema.openbis_objects import Wafer, WaferSubstrate
+
+    schema = yaml.safe_load(
+        (Path(__file__).parents[1] / "schema" / "openBIS_objects_schema.yaml").read_text()
+    )
+    assert {"doping", "material_coating"}.isdisjoint(Wafer.model_fields)
+    assert {"doping", "material_coating"}.isdisjoint(schema["classes"]["Wafer"]["slots"])
+    assert "material_coating" in WaferSubstrate.model_fields
+    assert "material_coating" in schema["classes"]["WaferSubstrate"]["slots"]
+
+
 def test_product_concept_uses_molecule_type_and_collection():
     import json
 
