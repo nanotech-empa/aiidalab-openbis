@@ -1294,15 +1294,22 @@ def test_running_watchdogs_widget_renders_cards_with_metadata_progress_afs_and_e
     )
     assert hasattr(widget, "refresh_button")
     assert hasattr(widget, "watchdogs_box")
-    assert len(widget.watchdogs_box.children) == 1
+    assert isinstance(widget.watchdogs_accordion, ipw.Accordion)
+    assert widget.watchdogs_box.children == (widget.watchdogs_accordion,)
+    assert len(widget.watchdogs_accordion.children) == 1
+    assert len(widget.watchdogs_accordion.titles) == 1
+    assert "RUNNING" in widget.watchdogs_accordion.titles[0]
+    assert "1/2 uploaded" in widget.watchdogs_accordion.titles[0]
+    assert widget.watchdogs_accordion.selected_index == 0
 
-    card = widget.watchdogs_box.children[0]
+    card = widget.watchdogs_accordion.children[0]
     card_html = "\n".join(_collect_html(card))
     assert "RUNNING" in card_html
     assert "SESS-CARD" in card_html
-    assert "SampleA" in card_html
-    assert "Exp1" in card_html
-    assert "STM-1" in card_html
+    assert "<div><b>Sample:</b> SampleA</div>" in card_html
+    assert "<div><b>Experiment:</b> Exp1</div>" in card_html
+    assert "<div><b>Instrument:</b> STM-1</div>" in card_html
+    assert "SampleA · " not in card_html
     assert "1 / 2" in card_html
     assert "AFS Sync" in card_html
     assert "parse &lt;boom&gt;" in card_html
@@ -1375,6 +1382,9 @@ def test_card_stop_transitions_to_stopped_and_dismiss_removes_entry_keeping_log(
 
     stopped_buttons["Dismiss"].click()
     assert json.loads(active_file.read_text(encoding="utf-8")) == []
+    assert widget.watchdogs_accordion.children == ()
+    assert widget.watchdogs_accordion.titles == ()
+    assert widget.watchdogs_accordion.selected_index is None
     assert log_json.exists()
 
 
@@ -1512,10 +1522,11 @@ def test_card_resume_blocks_when_folder_missing_already_running_or_session_delet
         return _fake_session(sample_ident, f"MEAS_{sample_ident}")
 
     def _find_live_card(w, sid):
-        for c in w.watchdogs_box.children:
+        assert w.watchdogs_box.children == (w.watchdogs_accordion,)
+        for c in w.watchdogs_accordion.children:
             if sid in "\n".join(_collect_html(c)):
                 return c
-        raise AssertionError(f"Card for {sid} not found in live watchdogs_box.children")
+        raise AssertionError(f"Card for {sid} not found in live watchdogs_accordion.children")
 
     with (
         patch("src.utils.get_openbis_object", side_effect=fake_get_openbis),
@@ -1524,6 +1535,13 @@ def test_card_resume_blocks_when_folder_missing_already_running_or_session_delet
         widget = watchdog_module.RunningMeasurementWatchdogsWidget(
             MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
         )
+        # Multiple watchdogs start collapsed, and refresh preserves selected panel
+        assert widget.watchdogs_accordion.selected_index is None
+        widget.watchdogs_accordion.selected_index = 2
+        selected_title_before = widget.watchdogs_accordion.titles[2]
+        widget.refresh_watchdog_list()
+        assert widget.watchdogs_accordion.selected_index == 2
+        assert widget.watchdogs_accordion.titles[2] == selected_title_before
 
         _collect_buttons(_find_live_card(widget, "SESS-CONFLICT"))["Resume"].click()
         assert (

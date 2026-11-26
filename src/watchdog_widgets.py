@@ -128,6 +128,9 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         )
         self.refresh_button.on_click(lambda _b: self.refresh_watchdog_list())
 
+        self.watchdogs_accordion = ipw.Accordion(selected_index=None)
+        self._accordion_keys = []
+        self._accordion_initialized = False
         self.watchdogs_box = ipw.VBox()
 
         self.children = [
@@ -304,12 +307,48 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             display(Javascript(data="alert('Select at least one directory.')"))
             logger.info("No directory selected.")
 
+    @staticmethod
+    def _format_accordion_title(snap: dict) -> str:
+        status = snap.get("status")
+        if status == "RUNNING":
+            prefix = "● RUNNING"
+        elif status == "TOKEN_EXPIRED":
+            prefix = "⚠ TOKEN EXPIRED"
+        elif status == "EXITED":
+            prefix = "⚠ EXITED"
+        else:
+            prefix = "○ STOPPED"
+
+        name = str(
+            snap.get("session_name") or snap.get("session_id") or "Unknown Session"
+        )
+        progress = f"({snap['uploaded_count']}/{snap['total_disk_files']} uploaded)"
+        has_issue = status != "TOKEN_EXPIRED" and bool(
+            snap.get("last_error")
+            or not snap.get("folder_exists", True)
+            or snap.get("heartbeat_stale")
+        )
+        issue_flag = " · ⚠" if has_issue else ""
+        folder = snap.get("monitored_folder") or ""
+        folder_suffix = f" — {folder}" if folder else ""
+        return f"{prefix} · {name} {progress}{issue_flag}{folder_suffix}"
+
     def render_watchdogs(self, entries=None):
+        if not hasattr(self, "watchdogs_accordion"):
+            self.watchdogs_accordion = ipw.Accordion(selected_index=None)
+            self._accordion_keys = []
+            self._accordion_initialized = False
+
         if entries is None:
             entries = measurement_monitor.load_watchdog_entries(
                 self._active_watchdogs_file()
             )
         if not entries:
+            self.watchdogs_accordion.children = []
+            self.watchdogs_accordion.titles = ()
+            self.watchdogs_accordion.selected_index = None
+            self._accordion_keys = []
+            self._accordion_initialized = False
             self.watchdogs_box.children = [
                 ipw.HTML(
                     "<div style='color: #6b7280; padding: 16px; font-style: italic;'>"
@@ -318,6 +357,14 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                 )
             ]
             return
+
+        prev_keys = getattr(self, "_accordion_keys", [])
+        prev_idx = self.watchdogs_accordion.selected_index
+        prev_key = (
+            prev_keys[prev_idx]
+            if prev_idx is not None and 0 <= prev_idx < len(prev_keys)
+            else None
+        )
 
         default_url = (
             self.session_data.get("url") if isinstance(self.session_data, dict) else None
@@ -339,19 +386,30 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         ]
 
         priority = {"RUNNING": 0, "TOKEN_EXPIRED": 1, "EXITED": 2, "STOPPED": 3}
-        snapshots.sort(
-            key=lambda s: (
-                priority.get(s["status"], 9),
-                "" if not s.get("started_at") else s["started_at"],
-            )
-        )
         # Keep newest started_at first within each status bucket
         snapshots.sort(key=lambda s: s.get("started_at") or "", reverse=True)
         snapshots.sort(key=lambda s: priority.get(s["status"], 9))
 
-        self.watchdogs_box.children = [
-            self._create_watchdog_card(snap) for snap in snapshots
+        cards = [self._create_watchdog_card(snap) for snap in snapshots]
+        titles = tuple(self._format_accordion_title(snap) for snap in snapshots)
+        keys = [
+            (snap.get("session_id"), snap.get("monitored_folder")) for snap in snapshots
         ]
+
+        self.watchdogs_accordion.children = cards
+        self.watchdogs_accordion.titles = titles
+
+        if prev_key is not None and prev_key in keys:
+            new_selected = keys.index(prev_key)
+        elif not getattr(self, "_accordion_initialized", False) and len(cards) == 1:
+            new_selected = 0
+        else:
+            new_selected = None
+
+        self.watchdogs_accordion.selected_index = new_selected
+        self._accordion_keys = keys
+        self._accordion_initialized = True
+        self.watchdogs_box.children = [self.watchdogs_accordion]
 
     def _create_watchdog_card(self, snap: dict) -> ipw.Widget:
         status = snap["status"]
@@ -434,9 +492,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             meta_parts.append(
                 f"<b>Instrument:</b> {html.escape(str(snap['instrument_name']))}"
             )
-        meta_line = (
-            f"<div>{' · '.join(meta_parts)}</div>" if meta_parts else ""
-        )
+        meta_line = "".join(f"<div>{part}</div>" for part in meta_parts)
 
         safe_folder = html.escape(snap.get("monitored_folder") or "")
         safe_action = html.escape(snap.get("current_action") or "Idle")
@@ -737,9 +793,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         return ipw.VBox(
             [header_html, details_html, btn_box, card_status, files_drawer, logs_drawer],
             layout=ipw.Layout(
-                border="1px solid #e5e7eb",
-                padding="12px",
-                margin="0 0 10px 0",
+                padding="4px 2px",
             ),
         )
 
