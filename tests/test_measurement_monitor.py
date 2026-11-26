@@ -441,3 +441,147 @@ def test_build_watchdog_card_snapshot_handles_legacy_logs_disk_counts_health_and
     assert snap_bad["status"] == "EXITED"
     assert snap_bad["uploaded_count"] == 0
     assert snap_bad["afs_sync_status"] is None
+
+
+def test_process_measurement_files_records_sxm_dat_upload_history_and_preserves_keys(
+    tmp_path,
+):
+    from nanonis_importer import nanonis_importer
+
+    data_folder = tmp_path / "run_importer"
+    data_folder.mkdir()
+    sxm_path = data_folder / "scan_01.sxm"
+    dat_path = data_folder / "spec_01.dat"
+    sxm_path.write_text("sxm", encoding="utf-8")
+    dat_path.write_text("dat", encoding="utf-8")
+
+    log_file = tmp_path / "logs" / "SESS-IMP.json"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text(
+        json.dumps(
+            {
+                "eln_url": "https://openbis.local",
+                "eln_token": "tok-1",
+                "measurement_session_id": "SESS-IMP",
+                "data_folder": str(data_folder),
+                "session_name": "MEAS_Importer",
+                "started_at": "2026-11-26T10:00:00+00:00",
+                "processed_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    def fake_spm(path):
+        obj = MagicMock()
+        if path.endswith(".sxm"):
+            obj.record_datetime = datetime.datetime(2026, 11, 26, 10, 0, 1)
+        else:
+            obj.record_datetime = datetime.datetime(2026, 11, 26, 10, 0, 2)
+            obj.signals = {"I": {}}
+            obj.measurement_type = "bias"
+        return obj
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch("nanonis_importer.nanonis_importer.demo_sxm_flow"),
+        patch("nanonis_importer.nanonis_importer.demo_dat_flow"),
+    ):
+        nanonis_importer.process_measurement_files(
+            openbis_url="https://openbis.local",
+            token="tok-1",
+            data_folder=str(data_folder),
+            measurements_id="SESS-IMP",
+            logging_filepath=str(log_file),
+        )
+
+    data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert data["session_name"] == "MEAS_Importer"
+    assert data["started_at"] == "2026-11-26T10:00:00+00:00"
+    assert set(data["processed_files"]) == {str(sxm_path), str(dat_path)}
+    types = {(ev["filename"], ev["type"]) for ev in data["upload_history"]}
+    assert types == {("scan_01.sxm", "SXM"), ("spec_01.dat", "DAT")}
+    assert data["last_uploaded_file"] == "spec_01.dat"
+    assert data["last_upload_at"]
+
+
+def test_process_measurement_files_records_per_file_errors_without_crashing(tmp_path):
+    from nanonis_importer import nanonis_importer
+
+    data_folder = tmp_path / "run_importer_err"
+    data_folder.mkdir()
+    (data_folder / "bad.sxm").write_text("sxm", encoding="utf-8")
+    (data_folder / "bad.dat").write_text("dat", encoding="utf-8")
+    log_file = tmp_path / "SESS-ERR.json"
+
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    def fake_spm(path):
+        obj = MagicMock()
+        obj.record_datetime = datetime.datetime(
+            2026, 11, 26, 10, 0, 1 if path.endswith(".sxm") else 2
+        )
+        obj.signals = {"I": {}}
+        obj.measurement_type = "bias"
+        return obj
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow",
+            side_effect=RuntimeError("bad sxm"),
+        ),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_dat_flow",
+            side_effect=ValueError("bad dat"),
+        ),
+    ):
+        nanonis_importer.process_measurement_files(
+            openbis_url="https://openbis.local",
+            token="tok-1",
+            data_folder=str(data_folder),
+            measurements_id="SESS-ERR",
+            logging_filepath=str(log_file),
+        )
+
+    data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert data["processed_files"] == []
+    stages = {(e["stage"], e["file"], e["message"]) for e in data["recent_errors"]}
+    assert ("sxm", "bad.sxm", "bad sxm") in stages
+    assert ("dat", "bad.dat", "bad dat") in stages
+    assert data["last_error"]["stage"] == "dat"
+    assert data["last_error"]["message"] == "bad dat"
+
+
+def test_process_measurement_files_handles_failed_openbis_connection_without_logout_crash(
+    tmp_path,
+):
+    from nanonis_importer import nanonis_importer
+
+    data_folder = tmp_path / "run_importer_auth"
+    data_folder.mkdir()
+    log_file = tmp_path / "SESS-AUTH.json"
+
+    with patch("src.utils.connect_openbis", return_value=(None, {})):
+        nanonis_importer.process_measurement_files(
+            openbis_url="https://openbis.local",
+            token="expired-tok",
+            data_folder=str(data_folder),
+            measurements_id="SESS-AUTH",
+            logging_filepath=str(log_file),
+        )
+
+    data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert data["token_expired"] is True
+    assert data["last_error"]["stage"] == "auth"
+    assert len(data["recent_errors"]) == 1
