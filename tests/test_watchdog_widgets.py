@@ -218,3 +218,201 @@ def test_add_active_watchdog_appends_entry_and_updates_options(
             "measurement_session_id": "SESS-9",
         }
     ]
+
+
+def _make_generator_widget(watchdog_module, tmp_path, running_widget=None):
+    logs_dir = tmp_path / "logs"
+    meas_logs_dir = logs_dir / "measurements"
+    meas_logs_dir.mkdir(parents=True, exist_ok=True)
+    if running_widget is None:
+        running_widget = _make_running_widget(watchdog_module, logs_dir)
+
+    widget = watchdog_module.GenerateMeasurementsWatchdogWidget.__new__(
+        watchdog_module.GenerateMeasurementsWatchdogWidget
+    )
+    ipw.VBox.__init__(widget)
+    widget.openbis_session = MagicMock()
+    widget.session_data = {"url": "https://openbis.local", "token": "tok-new"}
+    widget.running_watchdogs_widget = running_widget
+    widget.watchdog_processes = []
+    widget.measurement_logs_folder = meas_logs_dir
+    widget.measurement_session_name_text = ipw.Text(value="MEAS_New")
+    return widget
+
+
+def _fake_session(perm_id, name):
+    session = MagicMock()
+    session.permId = perm_id
+    session.props = {"name": name}
+    return session
+
+
+def test_find_existing_folder_tracking_returns_none_for_untracked_folder(
+    watchdog_module, tmp_path
+):
+    widget = _make_generator_widget(watchdog_module, tmp_path)
+    data_folder = tmp_path / "untracked_run"
+    data_folder.mkdir()
+
+    assert widget._find_existing_folder_tracking(str(data_folder)) is None
+
+
+def test_find_existing_folder_tracking_detects_stopped_previously_linked_session(
+    watchdog_module, tmp_path
+):
+    widget = _make_generator_widget(watchdog_module, tmp_path)
+    data_folder = tmp_path / "stopped_run"
+    data_folder.mkdir()
+    log_path = widget.measurement_logs_folder / "SESS-OLD.json"
+    log_path.write_text(
+        json.dumps(
+            {
+                "eln_url": "https://openbis.local",
+                "eln_token": "tok-old",
+                "measurement_session_id": "SESS-OLD",
+                "data_folder": str(data_folder),
+                "processed_files": [str(data_folder / "scan_001.sxm")],
+            }
+        )
+    )
+    old_session = _fake_session("SESS-OLD", "MEAS_Old")
+
+    with patch("src.utils.get_openbis_object", return_value=old_session):
+        info = widget._find_existing_folder_tracking(f"{data_folder}/")
+
+    assert info is not None
+    assert info["is_running"] is False
+    assert info["active_pids"] == []
+    assert info["session_id"] == "SESS-OLD"
+    assert info["session_name"] == "MEAS_Old"
+    assert info["measurement_session"] is old_session
+    assert info["log_filepath"] == log_path
+
+
+def test_find_existing_folder_tracking_prunes_stale_stopped_log_when_session_deleted(
+    watchdog_module, tmp_path
+):
+    widget = _make_generator_widget(watchdog_module, tmp_path)
+    data_folder = tmp_path / "deleted_session_run"
+    data_folder.mkdir()
+    log_path = widget.measurement_logs_folder / "SESS-DELETED.json"
+    log_path.write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-DELETED",
+                "data_folder": str(data_folder),
+                "processed_files": [],
+            }
+        )
+    )
+
+    with patch("src.utils.get_openbis_object", side_effect=ValueError("Not found")):
+        info = widget._find_existing_folder_tracking(str(data_folder))
+
+    assert info is None
+    assert not log_path.exists()
+
+
+def test_find_existing_folder_tracking_detects_running_watchdog_with_session(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    data_folder = tmp_path / "running_run"
+    data_folder.mkdir()
+    (logs_dir / "active_watchdogs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 5555,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-RUN",
+                }
+            ]
+        )
+    )
+    run_session = _fake_session("SESS-RUN", "MEAS_Run")
+
+    with (
+        patch("os.kill"),
+        patch("src.utils.get_openbis_object", return_value=run_session),
+    ):
+        widget = _make_generator_widget(watchdog_module, tmp_path)
+        info = widget._find_existing_folder_tracking(str(data_folder))
+
+    assert info is not None
+    assert info["is_running"] is True
+    assert info["active_pids"] == [5555]
+    assert info["session_id"] == "SESS-RUN"
+    assert info["session_name"] == "MEAS_Run"
+    assert info["measurement_session"] is run_session
+
+
+def test_find_existing_folder_tracking_detects_running_watchdog_when_openbis_session_deleted(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    data_folder = tmp_path / "running_deleted_run"
+    data_folder.mkdir()
+    (logs_dir / "active_watchdogs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 5555,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-GONE",
+                }
+            ]
+        )
+    )
+
+    with (
+        patch("os.kill"),
+        patch("src.utils.get_openbis_object", side_effect=ValueError("Deleted")),
+    ):
+        widget = _make_generator_widget(watchdog_module, tmp_path)
+        info = widget._find_existing_folder_tracking(str(data_folder))
+
+    assert info is not None
+    assert info["is_running"] is True
+    assert info["active_pids"] == [5555]
+    assert info["session_id"] == "SESS-GONE"
+    assert info["measurement_session"] is None
+
+
+def test_resume_existing_measurement_session_refreshes_token_and_preserves_processed_files(
+    watchdog_module, tmp_path
+):
+    widget = _make_generator_widget(watchdog_module, tmp_path)
+    data_folder = tmp_path / "resume_run"
+    data_folder.mkdir()
+    log_path = widget.measurement_logs_folder / "SESS-OLD.json"
+    log_path.write_text(
+        json.dumps(
+            {
+                "eln_url": "https://old.local",
+                "eln_token": "tok-old",
+                "measurement_session_id": "SESS-OLD",
+                "data_folder": str(data_folder),
+                "processed_files": [str(data_folder / "a.sxm")],
+            }
+        )
+    )
+    old_session = _fake_session("SESS-OLD", "MEAS_Old")
+    tracking_info = {
+        "is_running": False,
+        "active_pids": [],
+        "measurement_session": old_session,
+        "session_id": "SESS-OLD",
+        "session_name": "MEAS_Old",
+        "log_filepath": log_path,
+        "logging_data": json.loads(log_path.read_text()),
+    }
+
+    resumed = widget._resume_existing_measurement_session(tracking_info, f"{data_folder}/")
+
+    assert resumed is old_session
+    updated = json.loads(log_path.read_text())
+    assert updated["eln_url"] == "https://openbis.local"
+    assert updated["eln_token"] == "tok-new"
+    assert updated["data_folder"] == os.path.normpath(str(data_folder))
+    assert updated["processed_files"] == [str(data_folder / "a.sxm")]

@@ -615,14 +615,41 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
         return True
 
-    def _get_or_create_measurement_session(
-        self, sample_id, instrument_id, experiment_id, data_folder
-    ):
-        """Creates an openBIS session object or retrieves an existing one from logs/measurements."""
+    def _get_session_name(self, measurement_session, fallback=None):
+        if measurement_session is None:
+            return fallback or "Unknown"
+        props = getattr(measurement_session, "props", None)
+        name = None
+        if props is not None:
+            try:
+                name = props.get("name")
+            except AttributeError:
+                try:
+                    name = props["name"]
+                except (KeyError, TypeError):
+                    name = None
+        return (
+            name
+            or getattr(measurement_session, "permId", None)
+            or fallback
+            or "Unknown"
+        )
+
+    def _find_existing_folder_tracking(self, data_folder):
+        """Inspects active watchdogs and measurement logs for an existing link to data_folder."""
         logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
         norm_data_folder = os.path.normpath(data_folder)
 
-        # 1. Try to load an existing session for this data_folder from logs/measurements
+        running_widget = getattr(self, "running_watchdogs_widget", None)
+        active_entries = (
+            running_widget.get_active_watchdogs_for_folder(norm_data_folder)
+            if running_widget is not None
+            else []
+        )
+
+        matched_session = None
+        matched_log_filepath = None
+        matched_logging_data = None
         for log_filepath, logging_data in find_measurement_logs_for_folder(
             norm_data_folder, logs_dir=logs_dir
         ):
@@ -630,18 +657,12 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             if not session_id:
                 continue
             try:
-                measurement_session = utils.get_openbis_object(
+                matched_session = utils.get_openbis_object(
                     self.openbis_session, sample_ident=session_id
                 )
-                logging_data["eln_url"] = self.session_data["url"]
-                logging_data["eln_token"] = self.session_data["token"]
-                logging_data["data_folder"] = norm_data_folder
-                logging_data.setdefault("processed_files", [])
-                utils.write_json(logging_data, str(log_filepath))
-                logger.info(
-                    f"Uploading data into existing Measurement Session {measurement_session.permId}."
-                )
-                return measurement_session
+                matched_log_filepath = log_filepath
+                matched_logging_data = logging_data
+                break
             except ValueError:
                 logger.info(
                     f"Previous Measurement Session {session_id} no longer exists in openBIS. Removing stale log."
@@ -651,7 +672,71 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 except OSError:
                     pass
 
-        # 2. Create a new session if no valid existing one was found
+        if active_entries:
+            active_pids = [
+                entry["pid"] for entry in active_entries if entry.get("pid") is not None
+            ]
+            active_session_id = next(
+                (
+                    entry.get("measurement_session_id")
+                    for entry in reversed(active_entries)
+                    if entry.get("measurement_session_id")
+                ),
+                None,
+            )
+            if active_session_id is None and matched_session is not None:
+                active_session_id = matched_session.permId
+
+            measurement_session = None
+            if (
+                matched_session is not None
+                and active_session_id == matched_session.permId
+            ):
+                measurement_session = matched_session
+            elif active_session_id:
+                try:
+                    measurement_session = utils.get_openbis_object(
+                        self.openbis_session, sample_ident=active_session_id
+                    )
+                except ValueError:
+                    measurement_session = None
+
+            session_id = (
+                measurement_session.permId
+                if measurement_session is not None
+                else active_session_id
+            )
+            return {
+                "is_running": True,
+                "active_pids": active_pids,
+                "measurement_session": measurement_session,
+                "session_id": session_id,
+                "session_name": self._get_session_name(
+                    measurement_session, fallback=session_id
+                ),
+                "log_filepath": matched_log_filepath,
+                "logging_data": matched_logging_data,
+            }
+
+        if matched_session is not None:
+            return {
+                "is_running": False,
+                "active_pids": [],
+                "measurement_session": matched_session,
+                "session_id": matched_session.permId,
+                "session_name": self._get_session_name(
+                    matched_session, fallback=matched_session.permId
+                ),
+                "log_filepath": matched_log_filepath,
+                "logging_data": matched_logging_data,
+            }
+
+        return None
+
+    def _create_openbis_measurement_session(
+        self, sample_id, instrument_id, experiment_id, data_folder
+    ):
+        norm_data_folder = os.path.normpath(data_folder)
         measurement_session = utils.create_openbis_object(
             self.openbis_session,
             type=OPENBIS_OBJECT_TYPES["Measurement Session"],
@@ -663,21 +748,89 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 "measurement_folder_path": norm_data_folder,
             },
         )
+        logger.info(f"New Measurement Session {measurement_session.permId} created.")
+        return measurement_session
 
+    def _write_fresh_measurement_log(self, measurement_session_id, data_folder):
+        logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
+        norm_data_folder = os.path.normpath(data_folder)
         log_filepath = get_measurement_log_filepath(
-            measurement_session.permId, logs_dir=logs_dir
+            measurement_session_id, logs_dir=logs_dir
         )
         logging_data = {
             "eln_url": self.session_data["url"],
             "eln_token": self.session_data["token"],
-            "measurement_session_id": measurement_session.permId,
+            "measurement_session_id": measurement_session_id,
             "data_folder": norm_data_folder,
             "processed_files": [],
         }
         utils.write_json(logging_data, str(log_filepath))
+        return log_filepath
 
-        logger.info(f"New Measurement Session {measurement_session.permId} created.")
+    def _resume_existing_measurement_session(self, tracking_info, data_folder):
+        logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
+        norm_data_folder = os.path.normpath(data_folder)
+        measurement_session = tracking_info["measurement_session"]
+        log_filepath = tracking_info.get("log_filepath") or get_measurement_log_filepath(
+            measurement_session.permId, logs_dir=logs_dir
+        )
+        logging_data = dict(tracking_info.get("logging_data") or {})
+        logging_data["eln_url"] = self.session_data["url"]
+        logging_data["eln_token"] = self.session_data["token"]
+        logging_data["measurement_session_id"] = measurement_session.permId
+        logging_data["data_folder"] = norm_data_folder
+        logging_data.setdefault("processed_files", [])
+        utils.write_json(logging_data, str(log_filepath))
+        logger.info(
+            f"Uploading data into existing Measurement Session {measurement_session.permId}."
+        )
         return measurement_session
+
+    def _get_or_create_measurement_session(
+        self, sample_id, instrument_id, experiment_id, data_folder
+    ):
+        """Creates an openBIS session object or retrieves an existing one from logs/measurements."""
+        tracking_info = self._find_existing_folder_tracking(data_folder)
+        if tracking_info and tracking_info.get("measurement_session") is not None:
+            return self._resume_existing_measurement_session(tracking_info, data_folder)
+
+        measurement_session = self._create_openbis_measurement_session(
+            sample_id, instrument_id, experiment_id, data_folder
+        )
+        self._write_fresh_measurement_log(measurement_session.permId, data_folder)
+        return measurement_session
+
+    def _start_watchdog_process(self, measurement_session_id, data_folder):
+        norm_data_folder = os.path.normpath(data_folder)
+        watchdog_process = subprocess.Popen(
+            [
+                "python",
+                f"{APP_FOLDER}/src/measurements_uploader.py",
+                "--openbis_url",
+                self.session_data["url"],
+                "--openbis_token",
+                self.session_data["token"],
+                "--measurement_session_id",
+                measurement_session_id,
+                "--data_folder",
+                norm_data_folder,
+            ],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        display(Javascript(data="alert('Watchdog process started!');"))
+        logger.info(
+            f"Watchdog process started with PID: {watchdog_process.pid} for {norm_data_folder}"
+        )
+
+        self.running_watchdogs_widget.add_active_watchdog(
+            watchdog_process.pid, norm_data_folder, measurement_session_id
+        )
+        self.watchdog_processes.append(watchdog_process)
+        return watchdog_process
 
     def generate_watchdog(self, b):
         # 1. Block saving if inputs (or the folder chooser) aren't ready
