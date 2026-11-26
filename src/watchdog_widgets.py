@@ -6,6 +6,7 @@ import os
 import pathlib
 import signal
 import subprocess
+import time
 
 import ipyfilechooser
 import ipywidgets as ipw
@@ -228,9 +229,11 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             return []
 
         pid_set = set(target_pids)
+        signaled_pids = []
         for pid in target_pids:
             try:
                 os.kill(pid, signal.SIGTERM)
+                signaled_pids.append(pid)
                 logger.info(f"Terminating watchdog process with PID: {pid}")
             except (ProcessLookupError, PermissionError):
                 logger.warning(
@@ -250,14 +253,51 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                 remaining_processes.append(process)
         self.watchdog_processes = remaining_processes
 
+        # Wait briefly for graceful SIGTERM exit; escalate to SIGKILL if still running
+        for pid in signaled_pids:
+            for _ in range(10):
+                if not measurement_monitor.is_pid_running(pid):
+                    break
+                time.sleep(0.1)
+            if measurement_monitor.is_pid_running(pid):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    logger.warning(
+                        f"Watchdog PID {pid} did not exit after SIGTERM; sent SIGKILL."
+                    )
+                    for _ in range(5):
+                        if not measurement_monitor.is_pid_running(pid):
+                            break
+                        time.sleep(0.05)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
         if notify:
             display(Javascript(data="alert('Watchdog(s) stopped.')"))
+
+        existing_entries = measurement_monitor.load_watchdog_entries(
+            self._active_watchdogs_file()
+        )
+        stopped_session_ids = [
+            e.get("measurement_session_id")
+            for e in existing_entries
+            if e.get("pid") in pid_set and e.get("measurement_session_id")
+        ]
 
         entries = measurement_monitor.mark_watchdogs_stopped(
             self._active_watchdogs_file(),
             target_pids,
             remove_entries=remove_entries,
         )
+        if not remove_entries:
+            logs_dir = self._measurement_logs_dir()
+            for sid in stopped_session_ids:
+                log_path = logs_dir / f"{sid}.json"
+                if log_path.exists():
+                    measurement_monitor.update_measurement_log(
+                        log_path,
+                        lambda d: d.update({"current_action": "Stopped"}),
+                    )
         self._sync_select_options(entries)
         if hasattr(self, "watchdogs_box"):
             self.render_watchdogs(entries=entries)
@@ -713,14 +753,22 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                     self._resuming_sessions.discard(resume_key)
                     rbtn.disabled = False
 
-            def _on_dismiss(_b, s=snap):
-                measurement_monitor.dismiss_watchdog_entry(
+            def _on_dismiss(_b, s=snap, status_out=card_status):
+                dismissed = measurement_monitor.dismiss_watchdog_entry(
                     self._active_watchdogs_file(),
                     measurement_session_id=s.get("session_id"),
                     pid=s.get("pid"),
                     data_folder=s.get("monitored_folder"),
                 )
-                self.render_watchdogs()
+                if dismissed:
+                    self.render_watchdogs()
+                else:
+                    safe_p = html.escape(str(s.get("pid") or "N/A"))
+                    status_out.value = (
+                        "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
+                        f"⚠ Cannot dismiss: worker process (PID {safe_p}) is still running. "
+                        "Wait a moment or stop the process before dismissing.</div>"
+                    )
 
             resume_btn.on_click(_on_resume)
             dismiss_btn.on_click(_on_dismiss)

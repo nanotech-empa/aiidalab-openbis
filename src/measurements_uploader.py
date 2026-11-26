@@ -281,10 +281,13 @@ def run_upload_cycle(
     measurement_session_id,
     logging_filepath,
     upload_in_progress=None,
+    stop_event=None,
 ):
     if upload_in_progress is not None:
         upload_in_progress.set()
     try:
+        if stop_event is not None and stop_event.is_set():
+            return 0
         initial_logging_data = (
             measurement_monitor.read_json_safe(logging_filepath, default={}) or {}
         )
@@ -302,13 +305,26 @@ def run_upload_cycle(
             ),
         )
 
-        process_measurement_files(
-            openbis_url,
-            openbis_token,
-            data_folder,
-            measurement_session_id,
-            logging_filepath,
-        )
+        if stop_event is not None:
+            process_measurement_files(
+                openbis_url,
+                openbis_token,
+                data_folder,
+                measurement_session_id,
+                logging_filepath,
+                stop_event=stop_event,
+            )
+        else:
+            process_measurement_files(
+                openbis_url,
+                openbis_token,
+                data_folder,
+                measurement_session_id,
+                logging_filepath,
+            )
+
+        if stop_event is not None and stop_event.is_set():
+            return 0
 
         logging_data = (
             measurement_monitor.read_json_safe(logging_filepath, default={}) or {}
@@ -333,6 +349,8 @@ def run_upload_cycle(
         ]
 
         for file_path in missing_files:
+            if stop_event is not None and stop_event.is_set():
+                break
             basename = os.path.basename(file_path)
             measurement_monitor.update_measurement_log(
                 logging_filepath,
@@ -474,6 +492,7 @@ def process_new_file(
             measurement_session_id=measurement_session_id,
             logging_filepath=logging_filepath,
             upload_in_progress=upload_in_progress,
+            stop_event=stop_event,
         )
     except TokenExpiredError:
         if token_expired_event is not None:
@@ -637,6 +656,7 @@ def main(argv=None) -> int:
                         measurement_session_id=measurement_session_id,
                         logging_filepath=logging_filepath,
                         upload_in_progress=upload_in_progress,
+                        stop_event=stop_event,
                     )
                     or 0
                 )
@@ -672,6 +692,7 @@ def main(argv=None) -> int:
                     measurement_session_id=measurement_session_id,
                     logging_filepath=logging_filepath,
                     upload_in_progress=upload_in_progress,
+                    stop_event=stop_event,
                 )
                 or 0
             )

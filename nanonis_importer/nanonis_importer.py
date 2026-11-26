@@ -635,7 +635,12 @@ def create_dat_dataset(
 
 
 def process_measurement_files(
-    openbis_url, token, data_folder, measurements_id, logging_filepath=None
+    openbis_url,
+    token,
+    data_folder,
+    measurements_id,
+    logging_filepath=None,
+    stop_event=None,
 ):
     import contextlib
     import io
@@ -797,7 +802,7 @@ def process_measurement_files(
 
         token_expired_midrun = False
         for group in grouped_measurement_files:
-            if token_expired_midrun:
+            if token_expired_midrun or (stop_event is not None and stop_event.is_set()):
                 break
             # Save sxm files
             if group[0].endswith(".sxm"):
@@ -844,7 +849,9 @@ def process_measurement_files(
 
                 # Save dat files
                 for dat_files_group in dat_files_grouped_by_type:
-                    if token_expired_midrun:
+                    if token_expired_midrun or (
+                        stop_event is not None and stop_event.is_set()
+                    ):
                         break
                     dat_files_directory = tempfile.mkdtemp(prefix="nanonis_dat_files_")
                     try:

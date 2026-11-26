@@ -1639,6 +1639,66 @@ def test_stop_watchdog_pids_ignores_non_positive_pids(watchdog_module, tmp_path)
     mock_kill.assert_not_called()
 
 
+def test_stop_watchdog_pids_escalates_to_sigkill_and_dismiss_shows_error_if_still_alive(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    data_folder = tmp_path / "stubborn_run"
+    data_folder.mkdir()
+
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 65663,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-STUBBORN",
+                    "status": "RUNNING",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    kill_calls = []
+    killed = {"sigkill": False}
+
+    def fake_kill(pid, sig):
+        kill_calls.append((pid, sig))
+        if sig == signal.SIGKILL:
+            killed["sigkill"] = True
+
+    with (
+        patch("os.kill", side_effect=fake_kill),
+        patch(
+            "src.measurement_monitor.is_pid_running",
+            side_effect=lambda _pid: not killed["sigkill"],
+        ),
+        patch("time.sleep", return_value=None),
+    ):
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-1"}
+        )
+        widget.stop_watchdog_pids([65663], notify=False, remove_entries=False)
+
+    assert (65663, signal.SIGTERM) in kill_calls
+    assert (65663, signal.SIGKILL) in kill_calls
+
+    # If a STOPPED card's PID is somehow still alive when Dismiss is clicked,
+    # show a visible inline error message instead of silently doing nothing.
+    with patch("src.measurement_monitor.is_pid_running", return_value=True):
+        widget2 = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-1"}
+        )
+        card = widget2.watchdogs_accordion.children[0]
+        _collect_buttons(card)["Dismiss"].click()
+        live_html = "\n".join(_collect_html(widget2.watchdogs_accordion.children[0]))
+        assert "still running" in live_html.lower() or "cannot dismiss" in live_html.lower()
+
+
 def test_card_resume_handles_missing_credentials_or_popen_error_without_wiping_error_state(
     watchdog_module, tmp_path
 ):

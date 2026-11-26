@@ -1488,3 +1488,53 @@ def test_uploader_retry_scheduler_backoff_cap_and_main_integration(tmp_path, mon
 
     assert rc_exp == 1
     assert cycle_calls_exp["n"] == 2
+
+
+def test_process_measurement_files_respects_stop_event_between_files(tmp_path):
+    import threading
+
+    from nanonis_importer import nanonis_importer
+
+    data_folder = tmp_path / "stop_mid_cycle"
+    data_folder.mkdir()
+    (data_folder / "a_01.sxm").write_text("sxm1", encoding="utf-8")
+    (data_folder / "b_02.sxm").write_text("sxm2", encoding="utf-8")
+    log_file = tmp_path / "SESS-STOP-MID.json"
+
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    stop_event = threading.Event()
+    uploaded = []
+
+    def fake_spm(path):
+        obj = MagicMock()
+        obj.record_datetime = datetime.datetime(
+            2026, 11, 26, 10, 0, 1 if "a_01" in path else 2
+        )
+        return obj
+
+    def fake_sxm_flow(_session, file_path, **_kwargs):
+        uploaded.append(os.path.basename(file_path))
+        stop_event.set()  # SIGTERM arrives during upload of first file
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow",
+            side_effect=fake_sxm_flow,
+        ),
+    ):
+        nanonis_importer.process_measurement_files(
+            "https://openbis.local",
+            "tok-1",
+            str(data_folder),
+            "SESS-STOP-MID",
+            logging_filepath=str(log_file),
+            stop_event=stop_event,
+        )
+
+    assert uploaded == ["a_01.sxm"]
