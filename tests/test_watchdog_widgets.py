@@ -146,7 +146,11 @@ def test_get_active_watchdogs_for_folder_prunes_dead_pids_and_normalizes_paths(
     assert matches[0]["measurement_session_id"] == "SESS-LIVE"
 
     stored = json.loads(active_file.read_text())
-    assert [entry["pid"] for entry in stored] == [1111, 3333]
+    by_pid = {entry["pid"]: entry for entry in stored}
+    assert by_pid[1111]["status"] == "RUNNING"
+    assert by_pid[3333]["status"] == "RUNNING"
+    assert by_pid[2222]["status"] == "EXITED"
+    assert by_pid[2222]["user_stopped"] is False
 
 
 def test_stop_watchdog_pids_terminates_updates_ui_and_json_without_alert_when_silent(
@@ -193,9 +197,11 @@ def test_stop_watchdog_pids_terminates_updates_ui_and_json_without_alert_when_si
     assert mock_display.call_count == 0
     assert list(running_widget.running_watchdogs_widget.options) == [(run2, 5678)]
     stored = json.loads(active_file.read_text())
-    assert stored == [
-        {"pid": 5678, "monitored_folder": run2, "measurement_session_id": "SESS-2"}
-    ]
+    assert len(stored) == 1
+    assert stored[0]["pid"] == 5678
+    assert stored[0]["monitored_folder"] == run2
+    assert stored[0]["measurement_session_id"] == "SESS-2"
+    assert stored[0]["status"] == "RUNNING"
 
 
 def test_add_active_watchdog_appends_entry_and_updates_options(
@@ -211,13 +217,13 @@ def test_add_active_watchdog_appends_entry_and_updates_options(
         (os.path.normpath(run1), 4321)
     ]
     stored = json.loads((logs_dir / "active_watchdogs.json").read_text())
-    assert stored == [
-        {
-            "pid": 4321,
-            "monitored_folder": os.path.normpath(run1),
-            "measurement_session_id": "SESS-9",
-        }
-    ]
+    assert len(stored) == 1
+    assert stored[0]["pid"] == 4321
+    assert stored[0]["monitored_folder"] == os.path.normpath(run1)
+    assert stored[0]["measurement_session_id"] == "SESS-9"
+    assert stored[0]["status"] == "RUNNING"
+    assert stored[0]["user_stopped"] is False
+    assert stored[0]["started_at"]
 
 
 def _make_generator_widget(watchdog_module, tmp_path, running_widget=None):
@@ -676,13 +682,13 @@ def test_generate_watchdog_running_folder_switch_stops_old_detaches_logs_and_sta
     ]
 
     stored_active = json.loads((logs_dir / "active_watchdogs.json").read_text())
-    assert stored_active == [
-        {
-            "pid": 9002,
-            "monitored_folder": os.path.normpath(str(data_folder)),
-            "measurement_session_id": "SESS-NEW-2",
-        }
-    ]
+    assert len(stored_active) == 1
+    assert stored_active[0]["pid"] == 9002
+    assert stored_active[0]["monitored_folder"] == os.path.normpath(str(data_folder))
+    assert stored_active[0]["measurement_session_id"] == "SESS-NEW-2"
+    assert stored_active[0]["status"] == "RUNNING"
+    assert stored_active[0]["session_name"] == "MEAS_Correct"
+    assert stored_active[0]["log_file"].endswith("SESS-NEW-2.log")
 
     old1_data = json.loads(log_old_1.read_text())
     old2_data = json.loads(log_old_2.read_text())
@@ -1169,6 +1175,373 @@ def test_refresh_watchdog_list_reaps_zombie_child_and_marks_not_running(
         running_widget = _make_running_widget(watchdog_module, logs_dir)
         assert running_widget.get_active_watchdogs_for_folder(run_folder) == []
         assert list(running_widget.running_watchdogs_widget.options) == []
-        assert json.loads(active_file.read_text()) == []
+        entries = json.loads(active_file.read_text())
+        assert len(entries) == 1
+        assert entries[0]["pid"] == proc.pid
+        assert entries[0]["status"] == "EXITED"
+        assert entries[0]["user_stopped"] is False
     finally:
         proc.wait(timeout=5)
+
+
+def _collect_html(widget):
+    parts = []
+    if isinstance(widget, ipw.HTML):
+        parts.append(widget.value)
+    for child in getattr(widget, "children", ()):
+        parts.extend(_collect_html(child))
+    return parts
+
+
+def _collect_buttons(widget):
+    buttons = {}
+    if isinstance(widget, ipw.Button):
+        buttons[widget.description] = widget
+    for child in getattr(widget, "children", ()):
+        buttons.update(_collect_buttons(child))
+    return buttons
+
+
+def test_running_watchdogs_widget_renders_cards_with_metadata_progress_afs_and_escaped_logs(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    data_folder = tmp_path / "meas_run"
+    data_folder.mkdir()
+    sxm1 = data_folder / "scan1.sxm"
+    sxm2 = data_folder / "scan2.sxm"
+    sxm1.write_text("x", encoding="utf-8")
+    sxm2.write_text("x", encoding="utf-8")
+
+    (meas_dir / "SESS-CARD.json").write_text(
+        json.dumps(
+            {
+                "eln_url": "https://openbis.local/openbis/webapp/eln-lims/",
+                "eln_token": "SUPER-SECRET-TOKEN",
+                "measurement_session_id": "SESS-CARD",
+                "data_folder": str(data_folder),
+                "session_name": "MEAS_<script>xss</script>",
+                "sample_name": "SampleA",
+                "experiment_name": "Exp1",
+                "instrument_name": "STM-1",
+                "started_at": "2026-11-26T11:50:00+00:00",
+                "last_heartbeat_at": "2026-11-26T11:59:55+00:00",
+                "current_action": "Watching for new files",
+                "processed_files": [str(sxm1)],
+                "upload_history": [
+                    {
+                        "file": str(sxm1),
+                        "filename": "scan1.sxm",
+                        "type": "SXM",
+                        "uploaded_at": "2026-11-26T11:55:00+00:00",
+                    }
+                ],
+                "recent_errors": [
+                    {
+                        "timestamp": "2026-11-26T11:56:00+00:00",
+                        "file": "bad<file>.dat",
+                        "stage": "dat",
+                        "message": "parse <boom>",
+                    }
+                ],
+                "last_error": {
+                    "timestamp": "2026-11-26T11:56:00+00:00",
+                    "file": "bad<file>.dat",
+                    "stage": "dat",
+                    "message": "parse <boom>",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (meas_dir / "SESS-CARD.log").write_text(
+        "Started ok\n<script>log-xss</script>\n", encoding="utf-8"
+    )
+    (logs_dir / "active_watchdogs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pid": os.getpid(),
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-CARD",
+                    "status": "RUNNING",
+                    "log_file": str(meas_dir / "SESS-CARD.log"),
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (logs_dir / "active_synchronisations.json").write_text(
+        json.dumps(
+            {
+                "jobs": {
+                    "sync1": {
+                        "job_id": "sync1",
+                        "status": "RUNNING",
+                        "pid": os.getpid(),
+                        "local_path": str(data_folder),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+        MagicMock(), {"url": "https://openbis.local", "token": "SUPER-SECRET-TOKEN"}
+    )
+    assert hasattr(widget, "refresh_button")
+    assert hasattr(widget, "watchdogs_box")
+    assert len(widget.watchdogs_box.children) == 1
+
+    card = widget.watchdogs_box.children[0]
+    card_html = "\n".join(_collect_html(card))
+    assert "RUNNING" in card_html
+    assert "SESS-CARD" in card_html
+    assert "SampleA" in card_html
+    assert "Exp1" in card_html
+    assert "STM-1" in card_html
+    assert "1 / 2" in card_html
+    assert "AFS Sync" in card_html
+    assert "parse &lt;boom&gt;" in card_html
+    assert "MEAS_&lt;script&gt;xss&lt;/script&gt;" in card_html
+    assert "&lt;script&gt;log-xss&lt;/script&gt;" in card_html
+    assert "<script>" not in card_html
+    assert "SUPER-SECRET-TOKEN" not in card_html
+    buttons = _collect_buttons(card)
+    assert "Stop" in buttons
+    assert buttons["Stop"].button_style == "danger"
+
+
+def test_card_stop_transitions_to_stopped_and_dismiss_removes_entry_keeping_log(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    data_folder = tmp_path / "stop_dismiss_run"
+    data_folder.mkdir()
+    log_json = meas_dir / "SESS-SD.json"
+    log_json.write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-SD",
+                "data_folder": str(data_folder),
+                "processed_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 7777,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-SD",
+                    "status": "RUNNING",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    kill_calls = []
+
+    def fake_kill(pid, sig):
+        kill_calls.append((pid, sig))
+
+    with patch("os.kill", side_effect=fake_kill):
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-1"}
+        )
+        card = widget.watchdogs_box.children[0]
+        _collect_buttons(card)["Stop"].click()
+
+    assert (7777, signal.SIGTERM) in kill_calls
+    entries = json.loads(active_file.read_text(encoding="utf-8"))
+    assert len(entries) == 1
+    assert entries[0]["status"] == "STOPPED"
+    assert entries[0]["user_stopped"] is True
+    assert list(widget.running_watchdogs_widget.options) == []
+
+    stopped_card = widget.watchdogs_box.children[0]
+    stopped_buttons = _collect_buttons(stopped_card)
+    assert "Resume" in stopped_buttons
+    assert "Dismiss" in stopped_buttons
+
+    stopped_buttons["Dismiss"].click()
+    assert json.loads(active_file.read_text(encoding="utf-8")) == []
+    assert log_json.exists()
+
+
+def test_card_resume_refreshes_token_clears_error_and_restarts_worker(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    data_folder = tmp_path / "resume_card_run"
+    data_folder.mkdir()
+    log_json = meas_dir / "SESS-RES.json"
+    log_json.write_text(
+        json.dumps(
+            {
+                "eln_url": "https://old.local",
+                "eln_token": "tok-expired",
+                "measurement_session_id": "SESS-RES",
+                "data_folder": str(data_folder),
+                "processed_files": [str(data_folder / "old.sxm")],
+                "token_expired": True,
+                "last_error": {"stage": "auth", "message": "Token expired"},
+                "recent_errors": [{"stage": "auth", "message": "Token expired"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 8888,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-RES",
+                    "status": "EXITED",
+                    "user_stopped": False,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    session_obj = _fake_session("SESS-RES", "MEAS_Resumed")
+    resume_btn_ref = []
+    reentered = {"done": False}
+
+    def fake_popen(cmd, **kwargs):
+        if not reentered["done"]:
+            reentered["done"] = True
+            resume_btn_ref[0].click()
+        return MagicMock(pid=9901)
+
+    with (
+        patch("src.utils.get_openbis_object", return_value=session_obj),
+        patch("subprocess.Popen", side_effect=fake_popen) as mock_popen,
+        patch("os.kill"),
+    ):
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
+        )
+        card = widget.watchdogs_box.children[0]
+        assert "TOKEN EXPIRED" in "\n".join(_collect_html(card))
+        resume_btn = _collect_buttons(card)["Resume"]
+        resume_btn_ref.append(resume_btn)
+        resume_btn.click()
+
+    assert mock_popen.call_count == 1
+    assert "SESS-RES" in mock_popen.call_args.args[0]
+    assert "tok-fresh" in mock_popen.call_args.args[0]
+    updated_log = json.loads(log_json.read_text(encoding="utf-8"))
+    assert updated_log["eln_token"] == "tok-fresh"
+    assert updated_log["token_expired"] is False
+    assert updated_log["last_error"] is None
+    assert len(updated_log["recent_errors"]) == 1
+    assert updated_log["processed_files"] == [str(data_folder / "old.sxm")]
+
+    entries = json.loads(active_file.read_text(encoding="utf-8"))
+    assert len(entries) == 1
+    assert entries[0]["pid"] == 9901
+    assert entries[0]["status"] == "RUNNING"
+
+
+def test_card_resume_blocks_when_folder_missing_already_running_or_session_deleted(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    existing_folder = tmp_path / "live_folder"
+    existing_folder.mkdir()
+    missing_folder = tmp_path / "gone_folder"
+    deleted_sess_folder = tmp_path / "del_sess_folder"
+    deleted_sess_folder.mkdir()
+
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": os.getpid(),
+                    "monitored_folder": str(existing_folder),
+                    "measurement_session_id": "SESS-LIVE",
+                    "status": "RUNNING",
+                },
+                {
+                    "pid": 11111,
+                    "monitored_folder": str(existing_folder),
+                    "measurement_session_id": "SESS-CONFLICT",
+                    "status": "STOPPED",
+                    "user_stopped": True,
+                },
+                {
+                    "pid": 11112,
+                    "monitored_folder": str(missing_folder),
+                    "measurement_session_id": "SESS-MISSING",
+                    "status": "STOPPED",
+                    "user_stopped": True,
+                },
+                {
+                    "pid": 11113,
+                    "monitored_folder": str(deleted_sess_folder),
+                    "measurement_session_id": "SESS-DEL",
+                    "status": "STOPPED",
+                    "user_stopped": True,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_get_openbis(session, sample_ident=None):
+        if sample_ident == "SESS-DEL":
+            raise ValueError("Deleted in openBIS")
+        return _fake_session(sample_ident, f"MEAS_{sample_ident}")
+
+    with (
+        patch("src.utils.get_openbis_object", side_effect=fake_get_openbis),
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
+        )
+        cards_by_id = {}
+        for card in widget.watchdogs_box.children:
+            text = "\n".join(_collect_html(card))
+            for sid in ("SESS-CONFLICT", "SESS-MISSING", "SESS-DEL"):
+                if sid in text:
+                    cards_by_id[sid] = card
+
+        _collect_buttons(cards_by_id["SESS-CONFLICT"])["Resume"].click()
+        assert "already" in "\n".join(_collect_html(cards_by_id["SESS-CONFLICT"])).lower()
+
+        _collect_buttons(cards_by_id["SESS-MISSING"])["Resume"].click()
+        assert "not found" in "\n".join(_collect_html(cards_by_id["SESS-MISSING"])).lower()
+
+        _collect_buttons(cards_by_id["SESS-DEL"])["Resume"].click()
+        assert "openbis" in "\n".join(_collect_html(cards_by_id["SESS-DEL"])).lower()
+
+    assert mock_popen.call_count == 0
+
+
+def test_notebook_tab_switch_triggers_refresh():
+    from pathlib import Path
+
+    nb_path = Path(__file__).resolve().parents[1] / "2_sample_measurement.ipynb"
+    cells = json.loads(nb_path.read_text(encoding="utf-8"))["cells"]
+    code = "\n".join("".join(c.get("source", [])) for c in cells if c["cell_type"] == "code")
+    assert "selected_index" in code
+    assert "running_watchdogs_vbox.refresh_watchdog_list" in code

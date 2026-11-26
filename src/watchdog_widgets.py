@@ -11,7 +11,7 @@ import ipyfilechooser
 import ipywidgets as ipw
 from IPython.display import Javascript, display
 
-from . import utils, widgets
+from . import measurement_monitor, utils, widgets
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -88,6 +88,10 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         self.openbis_session = openbis_session
         self.session_data = session_data
         self.logs_folder = None
+        self.measurement_logs_folder = None
+        self.sync_registry_path = None
+        self.watchdog_processes = []
+        self._resuming_sessions = set()
 
         self.notes = ipw.HTML(
             value="""
@@ -98,135 +102,121 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
 
                 <div style="margin-top: 12px; cursor: default;">
                     <div style="font-weight: bold; font-size: 14px; color: #2c3e50; margin-bottom: 8px;">
-                        Directories being monitored (Management):
+                        Directories being monitored (Management & Observability):
                     </div>
 
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5;">
-                        <li style="margin-bottom: 6px;"><b>Running watchdogs:</b> Displays a list of all folder directories currently being actively monitored.</li>
-                        <li><b>Stop monitoring (🚫):</b> To turn off a watchdog, select the target directory from the list and click this button.</li>
+                        <li style="margin-bottom: 6px;"><b>Status cards:</b> Show running, stopped, and unexpectedly exited watchdogs along with openBIS links, upload progress, heartbeats, errors, and recent logs.</li>
+                        <li style="margin-bottom: 6px;"><b>Refresh Status:</b> Click to re-check process liveness, disk file counts, and recent logs (also refreshes automatically when opening this tab).</li>
+                        <li><b>Stop / Resume / Dismiss:</b> Stop a running watchdog, resume a stopped or token-expired watchdog with your current openBIS session, or dismiss old cards without touching openBIS records.</li>
                     </ul>
                 </div>
             </details>
             """
         )
 
-        header_style = "font-weight: bold; font-size: 16px; color: #34495e; margin-bottom: 5px; border-bottom: 1px solid #ecf0f1; padding-bottom: 3px;"
-
-        self.running_watchdogs_title = ipw.HTML(
-            value=f"<div style='{header_style}'>Running watchdogs</div>"
-        )
-
+        # Retained internally for backwards compatibility with callers/tests reading .options
         self.running_watchdogs_widget = ipw.SelectMultiple(
             layout=ipw.Layout(width="500px")
         )
-        self.refresh_watchdog_list()
 
-        self.stop_watchdog_button = ipw.Button(
-            icon="ban",
-            tooltip="Stop watchdog",
-            layout=ipw.Layout(width="100px", height="50px"),
+        self.refresh_button = ipw.Button(
+            description="Refresh Status",
+            icon="refresh",
+            button_style="",
+            layout=ipw.Layout(width="150px"),
         )
+        self.refresh_button.on_click(lambda _b: self.refresh_watchdog_list())
 
-        self.stop_watchdog_button.on_click(self.stop_watchdog)
+        self.watchdogs_box = ipw.VBox()
 
         self.children = [
             self.notes,
-            self.running_watchdogs_title,
-            self.running_watchdogs_widget,
-            self.stop_watchdog_button,
+            ipw.HBox(
+                [
+                    ipw.HTML(
+                        "<div style='font-weight: bold; font-size: 16px; color: #34495e;'>Tracked Measurement Watchdogs</div>"
+                    ),
+                    self.refresh_button,
+                ],
+                layout=ipw.Layout(
+                    justify_content="space-between",
+                    align_items="center",
+                    margin="0 0 12px 0",
+                ),
+            ),
+            self.watchdogs_box,
         ]
+
+        self.refresh_watchdog_list()
 
     def _active_watchdogs_file(self):
         logs_root = getattr(self, "logs_folder", None) or LOGS_FOLDER
         return pathlib.Path(logs_root) / "active_watchdogs.json"
 
-    def refresh_watchdog_list(self):
-        json_file = self._active_watchdogs_file()
+    def _measurement_logs_dir(self):
+        explicit = getattr(self, "measurement_logs_folder", None)
+        if explicit is not None:
+            return pathlib.Path(explicit)
+        logs_root = getattr(self, "logs_folder", None)
+        if logs_root is not None:
+            return pathlib.Path(logs_root) / "measurements"
+        return pathlib.Path(MEASUREMENT_LOGS_FOLDER)
 
-        folder_options = []
-        valid_entries = []  # We will store only the alive processes here
-        file_needs_update = False  # Flag to track if we need to rewrite the JSON
+    def _sync_registry_file(self):
+        explicit = getattr(self, "sync_registry_path", None)
+        if explicit is not None:
+            return pathlib.Path(explicit)
+        logs_root = getattr(self, "logs_folder", None) or LOGS_FOLDER
+        return pathlib.Path(logs_root) / "active_synchronisations.json"
 
-        try:
-            with open(json_file, "r") as f:
-                data = json.load(f)
+    def _reap_watchdog_processes(self):
+        alive = []
+        for process in getattr(self, "watchdog_processes", []):
+            poll = getattr(process, "poll", None)
+            if callable(poll):
+                try:
+                    if poll() is not None:
+                        continue
+                except OSError:
+                    continue
+            alive.append(process)
+        self.watchdog_processes = alive
 
-            if isinstance(data, list):
-                for entry in data:
-                    folder = entry.get("monitored_folder", "Unknown Folder")
-                    pid = entry.get("pid")
-
-                    if pid is not None:
-                        # Check if the process is actually running (reaping any exited child zombies first)
-                        is_running = False
-                        reaped = False
-                        if hasattr(os, "waitpid") and hasattr(os, "WNOHANG"):
-                            try:
-                                waited_pid, _ = os.waitpid(pid, os.WNOHANG)
-                                if waited_pid == pid:
-                                    reaped = True
-                                    file_needs_update = True
-                            except ChildProcessError:
-                                pass
-
-                        if not reaped:
-                            try:
-                                # Sending signal 0 checks for existence without killing it
-                                os.kill(pid, 0)
-                                is_running = True
-                            except ProcessLookupError:
-                                # The process is dead
-                                is_running = False
-                                file_needs_update = True
-                            except PermissionError:
-                                # The process exists, but is owned by another user (rare here, but means it's alive)
-                                is_running = True
-
-                        if is_running:
-                            # It's alive! Add it to the widget and our valid list
-                            folder_options.append((folder, pid))
-                            valid_entries.append(entry)
-                        else:
-                            logger.info(
-                                f"PID {pid} for {folder} is dead. Removing from logs."
-                            )
-
-            # If we found any dead processes, rewrite the JSON file to clean it up
-            if file_needs_update:
-                with open(json_file, "w") as f:
-                    json.dump(valid_entries, f, indent=4)
-
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-
-        # Update the widget with only the actively running folders
+    def _sync_select_options(self, entries):
+        folder_options = [
+            (entry.get("monitored_folder", "Unknown Folder"), entry.get("pid"))
+            for entry in entries
+            if entry.get("status") == "RUNNING" and entry.get("pid") is not None
+        ]
         self.running_watchdogs_widget.options = folder_options
+
+    def refresh_watchdog_list(self):
+        self._reap_watchdog_processes()
+        entries = measurement_monitor.sync_watchdog_liveness(
+            self._active_watchdogs_file()
+        )
+        self._sync_select_options(entries)
+        if hasattr(self, "watchdogs_box"):
+            self.render_watchdogs(entries=entries)
 
     def get_active_watchdogs_for_folder(self, data_folder):
         self.refresh_watchdog_list()
         norm_target = os.path.normpath(data_folder)
-        json_file = self._active_watchdogs_file()
-        matches = []
-        try:
-            with open(json_file, "r") as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
+        entries = measurement_monitor.load_watchdog_entries(
+            self._active_watchdogs_file()
+        )
+        return [
+            entry
+            for entry in entries
+            if entry.get("status") == "RUNNING"
+            and entry.get("monitored_folder")
+            and entry.get("pid") is not None
+            and os.path.normpath(entry["monitored_folder"]) == norm_target
+        ]
 
-        if isinstance(data, list):
-            for entry in data:
-                folder = entry.get("monitored_folder")
-                pid = entry.get("pid")
-                if (
-                    folder
-                    and pid is not None
-                    and os.path.normpath(folder) == norm_target
-                ):
-                    matches.append(entry)
-        return matches
-
-    def stop_watchdog_pids(self, pids, notify=True):
-        target_pids = list(pids)
+    def stop_watchdog_pids(self, pids, notify=True, remove_entries=True):
+        target_pids = list(dict.fromkeys(pids))
         if not target_pids:
             return []
 
@@ -235,70 +225,452 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             try:
                 os.kill(pid, signal.SIGTERM)
                 logger.info(f"Terminating watchdog process with PID: {pid}")
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 logger.warning(
-                    f"Process {pid} not found. It may have already exited."
+                    f"Process {pid} not found or inaccessible. It may have already exited."
                 )
+
+        remaining_processes = []
+        for process in getattr(self, "watchdog_processes", []):
+            if getattr(process, "pid", None) in pid_set:
+                wait = getattr(process, "wait", None)
+                if callable(wait):
+                    try:
+                        wait(timeout=1)
+                    except (subprocess.TimeoutExpired, OSError):
+                        pass
+            else:
+                remaining_processes.append(process)
+        self.watchdog_processes = remaining_processes
 
         if notify:
             display(Javascript(data="alert('Watchdog(s) stopped.')"))
 
-        self.running_watchdogs_widget.options = [
-            (directory, pid)
-            for directory, pid in self.running_watchdogs_widget.options
-            if pid not in pid_set
-        ]
-
-        json_file = self._active_watchdogs_file()
-        try:
-            with open(json_file, "r") as f:
-                data = json.load(f)
-
-            updated_data = (
-                [entry for entry in data if entry.get("pid") not in pid_set]
-                if isinstance(data, list)
-                else []
-            )
-            with open(json_file, "w") as f:
-                json.dump(updated_data, f, indent=4)
-        except (FileNotFoundError, json.JSONDecodeError):
-            logger.error(f"Could not read {json_file} to clean up PIDs.")
+        entries = measurement_monitor.mark_watchdogs_stopped(
+            self._active_watchdogs_file(),
+            target_pids,
+            remove_entries=remove_entries,
+        )
+        self._sync_select_options(entries)
+        if hasattr(self, "watchdogs_box"):
+            self.render_watchdogs(entries=entries)
 
         return target_pids
 
-    def add_active_watchdog(self, pid, data_folder, measurement_session_id):
-        norm_data_folder = os.path.normpath(data_folder)
-        json_file = self._active_watchdogs_file()
-        json_file.parent.mkdir(parents=True, exist_ok=True)
-        data = []
-        try:
-            with open(json_file, "r") as f:
-                data = json.load(f)
-                if not isinstance(data, list):
-                    data = [data]
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-
-        data.append(
-            {
-                "pid": pid,
-                "monitored_folder": norm_data_folder,
-                "measurement_session_id": measurement_session_id,
-            }
+    def add_active_watchdog(
+        self,
+        pid,
+        data_folder,
+        measurement_session_id,
+        metadata=None,
+        log_file=None,
+    ):
+        measurement_monitor.upsert_running_watchdog(
+            self._active_watchdogs_file(),
+            pid=pid,
+            data_folder=data_folder,
+            measurement_session_id=measurement_session_id,
+            metadata=metadata,
+            log_file=log_file,
         )
-        with open(json_file, "w") as f:
-            json.dump(data, f, indent=4)
-
-        self.running_watchdogs_widget.options += ((norm_data_folder, pid),)
+        entries = measurement_monitor.load_watchdog_entries(
+            self._active_watchdogs_file()
+        )
+        self._sync_select_options(entries)
+        if hasattr(self, "watchdogs_box"):
+            self.render_watchdogs(entries=entries)
 
     def stop_watchdog(self, b):
         selected_pids = self.running_watchdogs_widget.value
 
         if selected_pids:
-            self.stop_watchdog_pids(selected_pids, notify=True)
+            self.stop_watchdog_pids(selected_pids, notify=True, remove_entries=False)
         else:
             display(Javascript(data="alert('Select at least one directory.')"))
             logger.info("No directory selected.")
+
+    def render_watchdogs(self, entries=None):
+        if entries is None:
+            entries = measurement_monitor.load_watchdog_entries(
+                self._active_watchdogs_file()
+            )
+        if not entries:
+            self.watchdogs_box.children = [
+                ipw.HTML(
+                    "<div style='color: #6b7280; padding: 16px; font-style: italic;'>"
+                    "No measurement watchdogs tracked yet."
+                    "</div>"
+                )
+            ]
+            return
+
+        default_url = (
+            self.session_data.get("url") if isinstance(self.session_data, dict) else None
+        )
+        snapshots = [
+            measurement_monitor.build_watchdog_card_snapshot(
+                entry,
+                measurement_logs_dir=self._measurement_logs_dir(),
+                sync_registry_path=self._sync_registry_file(),
+                default_eln_url=default_url,
+            )
+            for entry in entries
+        ]
+
+        priority = {"RUNNING": 0, "TOKEN_EXPIRED": 1, "EXITED": 2, "STOPPED": 3}
+        snapshots.sort(
+            key=lambda s: (
+                priority.get(s["status"], 9),
+                "" if not s.get("started_at") else s["started_at"],
+            )
+        )
+        # Keep newest started_at first within each status bucket
+        snapshots.sort(key=lambda s: s.get("started_at") or "", reverse=True)
+        snapshots.sort(key=lambda s: priority.get(s["status"], 9))
+
+        self.watchdogs_box.children = [
+            self._create_watchdog_card(snap) for snap in snapshots
+        ]
+
+    def _create_watchdog_card(self, snap: dict) -> ipw.Widget:
+        status = snap["status"]
+        pid = snap.get("pid")
+        safe_pid = html.escape(str(pid if pid is not None else "N/A"))
+        if status == "RUNNING":
+            badge = (
+                f"<span style='background: #dcfce7; color: #166534; font-size: 11px; "
+                f"font-weight: bold; padding: 2px 8px; border-radius: 12px;'>"
+                f"● RUNNING (PID {safe_pid})</span>"
+            )
+        elif status == "TOKEN_EXPIRED":
+            badge = (
+                "<span style='background: #fee2e2; color: #991b1b; font-size: 11px; "
+                "font-weight: bold; padding: 2px 8px; border-radius: 12px;'>"
+                "⚠ TOKEN EXPIRED</span>"
+            )
+        elif status == "EXITED":
+            badge = (
+                "<span style='background: #fef3c7; color: #92400e; font-size: 11px; "
+                "font-weight: bold; padding: 2px 8px; border-radius: 12px;'>"
+                "⚠ EXITED UNEXPECTEDLY</span>"
+            )
+        else:
+            badge = (
+                "<span style='background: #f3f4f6; color: #4b5563; font-size: 11px; "
+                "font-weight: bold; padding: 2px 8px; border-radius: 12px;'>"
+                "○ STOPPED</span>"
+            )
+
+        afs_badge = ""
+        if snap.get("afs_sync_status") == "RUNNING":
+            afs_badge = (
+                "<span style='background: #dbeafe; color: #1e40af; font-size: 11px; "
+                "font-weight: bold; padding: 2px 8px; border-radius: 12px;'>"
+                "AFS Sync: ● RUNNING</span>"
+            )
+        elif snap.get("afs_sync_status") == "STOPPED":
+            afs_badge = (
+                "<span style='background: #f3f4f6; color: #6b7280; font-size: 11px; "
+                "font-weight: bold; padding: 2px 8px; border-radius: 12px;'>"
+                "AFS Sync: ○ STOPPED</span>"
+            )
+
+        safe_name = html.escape(str(snap.get("session_name") or "Unknown Session"))
+        safe_sid = html.escape(str(snap.get("session_id") or "N/A"))
+        session_url = snap.get("session_url")
+        if session_url:
+            safe_url = html.escape(session_url, quote=True)
+            session_title = (
+                f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer' "
+                f"style='font-weight: bold; color: #1d4ed8; text-decoration: none; margin-left: 8px;'>"
+                f"{safe_name} ({safe_sid} ↗)</a>"
+            )
+        else:
+            session_title = (
+                f"<strong style='margin-left: 8px;'>{safe_name} ({safe_sid})</strong>"
+            )
+
+        header_html = ipw.HTML(
+            f"<div style='display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;'>"
+            f"<div>{badge}{session_title}</div>"
+            f"<div>{afs_badge}</div>"
+            f"</div>"
+        )
+
+        meta_parts = []
+        if snap.get("sample_name"):
+            meta_parts.append(
+                f"<b>Sample:</b> {html.escape(str(snap['sample_name']))}"
+            )
+        if snap.get("experiment_name"):
+            meta_parts.append(
+                f"<b>Experiment:</b> {html.escape(str(snap['experiment_name']))}"
+            )
+        if snap.get("instrument_name"):
+            meta_parts.append(
+                f"<b>Instrument:</b> {html.escape(str(snap['instrument_name']))}"
+            )
+        meta_line = (
+            f"<div>{' · '.join(meta_parts)}</div>" if meta_parts else ""
+        )
+
+        safe_folder = html.escape(snap.get("monitored_folder") or "")
+        safe_action = html.escape(snap.get("current_action") or "Idle")
+        last_file = snap.get("last_uploaded_file")
+        last_upload_info = html.escape(snap.get("last_upload_relative") or "N/A")
+        if last_file:
+            last_upload_info += f" (<code>{html.escape(str(last_file))}</code>)"
+
+        tc = snap["type_counts"]
+        pending_count = len(snap["pending_files"])
+        progress_text = (
+            f"{snap['uploaded_count']} / {snap['total_disk_files']} uploaded "
+            f"({tc['SXM']} SXM · {tc['DAT']} DAT · {tc['ATTACHMENT']} ATT)"
+            f" · {pending_count} pending"
+        )
+
+        warnings_html = ""
+        if not snap["folder_exists"]:
+            warnings_html += (
+                "<div style='color: #b91c1c; font-weight: bold; margin-top: 4px;'>"
+                "⚠ Folder not found or inaccessible on disk.</div>"
+            )
+        if snap["heartbeat_stale"]:
+            warnings_html += (
+                f"<div style='color: #b45309; font-weight: bold; margin-top: 4px;'>"
+                f"⚠ Heartbeat stale ({html.escape(snap['heartbeat_relative'])}) — worker may be busy or hung.</div>"
+            )
+
+        error_banner = ""
+        if snap.get("token_expired") or snap.get("last_error"):
+            err = snap.get("last_error") or {}
+            err_stage = html.escape(str(err.get("stage") or "error"))
+            err_file = f" ({html.escape(str(err['file']))})" if err.get("file") else ""
+            err_msg = html.escape(
+                str(
+                    err.get("message")
+                    or "openBIS session token expired or invalid."
+                )
+            )
+            token_hint = (
+                " Click <b>Resume</b> to reconnect with your current openBIS token."
+                if snap.get("token_expired")
+                else ""
+            )
+            error_banner = (
+                "<div style='background: #fef2f2; border-left: 4px solid #dc2626; "
+                "padding: 6px 10px; margin-top: 6px; color: #991b1b; font-size: 12px; border-radius: 3px;'>"
+                f"<b>⚠ Upload issue [{err_stage}]{err_file}:</b> {err_msg}{token_hint}"
+                "</div>"
+            )
+
+        details_html = ipw.HTML(
+            f"<div style='font-size: 12px; color: #374151; margin: 8px 0; line-height: 1.5;'>"
+            f"<div><b>Folder:</b> <code>{safe_folder}</code></div>"
+            f"{meta_line}"
+            f"<div><b>Status:</b> {safe_action} · <b>Heartbeat:</b> {html.escape(snap['heartbeat_relative'])} · <b>Last upload:</b> {last_upload_info}</div>"
+            f"<div><b>Progress:</b> {progress_text}</div>"
+            f"{warnings_html}"
+            f"{error_banner}"
+            f"</div>"
+        )
+
+        card_status = ipw.HTML(value="")
+        btn_box = ipw.HBox()
+
+        if status == "RUNNING":
+            stop_btn = ipw.Button(
+                description="Stop",
+                button_style="danger",
+                icon="stop",
+                layout=ipw.Layout(width="100px"),
+            )
+
+            def _on_stop(_b, target_pid=pid):
+                if target_pid is not None:
+                    self.stop_watchdog_pids(
+                        [target_pid], notify=False, remove_entries=False
+                    )
+
+            stop_btn.on_click(_on_stop)
+            btn_box.children = [stop_btn]
+        else:
+            resume_btn = ipw.Button(
+                description="Resume",
+                button_style="success",
+                icon="play",
+                layout=ipw.Layout(width="110px"),
+            )
+            dismiss_btn = ipw.Button(
+                description="Dismiss",
+                button_style="",
+                icon="times",
+                layout=ipw.Layout(width="100px"),
+            )
+
+            def _on_resume(_b, s=snap, rbtn=resume_btn, status_out=card_status):
+                session_id = s.get("session_id")
+                folder = s.get("monitored_folder") or ""
+                resume_key = session_id or folder
+                if resume_key in self._resuming_sessions:
+                    return
+                self._resuming_sessions.add(resume_key)
+                rbtn.disabled = True
+                try:
+                    if not folder or not os.path.isdir(folder):
+                        status_out.value = (
+                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
+                            "⚠ Cannot resume: folder not found on disk.</div>"
+                        )
+                        return
+
+                    if self.get_active_watchdogs_for_folder(folder):
+                        status_out.value = (
+                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
+                            "⚠ Cannot resume: this folder is already being monitored by an active watchdog.</div>"
+                        )
+                        return
+
+                    if not session_id:
+                        status_out.value = (
+                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
+                            "⚠ Cannot resume: missing Measurement Session ID.</div>"
+                        )
+                        return
+
+                    try:
+                        utils.get_openbis_object(
+                            self.openbis_session, sample_ident=session_id
+                        )
+                    except Exception:
+                        status_out.value = (
+                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
+                            "⚠ Cannot resume: Measurement Session no longer exists in openBIS.</div>"
+                        )
+                        return
+
+                    logs_dir = self._measurement_logs_dir()
+                    log_json_path = get_measurement_log_filepath(
+                        session_id, logs_dir=logs_dir
+                    )
+                    measurement_monitor.update_measurement_log(
+                        log_json_path,
+                        lambda d: d.update(
+                            {
+                                "eln_url": self.session_data["url"],
+                                "eln_token": self.session_data["token"],
+                                "measurement_session_id": session_id,
+                                "data_folder": os.path.normpath(folder),
+                                "token_expired": False,
+                                "last_error": None,
+                                "processed_files": d.get("processed_files", []),
+                            }
+                        ),
+                    )
+                    proc, proc_log_path = measurement_monitor.start_watchdog_subprocess(
+                        APP_FOLDER,
+                        self.session_data["url"],
+                        self.session_data["token"],
+                        session_id,
+                        folder,
+                        logs_dir=logs_dir,
+                    )
+                    self.watchdog_processes.append(proc)
+                    self.add_active_watchdog(
+                        proc.pid,
+                        folder,
+                        session_id,
+                        log_file=proc_log_path,
+                    )
+                finally:
+                    self._resuming_sessions.discard(resume_key)
+                    rbtn.disabled = False
+
+            def _on_dismiss(_b, s=snap):
+                measurement_monitor.dismiss_watchdog_entry(
+                    self._active_watchdogs_file(),
+                    measurement_session_id=s.get("session_id"),
+                    pid=s.get("pid"),
+                    data_folder=s.get("monitored_folder"),
+                )
+                self.render_watchdogs()
+
+            resume_btn.on_click(_on_resume)
+            dismiss_btn.on_click(_on_dismiss)
+            btn_box.children = [resume_btn, dismiss_btn]
+
+        # Collapsible Uploaded & Pending files drawer
+        pending_items = "".join(
+            f"<li><code>{html.escape(f)}</code> (pending)</li>"
+            for f in snap["pending_files"][:20]
+        )
+        uploaded_items = "".join(
+            f"<li><code>{html.escape(str(ev.get('filename') or ''))}</code> "
+            f"[{html.escape(str(ev.get('type') or 'FILE'))}]"
+            f"{' — ' + html.escape(str(ev['uploaded_at'])) if ev.get('uploaded_at') else ''}</li>"
+            for ev in snap["recent_uploads"][:20]
+        )
+        files_body = ""
+        if pending_items:
+            files_body += f"<div><b>Pending ({pending_count}):</b><ul style='margin: 2px 0 6px 18px;'>{pending_items}</ul></div>"
+        if uploaded_items:
+            files_body += f"<div><b>Recent uploads ({snap['uploaded_count']} total):</b><ul style='margin: 2px 0 0 18px;'>{uploaded_items}</ul></div>"
+        if not files_body:
+            files_body = "<div style='color: #6b7280; font-style: italic;'>No files recorded yet.</div>"
+
+        files_drawer = ipw.HTML(
+            f"<details style='margin-top: 6px; font-size: 12px;'>"
+            f"<summary style='cursor: pointer; color: #374151; font-weight: bold;'>"
+            f"Uploaded & pending files ({snap['uploaded_count']} uploaded / {pending_count} pending)"
+            f"</summary>"
+            f"<div style='margin-top: 6px; padding: 6px 8px; background: #f9fafb; border-radius: 4px;'>{files_body}</div>"
+            f"</details>"
+        )
+
+        # Collapsible Recent logs & errors drawer
+        err_items = "".join(
+            f"<li><b>[{html.escape(str(e.get('stage') or 'error'))}]</b> "
+            f"{html.escape(str(e.get('file') or ''))} "
+            f"{html.escape(str(e.get('message') or ''))} "
+            f"<span style='color: #6b7280;'>({html.escape(str(e.get('timestamp') or ''))})</span></li>"
+            for e in snap["recent_errors"][:20]
+        )
+        errors_section = (
+            f"<div><b>Recorded errors ({snap['error_count']}):</b>"
+            f"<ul style='margin: 2px 0 6px 18px; color: #991b1b;'>{err_items}</ul></div>"
+            if err_items
+            else ""
+        )
+        log_tail_text = (
+            html.escape("\n".join(snap["log_tail"]))
+            if snap["log_tail"]
+            else "No worker log output yet."
+        )
+        log_path_label = (
+            f" — <code>{html.escape(str(snap['log_file_path']))}</code>"
+            if snap.get("log_file_path")
+            else ""
+        )
+        logs_drawer = ipw.HTML(
+            f"<details style='margin-top: 4px; font-size: 12px;'>"
+            f"<summary style='cursor: pointer; color: #374151; font-weight: bold;'>"
+            f"Recent logs & errors ({snap['error_count']} error(s) · {len(snap['log_tail'])} log lines){log_path_label}"
+            f"</summary>"
+            f"<div style='margin-top: 6px; padding: 6px 8px; background: #f9fafb; border-radius: 4px;'>"
+            f"{errors_section}"
+            f"<pre style='margin: 0; max-height: 220px; overflow-y: auto; font-size: 11px; white-space: pre-wrap;'>{log_tail_text}</pre>"
+            f"</div>"
+            f"</details>"
+        )
+
+        return ipw.VBox(
+            [header_html, details_html, btn_box, card_status, files_drawer, logs_drawer],
+            layout=ipw.Layout(
+                border="1px solid #e5e7eb",
+                padding="12px",
+                margin="0 0 10px 0",
+            ),
+        )
 
 
 class GenerateMeasurementsWatchdogWidget(ipw.VBox):
@@ -795,6 +1167,48 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         logger.info(f"New Measurement Session {measurement_session.permId} created.")
         return measurement_session
 
+    def _dropdown_selected_label(self, dropdown):
+        if dropdown is None:
+            return None
+        val = getattr(dropdown, "value", None)
+        if val in (None, "-1"):
+            return None
+        for option in getattr(dropdown, "options", ()):
+            if isinstance(option, (tuple, list)) and len(option) >= 2:
+                if option[1] == val:
+                    return str(option[0])
+            elif option == val:
+                return str(option)
+        return str(val)
+
+    def _collect_form_metadata(self):
+        metadata = {}
+        name_widget = getattr(self, "measurement_session_name_text", None)
+        if name_widget is not None and getattr(name_widget, "value", None):
+            metadata["session_name"] = str(name_widget.value)
+        sample_widget = getattr(self, "select_sample_widget", None)
+        if sample_widget is not None:
+            sample_label = self._dropdown_selected_label(
+                getattr(sample_widget, "sample_dropdown", None)
+            )
+            if sample_label:
+                metadata["sample_name"] = sample_label
+        exp_widget = getattr(self, "select_experiment_widget", None)
+        if exp_widget is not None:
+            exp_label = self._dropdown_selected_label(
+                getattr(exp_widget, "experiment_dropdown", None)
+            )
+            if exp_label:
+                metadata["experiment_name"] = exp_label
+        inst_widget = getattr(self, "select_instrument_widget", None)
+        if inst_widget is not None:
+            inst_label = self._dropdown_selected_label(
+                getattr(inst_widget, "instrument_dropdown", None)
+            )
+            if inst_label:
+                metadata["instrument_name"] = inst_label
+        return metadata
+
     def _write_fresh_measurement_log(self, measurement_session_id, data_folder):
         logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
         norm_data_folder = os.path.normpath(data_folder)
@@ -806,9 +1220,15 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             "eln_token": self.session_data["token"],
             "measurement_session_id": measurement_session_id,
             "data_folder": norm_data_folder,
+            "started_at": measurement_monitor.utc_now_iso(),
+            "token_expired": False,
+            "last_error": None,
             "processed_files": [],
+            "upload_history": [],
+            "recent_errors": [],
         }
-        utils.write_json(logging_data, str(log_filepath))
+        logging_data.update(self._collect_form_metadata())
+        measurement_monitor.atomic_write_json(logging_data, str(log_filepath))
         return log_filepath
 
     def _resume_existing_measurement_session(self, tracking_info, data_folder):
@@ -823,8 +1243,12 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         logging_data["eln_token"] = self.session_data["token"]
         logging_data["measurement_session_id"] = measurement_session.permId
         logging_data["data_folder"] = norm_data_folder
+        logging_data["token_expired"] = False
+        logging_data["last_error"] = None
         logging_data.setdefault("processed_files", [])
-        utils.write_json(logging_data, str(log_filepath))
+        if tracking_info.get("session_name"):
+            logging_data.setdefault("session_name", tracking_info["session_name"])
+        measurement_monitor.atomic_write_json(logging_data, str(log_filepath))
         logger.info(
             f"Uploading data into existing Measurement Session {measurement_session.permId}."
         )
@@ -844,25 +1268,18 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self._write_fresh_measurement_log(measurement_session.permId, data_folder)
         return measurement_session
 
-    def _start_watchdog_process(self, measurement_session_id, data_folder):
+    def _start_watchdog_process(
+        self, measurement_session_id, data_folder, metadata=None
+    ):
         norm_data_folder = os.path.normpath(data_folder)
-        watchdog_process = subprocess.Popen(
-            [
-                "python",
-                f"{APP_FOLDER}/src/measurements_uploader.py",
-                "--openbis_url",
-                self.session_data["url"],
-                "--openbis_token",
-                self.session_data["token"],
-                "--measurement_session_id",
-                measurement_session_id,
-                "--data_folder",
-                norm_data_folder,
-            ],
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
+        watchdog_process, proc_log_path = measurement_monitor.start_watchdog_subprocess(
+            APP_FOLDER,
+            self.session_data["url"],
+            self.session_data["token"],
+            measurement_session_id,
+            norm_data_folder,
+            logs_dir=logs_dir,
         )
 
         display(Javascript(data="alert('Watchdog process started!');"))
@@ -870,8 +1287,15 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             f"Watchdog process started with PID: {watchdog_process.pid} for {norm_data_folder}"
         )
 
+        effective_metadata = (
+            metadata if metadata is not None else self._collect_form_metadata()
+        )
         self.running_watchdogs_widget.add_active_watchdog(
-            watchdog_process.pid, norm_data_folder, measurement_session_id
+            watchdog_process.pid,
+            norm_data_folder,
+            measurement_session_id,
+            metadata=effective_metadata,
+            log_file=proc_log_path,
         )
         self.watchdog_processes.append(watchdog_process)
         return watchdog_process
@@ -994,8 +1418,13 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 measurement_session = self._resume_existing_measurement_session(
                     live_tracking, norm_data_folder
                 )
+                resume_meta = {}
+                if live_tracking.get("session_name"):
+                    resume_meta["session_name"] = live_tracking["session_name"]
                 self._start_watchdog_process(
-                    measurement_session.permId, norm_data_folder
+                    measurement_session.permId,
+                    norm_data_folder,
+                    metadata=resume_meta,
                 )
                 return
 
@@ -1059,7 +1488,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             )
             if active_pids:
                 self.running_watchdogs_widget.stop_watchdog_pids(
-                    active_pids, notify=False
+                    active_pids, notify=False, remove_entries=True
                 )
                 stopped_set = set(active_pids)
                 remaining_processes = []
