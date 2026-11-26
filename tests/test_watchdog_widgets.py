@@ -416,3 +416,490 @@ def test_resume_existing_measurement_session_refreshes_token_and_preserves_proce
     assert updated["eln_token"] == "tok-new"
     assert updated["data_folder"] == os.path.normpath(str(data_folder))
     assert updated["processed_files"] == [str(data_folder / "a.sxm")]
+
+
+def _make_full_generator_widget(
+    watchdog_module, tmp_path, data_folder, session_name="MEAS_New"
+):
+    logs_dir = tmp_path / "logs"
+    meas_logs_dir = logs_dir / "measurements"
+    meas_logs_dir.mkdir(parents=True, exist_ok=True)
+    running_widget = _make_running_widget(watchdog_module, logs_dir)
+
+    fake_project = ipw.VBox()
+    fake_project.project_dropdown = ipw.Dropdown(options=[("P1", "PROJ-1")], value="PROJ-1")
+    fake_experiment = ipw.VBox()
+    fake_experiment.experiment_dropdown = ipw.Dropdown(
+        options=[("E1", "EXP-1")], value="EXP-1"
+    )
+    fake_experiment.create_experiment_button = ipw.Button()
+    fake_sample = ipw.VBox()
+    fake_sample.sample_dropdown = ipw.Dropdown(options=[("S1", "SMP-1")], value="SMP-1")
+    fake_instrument = ipw.VBox()
+    fake_instrument.instrument_dropdown = ipw.Dropdown(
+        options=[("I1", "INST-1")], value="INST-1"
+    )
+
+    with (
+        patch.object(
+            watchdog_module.widgets, "SelectProjectWidget", return_value=fake_project
+        ),
+        patch.object(
+            watchdog_module.widgets,
+            "SelectExperimentWidget",
+            return_value=fake_experiment,
+        ),
+        patch.object(
+            watchdog_module.widgets, "SelectSampleWidget", return_value=fake_sample
+        ),
+        patch.object(
+            watchdog_module.widgets,
+            "SelectInstrumentWidget",
+            return_value=fake_instrument,
+        ),
+    ):
+        widget = watchdog_module.GenerateMeasurementsWatchdogWidget(
+            MagicMock(),
+            {"url": "https://openbis.local", "token": "tok-new"},
+            running_widget,
+        )
+
+    widget.measurement_logs_folder = meas_logs_dir
+    widget.measurement_session_name_text.value = session_name
+    widget.select_measurements_folder_widget.reset(path=str(data_folder))
+    return widget
+
+
+def _extract_prompt_widgets(conflict_box):
+    assert len(conflict_box.children) >= 2
+    message_html = conflict_box.children[0]
+    buttons_row = conflict_box.children[1]
+    buttons = {btn.description: btn for btn in buttons_row.children}
+    return message_html, buttons
+
+
+def test_generate_watchdog_untracked_folder_starts_immediately_without_prompt(
+    watchdog_module, tmp_path
+):
+    data_folder = tmp_path / "fresh_run"
+    data_folder.mkdir()
+    widget = _make_full_generator_widget(watchdog_module, tmp_path, data_folder)
+    new_session = _fake_session("SESS-NEW-1", "MEAS_New")
+    fake_proc = MagicMock(pid=7001)
+
+    with (
+        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
+        patch.object(watchdog_module, "display"),
+    ):
+        widget.generate_watchdog(None)
+
+    assert mock_create.call_count == 1
+    assert mock_popen.call_count == 1
+    assert widget.folder_conflict_box.layout.display == "none"
+    assert widget.generate_watchdog_button.disabled is False
+    log_data = json.loads(
+        (widget.measurement_logs_folder / "SESS-NEW-1.json").read_text()
+    )
+    assert log_data["processed_files"] == []
+    assert log_data["data_folder"] == os.path.normpath(str(data_folder))
+
+
+def test_generate_watchdog_running_folder_shows_prompt_and_continue_leaves_running(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    data_folder = tmp_path / "running_run"
+    data_folder.mkdir()
+    (logs_dir / "active_watchdogs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 4444,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-RUN",
+                }
+            ]
+        )
+    )
+    run_session = _fake_session("SESS-RUN", "MEAS_Running")
+
+    with (
+        patch("os.kill"),
+        patch("src.utils.get_openbis_object", return_value=run_session),
+        patch("src.utils.create_openbis_object") as mock_create,
+        patch("subprocess.Popen") as mock_popen,
+        patch.object(watchdog_module, "display") as mock_display,
+    ):
+        widget = _make_full_generator_widget(watchdog_module, tmp_path, data_folder)
+        widget.generate_watchdog(None)
+
+        assert widget.folder_conflict_box.layout.display != "none"
+        assert widget.generate_watchdog_button.disabled is True
+        message_html, buttons = _extract_prompt_widgets(widget.folder_conflict_box)
+        assert "MEAS_Running" in message_html.value
+        assert "SESS-RUN" in message_html.value
+        assert "4444" in message_html.value
+        assert buttons["Continue existing session"].button_style == "success"
+        assert buttons["Continue existing session"].disabled is False
+        assert buttons["Switch to new session"].button_style == "danger"
+        assert "Cancel" in buttons
+
+        buttons["Continue existing session"].click()
+
+    assert mock_create.call_count == 0
+    assert mock_popen.call_count == 0
+    assert widget.folder_conflict_box.layout.display == "none"
+    assert widget.generate_watchdog_button.disabled is False
+    assert mock_display.call_count >= 1
+
+
+def test_generate_watchdog_stopped_folder_continue_resumes_existing_session(
+    watchdog_module, tmp_path
+):
+    data_folder = tmp_path / "stopped_run"
+    data_folder.mkdir()
+    widget = _make_full_generator_widget(watchdog_module, tmp_path, data_folder)
+    log_path = widget.measurement_logs_folder / "SESS-OLD.json"
+    log_path.write_text(
+        json.dumps(
+            {
+                "eln_url": "https://old.local",
+                "eln_token": "tok-old",
+                "measurement_session_id": "SESS-OLD",
+                "data_folder": str(data_folder),
+                "processed_files": [str(data_folder / "existing.sxm")],
+            }
+        )
+    )
+    old_session = _fake_session("SESS-OLD", "MEAS_Old")
+    fake_proc = MagicMock(pid=8001)
+
+    with (
+        patch("src.utils.get_openbis_object", return_value=old_session),
+        patch("src.utils.create_openbis_object") as mock_create,
+        patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
+        patch.object(watchdog_module, "display"),
+    ):
+        widget.generate_watchdog(None)
+        assert widget.folder_conflict_box.layout.display != "none"
+        message_html, buttons = _extract_prompt_widgets(widget.folder_conflict_box)
+        assert "MEAS_Old" in message_html.value
+        assert "SESS-OLD" in message_html.value
+        assert "not currently running" in message_html.value.lower()
+
+        buttons["Continue existing session"].click()
+
+    assert mock_create.call_count == 0
+    assert mock_popen.call_count == 1
+    popen_cmd = mock_popen.call_args.args[0]
+    assert "SESS-OLD" in popen_cmd
+    updated_log = json.loads(log_path.read_text())
+    assert updated_log["eln_token"] == "tok-new"
+    assert updated_log["processed_files"] == [str(data_folder / "existing.sxm")]
+    assert widget.folder_conflict_box.layout.display == "none"
+    assert widget.generate_watchdog_button.disabled is False
+
+
+def test_generate_watchdog_running_folder_switch_stops_old_detaches_logs_and_starts_new_fresh(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    data_folder = tmp_path / "running_switch_run"
+    data_folder.mkdir()
+    (logs_dir / "active_watchdogs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 4444,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-OLD-1",
+                }
+            ]
+        )
+    )
+    old_session = _fake_session("SESS-OLD-1", "MEAS_Wrong")
+    new_session = _fake_session("SESS-NEW-2", "MEAS_Correct")
+    fake_old_proc = MagicMock(pid=4444)
+    fake_new_proc = MagicMock(pid=9002)
+    kill_calls = []
+
+    def fake_kill(pid, sig):
+        kill_calls.append((pid, sig))
+
+    with (
+        patch("os.kill", side_effect=fake_kill),
+        patch("src.utils.get_openbis_object", return_value=old_session),
+        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch("subprocess.Popen", return_value=fake_new_proc) as mock_popen,
+        patch.object(watchdog_module, "display"),
+    ):
+        widget = _make_full_generator_widget(
+            watchdog_module, tmp_path, data_folder, session_name="MEAS_Correct"
+        )
+        widget.watchdog_processes.append(fake_old_proc)
+        log_old_1 = widget.measurement_logs_folder / "SESS-OLD-1.json"
+        log_old_2 = widget.measurement_logs_folder / "SESS-OLD-0.json"
+        log_old_1.write_text(
+            json.dumps(
+                {
+                    "measurement_session_id": "SESS-OLD-1",
+                    "data_folder": str(data_folder),
+                    "processed_files": [str(data_folder / "scan1.sxm")],
+                }
+            )
+        )
+        log_old_2.write_text(
+            json.dumps(
+                {
+                    "measurement_session_id": "SESS-OLD-0",
+                    "data_folder": f"{data_folder}/",
+                    "processed_files": [str(data_folder / "scan0.sxm")],
+                }
+            )
+        )
+
+        widget.generate_watchdog(None)
+        _, buttons = _extract_prompt_widgets(widget.folder_conflict_box)
+        assert buttons["Switch to new session"].button_style == "danger"
+        buttons["Switch to new session"].click()
+
+    assert mock_create.call_count == 1
+    assert (4444, signal.SIGTERM) in kill_calls
+    assert mock_popen.call_count == 1
+    assert "SESS-NEW-2" in mock_popen.call_args.args[0]
+    assert [p.pid for p in widget.watchdog_processes] == [9002]
+    assert list(widget.running_watchdogs_widget.running_watchdogs_widget.options) == [
+        (os.path.normpath(str(data_folder)), 9002)
+    ]
+
+    stored_active = json.loads((logs_dir / "active_watchdogs.json").read_text())
+    assert stored_active == [
+        {
+            "pid": 9002,
+            "monitored_folder": os.path.normpath(str(data_folder)),
+            "measurement_session_id": "SESS-NEW-2",
+        }
+    ]
+
+    old1_data = json.loads(log_old_1.read_text())
+    old2_data = json.loads(log_old_2.read_text())
+    assert old1_data["data_folder"] is None
+    assert old1_data["replaced_by_session_id"] == "SESS-NEW-2"
+    assert old2_data["data_folder"] is None
+    assert old2_data["replaced_by_session_id"] == "SESS-NEW-2"
+
+    new_log_path = widget.measurement_logs_folder / "SESS-NEW-2.json"
+    new_log_data = json.loads(new_log_path.read_text())
+    assert new_log_data["data_folder"] == os.path.normpath(str(data_folder))
+    assert new_log_data["processed_files"] == []
+    active_logs = watchdog_module.find_measurement_logs_for_folder(
+        str(data_folder), logs_dir=widget.measurement_logs_folder
+    )
+    assert [p for p, _ in active_logs] == [new_log_path]
+
+
+def test_generate_watchdog_stopped_folder_switch_detaches_old_log_and_uploads_all_files(
+    watchdog_module, tmp_path
+):
+    data_folder = tmp_path / "stopped_switch_run"
+    data_folder.mkdir()
+    widget = _make_full_generator_widget(
+        watchdog_module, tmp_path, data_folder, session_name="MEAS_Fresh"
+    )
+    old_log = widget.measurement_logs_folder / "SESS-OLD.json"
+    old_log.write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-OLD",
+                "data_folder": str(data_folder),
+                "processed_files": [str(data_folder / "scan1.sxm")],
+            }
+        )
+    )
+    old_session = _fake_session("SESS-OLD", "MEAS_Old")
+    new_session = _fake_session("SESS-FRESH", "MEAS_Fresh")
+    fake_proc = MagicMock(pid=9111)
+
+    with (
+        patch("src.utils.get_openbis_object", return_value=old_session),
+        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
+        patch.object(watchdog_module, "display"),
+    ):
+        widget.generate_watchdog(None)
+        _, buttons = _extract_prompt_widgets(widget.folder_conflict_box)
+        buttons["Switch to new session"].click()
+
+    assert mock_create.call_count == 1
+    assert mock_popen.call_count == 1
+    assert "SESS-FRESH" in mock_popen.call_args.args[0]
+    assert json.loads(old_log.read_text())["data_folder"] is None
+    new_log = json.loads(
+        (widget.measurement_logs_folder / "SESS-FRESH.json").read_text()
+    )
+    assert new_log["processed_files"] == []
+    assert new_log["data_folder"] == os.path.normpath(str(data_folder))
+
+
+def test_generate_watchdog_switch_failure_preserves_old_watchdog_and_log(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    data_folder = tmp_path / "switch_fail_run"
+    data_folder.mkdir()
+    (logs_dir / "active_watchdogs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 4444,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-OLD",
+                }
+            ]
+        )
+    )
+    old_session = _fake_session("SESS-OLD", "MEAS_Old")
+    kill_calls = []
+
+    def fake_kill(pid, sig):
+        kill_calls.append((pid, sig))
+
+    with (
+        patch("os.kill", side_effect=fake_kill),
+        patch("src.utils.get_openbis_object", return_value=old_session),
+        patch(
+            "src.utils.create_openbis_object", side_effect=RuntimeError("openBIS down")
+        ),
+        patch("subprocess.Popen") as mock_popen,
+        patch.object(watchdog_module, "display") as mock_display,
+    ):
+        widget = _make_full_generator_widget(watchdog_module, tmp_path, data_folder)
+        old_log = widget.measurement_logs_folder / "SESS-OLD.json"
+        old_log.write_text(
+            json.dumps(
+                {
+                    "measurement_session_id": "SESS-OLD",
+                    "data_folder": str(data_folder),
+                    "processed_files": [str(data_folder / "scan1.sxm")],
+                }
+            )
+        )
+        widget.generate_watchdog(None)
+        _, buttons = _extract_prompt_widgets(widget.folder_conflict_box)
+        buttons["Switch to new session"].click()
+
+    assert (4444, signal.SIGTERM) not in kill_calls
+    assert mock_popen.call_count == 0
+    assert json.loads(old_log.read_text())["data_folder"] == str(data_folder)
+    assert widget.folder_conflict_box.layout.display == "none"
+    assert widget.generate_watchdog_button.disabled is False
+    assert mock_display.call_count >= 1
+
+
+def test_generate_watchdog_running_with_deleted_openbis_session_disables_continue_allows_switch(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    data_folder = tmp_path / "running_deleted_session_run"
+    data_folder.mkdir()
+    (logs_dir / "active_watchdogs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 6666,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-DELETED",
+                }
+            ]
+        )
+    )
+    new_session = _fake_session("SESS-NEW-3", "MEAS_Recovered")
+    fake_proc = MagicMock(pid=9333)
+    kill_calls = []
+
+    with (
+        patch("os.kill", side_effect=lambda pid, sig: kill_calls.append((pid, sig))),
+        patch("src.utils.get_openbis_object", side_effect=ValueError("Deleted")),
+        patch("src.utils.create_openbis_object", return_value=new_session),
+        patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
+        patch.object(watchdog_module, "display"),
+    ):
+        widget = _make_full_generator_widget(watchdog_module, tmp_path, data_folder)
+        widget.generate_watchdog(None)
+        _, buttons = _extract_prompt_widgets(widget.folder_conflict_box)
+        assert buttons["Continue existing session"].disabled is True
+        assert buttons["Switch to new session"].disabled is False
+        buttons["Switch to new session"].click()
+
+    assert (6666, signal.SIGTERM) in kill_calls
+    assert mock_popen.call_count == 1
+    assert "SESS-NEW-3" in mock_popen.call_args.args[0]
+
+
+def test_generate_watchdog_cancel_dismisses_prompt_without_changes(
+    watchdog_module, tmp_path
+):
+    data_folder = tmp_path / "cancel_run"
+    data_folder.mkdir()
+    widget = _make_full_generator_widget(watchdog_module, tmp_path, data_folder)
+    old_log = widget.measurement_logs_folder / "SESS-OLD.json"
+    old_log.write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-OLD",
+                "data_folder": str(data_folder),
+                "processed_files": [],
+            }
+        )
+    )
+    old_session = _fake_session("SESS-OLD", "MEAS_Old")
+
+    with (
+        patch("src.utils.get_openbis_object", return_value=old_session),
+        patch("src.utils.create_openbis_object") as mock_create,
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        widget.generate_watchdog(None)
+        assert widget.folder_conflict_box.layout.display != "none"
+        _, buttons = _extract_prompt_widgets(widget.folder_conflict_box)
+        buttons["Cancel"].click()
+
+    assert mock_create.call_count == 0
+    assert mock_popen.call_count == 0
+    assert json.loads(old_log.read_text())["data_folder"] == str(data_folder)
+    assert widget.folder_conflict_box.layout.display == "none"
+    assert widget.generate_watchdog_button.disabled is False
+
+
+def test_changing_folder_clears_open_confirmation_prompt_and_html_escapes_names(
+    watchdog_module, tmp_path
+):
+    data_folder = tmp_path / "escape_run"
+    data_folder.mkdir()
+    widget = _make_full_generator_widget(watchdog_module, tmp_path, data_folder)
+    old_log = widget.measurement_logs_folder / "SESS-XSS.json"
+    old_log.write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-XSS",
+                "data_folder": str(data_folder),
+                "processed_files": [],
+            }
+        )
+    )
+    old_session = _fake_session("SESS-XSS", "<script>alert(1)</script>")
+
+    with patch("src.utils.get_openbis_object", return_value=old_session):
+        widget.generate_watchdog(None)
+
+    message_html, _ = _extract_prompt_widgets(widget.folder_conflict_box)
+    assert "<script>" not in message_html.value
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in message_html.value
+
+    chooser = widget.select_measurements_folder_widget
+    assert chooser._callback is not None
+    chooser._callback(chooser)
+
+    assert widget.folder_conflict_box.layout.display == "none"
+    assert widget.generate_watchdog_button.disabled is False

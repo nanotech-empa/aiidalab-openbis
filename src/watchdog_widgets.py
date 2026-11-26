@@ -298,6 +298,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.running_watchdogs_widget = running_watchdogs_widget
         self.watchdog_processes = []
         self.measurement_logs_folder = MEASUREMENT_LOGS_FOLDER
+        self._pending_folder_conflict = None
 
         # Keep __init__ clean by delegating UI creation
         self._setup_ui()
@@ -396,6 +397,9 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             use_dir_icons=True,
             show_only_dirs=True,
         )
+        self.select_measurements_folder_widget.register_callback(
+            self._on_folder_changed
+        )
 
         # Save Button
         self.generate_watchdog_button = ipw.Button(
@@ -407,6 +411,8 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             layout=ipw.Layout(width="100px", height="50px"),
         )
         self.generate_watchdog_button.on_click(self.generate_watchdog)
+
+        self.folder_conflict_box = ipw.VBox(layout=ipw.Layout(display="none"))
 
         self.children = [
             self.notes,
@@ -423,6 +429,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             self.select_measurements_folder_title,
             self.select_measurements_folder_widget,
             self.generate_watchdog_button,
+            self.folder_conflict_box,
         ]
 
     def load_experiment_data(self, change):
@@ -832,7 +839,165 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.watchdog_processes.append(watchdog_process)
         return watchdog_process
 
+    def _on_folder_changed(self, _chooser):
+        self._clear_folder_conflict_prompt()
+
+    def _clear_folder_conflict_prompt(self):
+        self._pending_folder_conflict = None
+        if hasattr(self, "folder_conflict_box"):
+            self.folder_conflict_box.children = ()
+            self.folder_conflict_box.layout.display = "none"
+        if hasattr(self, "generate_watchdog_button"):
+            self.generate_watchdog_button.disabled = False
+
+    def _show_folder_conflict_prompt(
+        self, tracking_info, sample_id, instrument_id, experiment_id, data_folder
+    ):
+        norm_data_folder = os.path.normpath(data_folder)
+        self._pending_folder_conflict = {
+            "tracking_info": tracking_info,
+            "sample_id": sample_id,
+            "instrument_id": instrument_id,
+            "experiment_id": experiment_id,
+            "data_folder": norm_data_folder,
+        }
+        self.generate_watchdog_button.disabled = True
+
+        safe_folder = html.escape(norm_data_folder)
+        safe_name = html.escape(str(tracking_info.get("session_name") or "Unknown"))
+        safe_session_id = html.escape(
+            str(tracking_info.get("session_id") or "Unknown")
+        )
+        if tracking_info["is_running"]:
+            pids_str = ", ".join(
+                str(pid) for pid in tracking_info.get("active_pids", [])
+            )
+            status_text = f"Actively monitored (PID {html.escape(pids_str)})"
+        else:
+            status_text = "Not currently running (previously linked)"
+
+        deleted_note = ""
+        if tracking_info.get("measurement_session") is None:
+            deleted_note = (
+                "<br><i>The linked Measurement Session could not be found in openBIS, "
+                "so continuing it is unavailable.</i>"
+            )
+
+        prompt_html = ipw.HTML(
+            value=f"""
+            <div style="background-color: #fdf2f2; border-left: 5px solid #e74c3c; padding: 12px; margin-top: 10px; border-radius: 4px; font-family: sans-serif; color: #2c3e50;">
+                <div style="font-weight: bold; font-size: 14px; color: #991b1b; margin-bottom: 6px;">
+                    ⚠️ Folder already linked to an existing Measurement Session
+                </div>
+                <div style="font-size: 13px; line-height: 1.5; margin-bottom: 8px;">
+                    Directory <code>{safe_folder}</code> is already linked to Measurement Session
+                    <b>{safe_name}</b> (<code>{safe_session_id}</code>) — <b>{status_text}</b>.{deleted_note}<br>
+                    Do you want to continue uploading this folder to the previous measurement session?
+                </div>
+                <div style="font-size: 12px; color: #991b1b;">
+                    <b>Warning:</b> Only switch to a new measurement session if the previous one was created by mistake.
+                    Switching stops the connection to the previous session and uploads all existing files in this folder to the new session.
+                </div>
+            </div>
+            """
+        )
+
+        continue_btn = ipw.Button(
+            description="Continue existing session",
+            button_style="success",
+            icon="play",
+            disabled=tracking_info.get("measurement_session") is None,
+            layout=ipw.Layout(width="220px"),
+        )
+        switch_btn = ipw.Button(
+            description="Switch to new session",
+            button_style="danger",
+            icon="exclamation-triangle",
+            tooltip="Use only if the previous measurement session was created by mistake",
+            layout=ipw.Layout(width="200px"),
+        )
+        cancel_btn = ipw.Button(
+            description="Cancel",
+            button_style="",
+            layout=ipw.Layout(width="100px"),
+        )
+
+        def _on_continue(_):
+            self._clear_folder_conflict_prompt()
+            if tracking_info["is_running"]:
+                logger.info(
+                    f"Continuing active watchdog for {norm_data_folder} (session {tracking_info.get('session_id')})."
+                )
+                display(
+                    Javascript(
+                        data="alert('Continuing upload to the existing measurement session.');"
+                    )
+                )
+                return
+
+            measurement_session = self._resume_existing_measurement_session(
+                tracking_info, norm_data_folder
+            )
+            self._start_watchdog_process(measurement_session.permId, norm_data_folder)
+
+        def _on_switch(_):
+            logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
+            try:
+                new_session = self._create_openbis_measurement_session(
+                    sample_id, instrument_id, experiment_id, norm_data_folder
+                )
+            except Exception as exc:
+                logger.exception(
+                    f"Failed to create new Measurement Session for {norm_data_folder}: {exc}"
+                )
+                self._clear_folder_conflict_prompt()
+                display(
+                    Javascript(
+                        data="alert('Failed to create new measurement session. Previous tracking was left unchanged.');"
+                    )
+                )
+                return
+
+            active_pids = tracking_info.get("active_pids") or []
+            if active_pids:
+                self.running_watchdogs_widget.stop_watchdog_pids(
+                    active_pids, notify=False
+                )
+                stopped_set = set(active_pids)
+                self.watchdog_processes = [
+                    process
+                    for process in self.watchdog_processes
+                    if getattr(process, "pid", None) not in stopped_set
+                ]
+
+            detach_measurement_logs_for_folder(
+                norm_data_folder,
+                replaced_by_session_id=new_session.permId,
+                logs_dir=logs_dir,
+            )
+            self._write_fresh_measurement_log(new_session.permId, norm_data_folder)
+            self._clear_folder_conflict_prompt()
+            self._start_watchdog_process(new_session.permId, norm_data_folder)
+
+        def _on_cancel(_):
+            self._clear_folder_conflict_prompt()
+
+        continue_btn.on_click(_on_continue)
+        switch_btn.on_click(_on_switch)
+        cancel_btn.on_click(_on_cancel)
+
+        self.folder_conflict_box.children = [
+            prompt_html,
+            ipw.HBox(
+                [continue_btn, switch_btn, cancel_btn],
+                layout=ipw.Layout(margin="8px 0 0 0"),
+            ),
+        ]
+        self.folder_conflict_box.layout.display = ""
+
     def generate_watchdog(self, b):
+        self._clear_folder_conflict_prompt()
+
         # 1. Block saving if inputs (or the folder chooser) aren't ready
         if not self._validate_inputs():
             return
@@ -845,79 +1010,27 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             self.select_measurements_folder_widget.selected_path
         )
 
-        # Refresh running watchdogs list first so dead PIDs are pruned
-        self.running_watchdogs_widget.refresh_watchdog_list()
-
-        # Check if the folder is already being monitored
-        current_options = self.running_watchdogs_widget.running_watchdogs_widget.options
-        if any(
-            os.path.normpath(folder) == data_folder for folder, pid in current_options
-        ):
-            display(
-                Javascript(data="alert('This directory is already being monitored!');")
+        # 3. Check if folder is already tracked (running watchdog or previous session log)
+        tracking_info = self._find_existing_folder_tracking(data_folder)
+        if tracking_info is not None:
+            self._show_folder_conflict_prompt(
+                tracking_info,
+                sample_id,
+                instrument_id,
+                experiment_id,
+                data_folder,
             )
             return
 
-        # 3. Handle openBIS connection
-        measurement_session = self._get_or_create_measurement_session(
+        # 4. Create new measurement session, initialize fresh log, and start watchdog
+        measurement_session = self._create_openbis_measurement_session(
             sample_id,
             instrument_id,
             experiment_id,
             data_folder,
         )
-
-        # 4. Start Subprocess
-        watchdog_process = subprocess.Popen(
-            [
-                "python",
-                f"{APP_FOLDER}/src/measurements_uploader.py",
-                "--openbis_url",
-                self.session_data["url"],
-                "--openbis_token",
-                self.session_data["token"],
-                "--measurement_session_id",
-                measurement_session.permId,
-                "--data_folder",
-                data_folder,
-            ],
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        display(Javascript(data="alert('Watchdog process started!');"))
-        logger.info(
-            f"Watchdog process started with PID: {watchdog_process.pid} for {data_folder}"
-        )
-
-        # 5. Update the JSON log file
-        json_file = LOGS_FOLDER / "active_watchdogs.json"
-        data = []
-        try:
-            with open(json_file, "r") as f:
-                data = json.load(f)
-                if not isinstance(data, list):
-                    data = [data]
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-
-        data.append(
-            {
-                "pid": watchdog_process.pid,
-                "monitored_folder": data_folder,
-                "measurement_session_id": measurement_session.permId,
-            }
-        )
-
-        with open(json_file, "w") as f:
-            json.dump(data, f, indent=4)
-
-        # 6. Update UI Watchdog List (Pythonic Tuple Concatenation)
-        self.watchdog_processes.append(watchdog_process)
-        self.running_watchdogs_widget.running_watchdogs_widget.options += (
-            (data_folder, watchdog_process.pid),
-        )
+        self._write_fresh_measurement_log(measurement_session.permId, data_folder)
+        self._start_watchdog_process(measurement_session.permId, data_folder)
 
     def cleanup_watchdog(self):
         if self.watchdog_processes:
