@@ -585,3 +585,200 @@ def test_process_measurement_files_handles_failed_openbis_connection_without_log
     assert data["token_expired"] is True
     assert data["last_error"]["stage"] == "auth"
     assert len(data["recent_errors"]) == 1
+
+
+def test_run_upload_cycle_records_attachment_upload_and_annotates_imaging_fallback(
+    tmp_path,
+):
+    from src import measurement_monitor, measurements_uploader
+
+    data_folder = tmp_path / "fallback_run"
+    data_folder.mkdir()
+    bad_dat = data_folder / "Z-Spec01.dat"
+    bad_dat.write_text("dat", encoding="utf-8")
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_filepath, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-FB", str(data_folder), logs_dir=logs_dir
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+
+    def fake_importer(url, tok, folder, sess_id, log_fp):
+        def _mark_err(d):
+            measurement_monitor.append_error_event(
+                d, "Cannot parse Z-Spec", stage="dat", file_path=str(bad_dat)
+            )
+
+        measurement_monitor.update_measurement_log(log_fp, _mark_err)
+
+    with (
+        patch.object(
+            measurements_uploader,
+            "process_measurement_files",
+            side_effect=fake_importer,
+        ),
+        patch("src.utils.create_openbis_dataset"),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        measurements_uploader.run_upload_cycle(
+            data_folder=str(data_folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-FB",
+            logging_filepath=log_filepath,
+        )
+
+    data = json.loads(open(log_filepath, encoding="utf-8").read())
+    assert str(bad_dat) in data["processed_files"]
+    assert data["upload_history"][-1]["type"] == "ATTACHMENT"
+    assert data["upload_history"][-1]["filename"] == "Z-Spec01.dat"
+    assert data["last_error"] is not None
+    assert "ATTACHMENT fallback" in data["last_error"]["message"]
+    assert data["current_action"] == "Watching for new files"
+
+
+def test_run_upload_cycle_transient_attachment_error_logs_without_raising_token_expired(
+    tmp_path,
+):
+    from src import measurements_uploader
+
+    data_folder = tmp_path / "transient_err_run"
+    data_folder.mkdir()
+    txt_file = data_folder / "notes.txt"
+    txt_file.write_text("hello", encoding="utf-8")
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_filepath, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-TR", str(data_folder), logs_dir=logs_dir
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+
+    with (
+        patch.object(measurements_uploader, "process_measurement_files"),
+        patch(
+            "src.utils.create_openbis_dataset", side_effect=RuntimeError("network blip")
+        ),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        measurements_uploader.run_upload_cycle(
+            data_folder=str(data_folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-TR",
+            logging_filepath=log_filepath,
+        )
+
+    data = json.loads(open(log_filepath, encoding="utf-8").read())
+    assert data["processed_files"] == []
+    assert data.get("token_expired", False) is False
+    assert data["last_error"]["stage"] == "attachment"
+    assert data["last_error"]["file"] == "notes.txt"
+    assert "network blip" in data["last_error"]["message"]
+
+
+def test_run_upload_cycle_midrun_expired_token_raises_token_expired_and_marks_log(
+    tmp_path,
+):
+    from src import measurements_uploader
+
+    data_folder = tmp_path / "midrun_expired_run"
+    data_folder.mkdir()
+    txt_file = data_folder / "notes.txt"
+    txt_file.write_text("hello", encoding="utf-8")
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_filepath, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local",
+        "tok-expired",
+        "SESS-MID",
+        str(data_folder),
+        logs_dir=logs_dir,
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = False
+
+    with (
+        patch.object(measurements_uploader, "process_measurement_files"),
+        patch("src.utils.create_openbis_dataset", side_effect=ValueError("Expired")),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+        pytest.raises(measurements_uploader.TokenExpiredError),
+    ):
+        measurements_uploader.run_upload_cycle(
+            data_folder=str(data_folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-expired",
+            measurement_session_id="SESS-MID",
+            logging_filepath=log_filepath,
+        )
+
+    data = json.loads(open(log_filepath, encoding="utf-8").read())
+    assert data["token_expired"] is True
+    assert data["last_error"]["stage"] == "auth"
+    assert "token" in data["current_action"].lower()
+
+
+def test_uploader_main_startup_expired_token_marks_log_and_returns_1(
+    tmp_path, monkeypatch
+):
+    from src import measurements_uploader
+
+    data_folder = tmp_path / "startup_expired"
+    data_folder.mkdir()
+    logs_dir = tmp_path / "logs" / "measurements"
+    monkeypatch.setattr(measurements_uploader, "MEASUREMENT_LOGS_FOLDER", logs_dir)
+
+    mock_openbis = MagicMock()
+    mock_openbis.set_token.side_effect = ValueError("Session token invalid")
+
+    with patch.object(measurements_uploader, "Openbis", return_value=mock_openbis):
+        rc = measurements_uploader.main(
+            [
+                "--openbis_url",
+                "https://openbis.local",
+                "--openbis_token",
+                "bad-token",
+                "--measurement_session_id",
+                "SESS-START-EXP",
+                "--data_folder",
+                str(data_folder),
+            ]
+        )
+
+    assert rc == 1
+    data = json.loads((logs_dir / "SESS-START-EXP.json").read_text(encoding="utf-8"))
+    assert data["token_expired"] is True
+    assert data["last_error"]["stage"] == "auth"
+    assert "token" in data["current_action"].lower()
+
+
+def test_monitor_folder_invokes_heartbeat_callback_and_stops_on_interrupt(tmp_path):
+    from src import measurements_uploader
+
+    watch_dir = tmp_path / "watched"
+    watch_dir.mkdir()
+    beats = []
+
+    def fake_heartbeat():
+        beats.append(True)
+
+    sleep_calls = {"n": 0}
+
+    def fake_sleep(_sec):
+        sleep_calls["n"] += 1
+        if sleep_calls["n"] >= 2:
+            raise KeyboardInterrupt
+
+    with patch("time.sleep", side_effect=fake_sleep):
+        measurements_uploader.monitor_folder(
+            str(watch_dir),
+            lambda _p: None,
+            heartbeat_callback=fake_heartbeat,
+            heartbeat_interval=0.0,
+        )
+
+    assert len(beats) >= 2
