@@ -33,6 +33,7 @@ from nanonis_importer.spmpy import Spm as spm
 from datetime import datetime
 import shutil
 import tempfile
+import threading
 import time
 from collections import defaultdict
 from src import measurement_monitor, utils
@@ -47,6 +48,8 @@ DAT_ADAPTOR = (
 VERBOSE = False
 DEFAULT_URL = "local.openbis.ch"
 DEFAULT_INLINE_RETRY_DELAYS = (5.0, 15.0, 30.0)
+DEFAULT_PREVIEW_RETRY_DELAYS = (2.0, 5.0)
+_PREVIEW_STATE = threading.local()
 
 logger = logging.getLogger(__name__)
 app_folder = pathlib.Path().resolve()
@@ -201,6 +204,38 @@ def multi_export_images(
     )
 
 
+def _attach_preview_with_retry(session, perm_id, config_preview, tags):
+    """Attempt to render and attach an openBIS preview without failing the dataset upload."""
+    _PREVIEW_STATE.last_warning = None
+    retry_delays = tuple(DEFAULT_PREVIEW_RETRY_DELAYS)
+    last_exc = None
+    for attempt in range(len(retry_delays) + 1):
+        try:
+            preview = create_preview(session, perm_id, config_preview, tags=tags)
+            preview.index = 0
+            update_image_with_preview(session, perm_id, 0, preview)
+            _PREVIEW_STATE.last_warning = None
+            return True
+        except Exception as exc:
+            last_exc = exc
+            if measurement_monitor.is_session_token_expired(session):
+                break
+            if attempt < len(retry_delays):
+                delay = retry_delays[attempt]
+                logger.warning(
+                    f"Preview rendering failed for dataset {perm_id} "
+                    f"(attempt {attempt + 1}/{len(retry_delays) + 1}); retrying in {delay}s: {exc}"
+                )
+                if delay > 0:
+                    time.sleep(delay)
+                continue
+    logger.warning(
+        f"Keeping IMAGING_DATA dataset {perm_id} without preview after preview rendering failed: {last_exc}"
+    )
+    _PREVIEW_STATE.last_warning = str(last_exc)
+    return False
+
+
 def demo_sxm_flow(session, file_path, experiment=None, sample=None):
     dataset_sxm = create_sxm_dataset(
         session=session,
@@ -212,33 +247,31 @@ def demo_sxm_flow(session, file_path, experiment=None, sample=None):
 
     perm_id = dataset_sxm.permId
     logger.info(f"Created imaging .SXM dataset: {perm_id}")
-    img = spm(file_path)
-    channels = img.default_channels
-    color_scale = get_color_scale_range(img, channels[0])[:2]
-    width = str(img.get_param("width")[0])
-    height = str(img.get_param("height")[0])
+    try:
+        img = spm(file_path)
+        channels = img.default_channels
+        color_scale = get_color_scale_range(img, channels[0])[:2]
+        width = str(img.get_param("width")[0])
+        height = str(img.get_param("height")[0])
 
-    config_sxm_preview = {
-        "Channel": channels[0],  # usually one of these: ['z', 'I', 'dIdV', 'dIdV_Y']
-        "X-axis": ["0", width],  # file dependent
-        "Y-axis": ["0", height],  # file dependent
-        "Color-scale": color_scale,  # file dependent
-        "Colormap": "gray",  # [gray, YlOrBr, viridis, cividis, inferno, rainbow, Spectral, RdBu, RdGy]
-        "Scaling": "linear",  # ['linear', 'logarithmic']
-    }
+        config_sxm_preview = {
+            "Channel": channels[0],  # usually one of these: ['z', 'I', 'dIdV', 'dIdV_Y']
+            "X-axis": ["0", width],  # file dependent
+            "Y-axis": ["0", height],  # file dependent
+            "Color-scale": color_scale,  # file dependent
+            "Colormap": "gray",  # [gray, YlOrBr, viridis, cividis, inferno, rainbow, Spectral, RdBu, RdGy]
+            "Scaling": "linear",  # ['linear', 'logarithmic']
+        }
+        config_preview = config_sxm_preview.copy()
+    except Exception as exc:
+        logger.warning(
+            f"Keeping IMAGING_DATA dataset {perm_id} without preview (preview config error): {exc}"
+        )
+        _PREVIEW_STATE.last_warning = str(exc)
+        return perm_id
 
-    config_preview = config_sxm_preview.copy()
-    preview = create_preview(session, perm_id, config_preview, tags=["SXM"])
-    preview.index = 0
-    update_image_with_preview(session, perm_id, 0, preview)
-
-    config_preview = config_sxm_preview.copy()
-    config_preview["Scaling"] = "logarithmic"
-    config_preview["Colormap"] = "inferno"
-
-    # preview = create_preview(openbis, perm_id, config_preview, filterConfig=filter_config, tags=['SXM'])
-    # preview.index = 1
-    # update_image_with_preview(openbis, perm_id, 0, preview)
+    _attach_preview_with_retry(session, perm_id, config_preview, tags=["SXM"])
+    return perm_id
 
 
 def demo_dat_flow(session, folder_path, experiment, sample):
@@ -252,39 +285,44 @@ def demo_dat_flow(session, folder_path, experiment, sample):
 
     perm_id = dataset_dat.permId
     logger.info(f"Created imaging .DAT dataset: {perm_id}")
-    data = spm.importall(folder_path, "spec")
+    try:
+        data = spm.importall(folder_path, "spec")
 
-    # Sort dat files by datetime
-    data.sort(key=lambda da: da.record_datetime)
+        # Sort dat files by datetime
+        data.sort(key=lambda da: da.record_datetime)
 
-    # Select default channels for the selected measurement type
-    default_channels = data[0].default_channels
-    if default_channels:
-        channel_x = default_channels[0]
-        channel_y = default_channels[1]
-    else:
-        data_channels = list(data[0].signals.keys())
-        channel_x = data_channels[0]
-        channel_y = data_channels[1]
+        # Select default channels for the selected measurement type
+        default_channels = data[0].default_channels
+        if default_channels:
+            channel_x = default_channels[0]
+            channel_y = default_channels[1]
+        else:
+            data_channels = list(data[0].signals.keys())
+            channel_x = data_channels[0]
+            channel_y = data_channels[1]
 
-    (minimum_x, maximum_x, step_x) = _min_max_step(channel_x, data)
-    (minimum_y, maximum_y, step_y) = _min_max_step(channel_y, data)
+        (minimum_x, maximum_x, step_x) = _min_max_step(channel_x, data)
+        (minimum_y, maximum_y, step_y) = _min_max_step(channel_y, data)
 
-    config_dat_preview = {
-        "Channel X": channel_x,
-        "Channel Y": channel_y,
-        "X-axis": [str(minimum_x), str(maximum_x)],
-        "Y-axis": [str(minimum_y), str(maximum_y)],
-        "Grouping": sorted([os.path.basename(str(f)) for f in data]),
-        "Colormap": "rainbow",
-        "Scaling": "lin-lin",  # ['lin-lin', 'lin-log', 'log-lin', 'log-log']
-        "Print legend": "True",  # disable legend in image
-    }
+        config_dat_preview = {
+            "Channel X": channel_x,
+            "Channel Y": channel_y,
+            "X-axis": [str(minimum_x), str(maximum_x)],
+            "Y-axis": [str(minimum_y), str(maximum_y)],
+            "Grouping": sorted([os.path.basename(str(f)) for f in data]),
+            "Colormap": "rainbow",
+            "Scaling": "lin-lin",  # ['lin-lin', 'lin-log', 'log-lin', 'log-log']
+            "Print legend": "True",  # disable legend in image
+        }
+        config_preview = config_dat_preview.copy()
+    except Exception as exc:
+        logger.warning(
+            f"Keeping IMAGING_DATA dataset {perm_id} without preview (preview config error): {exc}"
+        )
+        _PREVIEW_STATE.last_warning = str(exc)
+        return perm_id
 
-    config_preview = config_dat_preview.copy()
-    preview = create_preview(session, perm_id, config_preview, tags=["DAT"])
-    preview.index = 0
-    update_image_with_preview(session, perm_id, 0, preview)
+    _attach_preview_with_retry(session, perm_id, config_preview, tags=["DAT"])
     return perm_id
 
 
@@ -766,6 +804,20 @@ def process_measurement_files(
         measurement_monitor.update_measurement_log(logging_filepath, _upd)
         return expired
 
+    def _record_preview_warning_if_any(file_path):
+        warn = getattr(_PREVIEW_STATE, "last_warning", None)
+        _PREVIEW_STATE.last_warning = None
+        if not warn:
+            return
+        safe_warn = measurement_monitor.redact_secrets(str(warn), [token])
+        msg = f"Uploaded as IMAGING_DATA (preview rendering failed: {safe_warn})"
+        measurement_monitor.update_measurement_log(
+            logging_filepath,
+            lambda d: measurement_monitor.append_error_event(
+                d, msg, stage="preview", file_path=file_path
+            ),
+        )
+
     def _run_with_inline_retry(label: str, stage: str, file_path: str, action_fn):
         for attempt in range(len(retry_delays) + 1):
             if stop_event is not None and stop_event.is_set():
@@ -902,11 +954,13 @@ def process_measurement_files(
                             experiment=experiment,
                         )
 
+                    _PREVIEW_STATE.last_warning = None
                     outcome, _ = _run_with_inline_retry(
                         basename, "sxm", file_path, _upload_sxm
                     )
                     if outcome == "ok":
                         _record_uploads([file_path], "SXM")
+                        _record_preview_warning_if_any(file_path)
                     elif outcome == "auth":
                         token_expired_midrun = True
                         break
@@ -1019,6 +1073,7 @@ def process_measurement_files(
                                 experiment=experiment,
                             )
 
+                        _PREVIEW_STATE.last_warning = None
                         outcome, new_perm_id = _run_with_inline_retry(
                             dat_label, "dat", first_dat, _upload_dat
                         )
@@ -1033,6 +1088,7 @@ def process_measurement_files(
                                 ),
                                 group_paths=all_group_paths,
                             )
+                            _record_preview_warning_if_any(first_dat)
                             old_perm_id = dataset_to_remove_holder["perm_id"]
                             if (
                                 group_in_openbis

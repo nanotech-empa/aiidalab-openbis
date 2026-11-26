@@ -1896,3 +1896,202 @@ def test_dat_group_update_deletes_tracked_group_dataset_permid_not_latest_unrela
     assert data["dat_group_datasets"][os.path.normpath(str(folder / "dIdV_1.dat"))] == "DS-TYPE-A-2"
     assert data["dat_group_datasets"][os.path.normpath(str(folder / "dIdV_2.dat"))] == "DS-TYPE-A-2"
     assert data["dat_group_datasets"][os.path.normpath(str(folder / "iv_1.dat"))] == "DS-TYPE-B-1"
+
+
+def test_demo_sxm_and_dat_flow_retry_preview_and_keep_imaging_dataset_without_attachment_fallback(
+    tmp_path, monkeypatch
+):
+    from nanonis_importer import nanonis_importer
+    from src import measurements_uploader
+
+    monkeypatch.setattr(nanonis_importer, "DEFAULT_PREVIEW_RETRY_DELAYS", (0.0, 0.0))
+    monkeypatch.setattr(nanonis_importer, "DEFAULT_INLINE_RETRY_DELAYS", (0.0,))
+
+    folder = tmp_path / "preview_err_run"
+    folder.mkdir()
+    for name in ("img0001.sxm", "img0002.sxm", "spec0001.dat"):
+        (folder / name).write_text("data", encoding="utf-8")
+
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_fp, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-PREV", str(folder), logs_dir=logs_dir
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    timestamps = {
+        "img0001.sxm": datetime.datetime(2026, 11, 26, 12, 0, 0),
+        "img0002.sxm": datetime.datetime(2026, 11, 26, 12, 1, 0),
+        "spec0001.dat": datetime.datetime(2026, 11, 26, 12, 2, 0),
+    }
+
+    def fake_spm(path):
+        name = os.path.basename(path)
+        obj = MagicMock()
+        obj.record_datetime = timestamps[name]
+        obj.default_channels = ["z"] if name.endswith(".sxm") else ["V", "dIdV"]
+        obj.signals = {"V": {}, "dIdV": {}}
+        obj.measurement_type = "bias spectroscopy dIdV vs V"
+        obj.get_param.return_value = (10.0, "nm")
+        obj.get_channel.return_value = ([0.0, 1.0], "nm")
+        return obj
+
+    fake_spm.importall = lambda d, _t: [
+        fake_spm(os.path.join(d, f)) for f in sorted(os.listdir(d))
+    ]
+
+    ds_counter = {"n": 0}
+
+    def fake_create_sxm(**_kw):
+        ds_counter["n"] += 1
+        ds = MagicMock()
+        ds.permId = f"DS-SXM-{ds_counter['n']}"
+        return ds
+
+    def fake_create_dat(**_kw):
+        ds = MagicMock()
+        ds.permId = "DS-DAT-1"
+        return ds
+
+    preview_calls = {}
+
+    def fake_create_preview(_sess, perm_id, _cfg, tags=None):
+        preview_calls[perm_id] = preview_calls.get(perm_id, 0) + 1
+        # DS-SXM-1 fails once then succeeds on retry; DS-SXM-2 and DS-DAT-1 fail persistently
+        if perm_id == "DS-SXM-1" and preview_calls[perm_id] == 1:
+            raise RuntimeError(
+                "Couldn't convert map to string\n"
+                "Cause: java.lang.RuntimeException: java.util.concurrent.ExecutionException: "
+                "java.lang.IllegalStateException: zip file closed"
+            )
+        if perm_id in ("DS-SXM-2", "DS-DAT-1"):
+            raise RuntimeError(
+                "Couldn't convert map to string\n"
+                "Cause: java.lang.IllegalStateException: zip file closed"
+            )
+        return MagicMock()
+
+    attachments = []
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", new=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.create_sxm_dataset",
+            side_effect=fake_create_sxm,
+        ) as mock_create_sxm,
+        patch(
+            "nanonis_importer.nanonis_importer.create_dat_dataset",
+            side_effect=fake_create_dat,
+        ) as mock_create_dat,
+        patch(
+            "nanonis_importer.nanonis_importer.create_preview",
+            side_effect=fake_create_preview,
+        ),
+        patch(
+            "nanonis_importer.nanonis_importer.update_image_with_preview"
+        ) as mock_upd_preview,
+        patch(
+            "src.utils.create_openbis_dataset",
+            side_effect=lambda *a, **kw: attachments.append(kw.get("files")),
+        ),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        pending = measurements_uploader.run_upload_cycle(
+            data_folder=str(folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-PREV",
+            logging_filepath=log_fp,
+        )
+
+    assert pending == 0
+    assert attachments == []  # NEVER duplicated as raw ATTACHMENT!
+    assert mock_create_sxm.call_count == 2
+    assert mock_create_dat.call_count == 1
+    assert preview_calls["DS-SXM-1"] == 2  # Retried once and succeeded
+    assert preview_calls["DS-SXM-2"] == 3  # 1 initial + 2 retries, still kept IMAGING_DATA
+    assert preview_calls["DS-DAT-1"] == 3
+    assert mock_upd_preview.call_count == 1  # Only DS-SXM-1 attached preview
+
+    data = json.loads(open(log_fp, encoding="utf-8").read())
+    assert len(data["processed_files"]) == 3
+    upload_types = {(ev["filename"], ev["type"]) for ev in data["upload_history"]}
+    assert upload_types == {
+        ("img0001.sxm", "SXM"),
+        ("img0002.sxm", "SXM"),
+        ("spec0001.dat", "DAT"),
+    }
+    assert data["dat_group_datasets"][os.path.normpath(str(folder / "spec0001.dat"))] == "DS-DAT-1"
+    preview_errs = [e for e in data["recent_errors"] if e["stage"] == "preview"]
+    assert {e["file"] for e in preview_errs} == {"img0002.sxm", "spec0001.dat"}
+
+
+def test_openbis_server_error_during_dataset_creation_never_falls_back_to_attachment(
+    tmp_path, monkeypatch
+):
+    from nanonis_importer import nanonis_importer
+    from src import measurement_monitor, measurements_uploader
+
+    monkeypatch.setattr(nanonis_importer, "DEFAULT_INLINE_RETRY_DELAYS", (0.0,))
+    assert measurement_monitor.is_transient_upload_error(
+        RuntimeError(
+            "Couldn't convert map to string\n"
+            "Cause: java.lang.RuntimeException: java.lang.IllegalStateException: zip file closed"
+        )
+    )
+
+    folder = tmp_path / "server_err_no_att"
+    folder.mkdir()
+    (folder / "img0001.sxm").write_text("data", encoding="utf-8")
+    (folder / "img0002.sxm").write_text("data", encoding="utf-8")
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_fp, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-SRV", str(folder), logs_dir=logs_dir
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    def fake_spm(path):
+        obj = MagicMock()
+        obj.record_datetime = datetime.datetime(
+            2026, 11, 26, 12, 0, 1 if "0001" in path else 2
+        )
+        return obj
+
+    attachments = []
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow",
+            side_effect=RuntimeError(
+                "Couldn't convert map to string\n"
+                "Cause: java.lang.IllegalStateException: zip file closed"
+            ),
+        ),
+        patch(
+            "src.utils.create_openbis_dataset",
+            side_effect=lambda *a, **kw: attachments.append(kw.get("files")),
+        ),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        pending = measurements_uploader.run_upload_cycle(
+            data_folder=str(folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-SRV",
+            logging_filepath=log_fp,
+        )
+
+    assert pending == 2
+    assert attachments == []

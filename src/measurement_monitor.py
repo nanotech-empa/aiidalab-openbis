@@ -33,6 +33,12 @@ _TRANSIENT_ERROR_PHRASES = (
     "max retries exceeded",
     "name or service not known",
     "temporary failure in name resolution",
+    "zip file closed",
+    "java.lang.",
+    "java.util.concurrent.",
+    "executionexception",
+    "general error while performing",
+    "couldn't convert map to string",
 )
 _NON_TRANSIENT_EXC_TYPES = (
     TypeError,
