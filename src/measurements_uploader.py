@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import inspect
 import io
 import logging
 import os
@@ -273,6 +274,126 @@ def monitor_folder(
         observer.join()
 
 
+def _upload_attachment_file(
+    file_path,
+    openbis_session,
+    openbis_token,
+    measurement_session_id,
+    logging_filepath,
+    stop_event=None,
+    inline_retry_delays=(5.0, 15.0, 30.0),
+) -> str:
+    """Upload a single file as ATTACHMENT with inline transient retries.
+
+    Returns one of: 'ok', 'stopped', 'transient_halt', 'error'.
+    Raises TokenExpiredError if openBIS token is confirmed expired.
+    """
+    basename = os.path.basename(file_path)
+    measurement_monitor.update_measurement_log(
+        logging_filepath,
+        lambda d, name=basename: d.update(
+            {
+                "current_action": f"Uploading {name}...",
+                "last_heartbeat_at": measurement_monitor.utc_now_iso(),
+            }
+        ),
+    )
+
+    for attempt in range(len(inline_retry_delays) + 1):
+        if stop_event is not None and stop_event.is_set():
+            return "stopped"
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                measurement_session_obj = openbis_session.get_object(
+                    measurement_session_id
+                )
+            utils.create_openbis_dataset(
+                openbis_session,
+                type="ATTACHMENT",
+                sample=measurement_session_obj,
+                files=[file_path],
+            )
+            break
+        except Exception as exc:
+            safe_exc = measurement_monitor.redact_secrets(str(exc), [openbis_token])
+            if is_session_token_expired(openbis_session):
+                auth_msg = (
+                    f"openBIS token expired while uploading {basename}: {safe_exc}"
+                )
+                logger.error(auth_msg)
+                print(auth_msg, flush=True)
+
+                def _mark_expired(d):
+                    d["token_expired"] = True
+                    d["current_action"] = "Stopped — openBIS token invalid or expired"
+                    measurement_monitor.append_error_event(
+                        d, auth_msg, stage="auth", file_path=file_path
+                    )
+
+                measurement_monitor.update_measurement_log(
+                    logging_filepath, _mark_expired
+                )
+                raise TokenExpiredError(auth_msg) from exc
+
+            err_msg = f"Failed to upload attachment {basename}: {safe_exc}"
+            logger.error(err_msg)
+            print(err_msg, flush=True)
+            measurement_monitor.update_measurement_log(
+                logging_filepath,
+                lambda d, m=safe_exc, fp=file_path: measurement_monitor.append_error_event(
+                    d, m, stage="attachment", file_path=fp
+                ),
+            )
+            if measurement_monitor.is_transient_upload_error(exc):
+                if attempt < len(inline_retry_delays):
+                    delay = inline_retry_delays[attempt]
+                    retry_msg = (
+                        f"Transient error uploading {basename}; retrying in "
+                        f"{int(delay)}s ({attempt + 1}/{len(inline_retry_delays)})..."
+                    )
+                    measurement_monitor.update_measurement_log(
+                        logging_filepath,
+                        lambda d, msg=retry_msg: d.update(
+                            {
+                                "current_action": msg,
+                                "last_heartbeat_at": measurement_monitor.utc_now_iso(),
+                            }
+                        ),
+                    )
+                    if delay > 0:
+                        if stop_event is not None:
+                            if stop_event.wait(delay):
+                                return "stopped"
+                        else:
+                            time.sleep(delay)
+                    continue
+                return "transient_halt"
+            return "error"
+
+    def _record_attachment(d, fp=file_path, name=basename):
+        d.setdefault("processed_files", [])
+        if fp not in d["processed_files"]:
+            d["processed_files"].append(fp)
+        measurement_monitor.append_upload_event(d, fp, "ATTACHMENT")
+        last_err = d.get("last_error")
+        if (
+            isinstance(last_err, dict)
+            and last_err.get("file") == name
+            and last_err.get("stage") in ("sxm", "dat")
+            and "ATTACHMENT fallback" not in str(last_err.get("message", ""))
+        ):
+            last_err["message"] = (
+                f"{last_err['message']} (uploaded as raw ATTACHMENT fallback)"
+            )
+            if isinstance(d.get("recent_errors"), list) and d["recent_errors"]:
+                d["recent_errors"][-1]["message"] = last_err["message"]
+
+    measurement_monitor.update_measurement_log(logging_filepath, _record_attachment)
+    logger.info(f"Uploaded file: {file_path}")
+    print(f"Uploaded file as ATTACHMENT: {basename}", flush=True)
+    return "ok"
+
+
 def run_upload_cycle(
     data_folder,
     openbis_session,
@@ -305,23 +426,50 @@ def run_upload_cycle(
             ),
         )
 
-        if stop_event is not None:
-            process_measurement_files(
-                openbis_url,
-                openbis_token,
-                data_folder,
-                measurement_session_id,
-                logging_filepath,
-                stop_event=stop_event,
-            )
-        else:
-            process_measurement_files(
-                openbis_url,
-                openbis_token,
-                data_folder,
-                measurement_session_id,
-                logging_filepath,
-            )
+        from nanonis_importer import nanonis_importer as _ni_mod
+
+        inline_delays = getattr(
+            _ni_mod, "DEFAULT_INLINE_RETRY_DELAYS", (5.0, 15.0, 30.0)
+        )
+
+        def _in_place_fallback(file_paths):
+            for fp in file_paths:
+                if not os.path.isfile(fp) or is_ignored_file(fp):
+                    continue
+                try:
+                    status = _upload_attachment_file(
+                        fp,
+                        openbis_session=openbis_session,
+                        openbis_token=openbis_token,
+                        measurement_session_id=measurement_session_id,
+                        logging_filepath=logging_filepath,
+                        stop_event=stop_event,
+                        inline_retry_delays=inline_delays,
+                    )
+                except TokenExpiredError:
+                    return "auth"
+                if status in ("stopped", "transient_halt"):
+                    return status
+            return "ok"
+
+        importer_kwargs = {}
+        try:
+            sig = inspect.signature(process_measurement_files)
+            if "stop_event" in sig.parameters:
+                importer_kwargs["stop_event"] = stop_event
+            if "fallback_uploader" in sig.parameters:
+                importer_kwargs["fallback_uploader"] = _in_place_fallback
+        except (TypeError, ValueError):
+            pass
+
+        importer_result = process_measurement_files(
+            openbis_url,
+            openbis_token,
+            data_folder,
+            measurement_session_id,
+            logging_filepath,
+            **importer_kwargs,
+        )
 
         if stop_event is not None and stop_event.is_set():
             return 0
@@ -339,98 +487,47 @@ def run_upload_cycle(
             print(msg, flush=True)
             raise TokenExpiredError(msg)
 
-        uploaded_files = logging_data.get("processed_files", [])
+        halted_on_transient = isinstance(importer_result, dict) and bool(
+            importer_result.get("halted_on_transient_error")
+        )
 
-        # Determine which files from the pre-processing snapshot still need uploading
-        missing_files = [
-            f
-            for f in candidate_files
-            if f not in uploaded_files and os.path.isfile(f) and not is_ignored_file(f)
-        ]
+        if not halted_on_transient:
+            uploaded_norm = {
+                os.path.normpath(p)
+                for p in logging_data.get("processed_files", [])
+                if isinstance(p, str)
+            }
+            # Determine which files from the pre-processing snapshot still need uploading
+            missing_files = [
+                f
+                for f in candidate_files
+                if os.path.normpath(f) not in uploaded_norm
+                and os.path.isfile(f)
+                and not is_ignored_file(f)
+            ]
 
-        for file_path in missing_files:
-            if stop_event is not None and stop_event.is_set():
-                break
-            basename = os.path.basename(file_path)
-            measurement_monitor.update_measurement_log(
-                logging_filepath,
-                lambda d, name=basename: d.update(
-                    {
-                        "current_action": f"Uploading {name}...",
-                        "last_heartbeat_at": measurement_monitor.utc_now_iso(),
-                    }
-                ),
-            )
-            try:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    measurement_session_obj = openbis_session.get_object(
-                        measurement_session_id
-                    )
-                utils.create_openbis_dataset(
-                    openbis_session,
-                    type="ATTACHMENT",
-                    sample=measurement_session_obj,
-                    files=[file_path],
+            def _mtime_key(fp):
+                try:
+                    return (os.path.getmtime(fp), os.path.basename(fp))
+                except OSError:
+                    return (0.0, os.path.basename(fp))
+
+            missing_files.sort(key=_mtime_key)
+
+            for file_path in missing_files:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                status = _upload_attachment_file(
+                    file_path,
+                    openbis_session=openbis_session,
+                    openbis_token=openbis_token,
+                    measurement_session_id=measurement_session_id,
+                    logging_filepath=logging_filepath,
+                    stop_event=stop_event,
+                    inline_retry_delays=inline_delays,
                 )
-            except Exception as exc:
-                safe_exc = measurement_monitor.redact_secrets(
-                    str(exc), [openbis_token]
-                )
-                if is_session_token_expired(openbis_session):
-                    auth_msg = (
-                        f"openBIS token expired while uploading {basename}: {safe_exc}"
-                    )
-                    logger.error(auth_msg)
-                    print(auth_msg, flush=True)
-
-                    def _mark_expired(d):
-                        d["token_expired"] = True
-                        d["current_action"] = (
-                            "Stopped — openBIS token invalid or expired"
-                        )
-                        measurement_monitor.append_error_event(
-                            d, auth_msg, stage="auth", file_path=file_path
-                        )
-
-                    measurement_monitor.update_measurement_log(
-                        logging_filepath, _mark_expired
-                    )
-                    raise TokenExpiredError(auth_msg) from exc
-
-                err_msg = f"Failed to upload attachment {basename}: {safe_exc}"
-                logger.error(err_msg)
-                print(err_msg, flush=True)
-                measurement_monitor.update_measurement_log(
-                    logging_filepath,
-                    lambda d, m=safe_exc, fp=file_path: measurement_monitor.append_error_event(
-                        d, m, stage="attachment", file_path=fp
-                    ),
-                )
-                continue
-
-            def _record_attachment(d, fp=file_path, name=basename):
-                d.setdefault("processed_files", [])
-                if fp not in d["processed_files"]:
-                    d["processed_files"].append(fp)
-                measurement_monitor.append_upload_event(d, fp, "ATTACHMENT")
-                last_err = d.get("last_error")
-                if (
-                    isinstance(last_err, dict)
-                    and last_err.get("file") == name
-                    and last_err.get("stage") in ("sxm", "dat")
-                    and "ATTACHMENT fallback" not in str(last_err.get("message", ""))
-                ):
-                    last_err["message"] = (
-                        f"{last_err['message']} (uploaded as raw ATTACHMENT fallback)"
-                    )
-                    if isinstance(d.get("recent_errors"), list) and d["recent_errors"]:
-                        d["recent_errors"][-1]["message"] = last_err["message"]
-
-            measurement_monitor.update_measurement_log(
-                logging_filepath, _record_attachment
-            )
-            logger.info(f"Uploaded file: {file_path}")
-            print(f"Uploaded file as ATTACHMENT: {basename}", flush=True)
+                if status in ("stopped", "transient_halt"):
+                    break
 
         remaining_pending = {"count": 0}
 

@@ -6,6 +6,7 @@ import datetime
 import json
 import os
 import pathlib
+import re
 import subprocess
 import threading
 import uuid
@@ -14,8 +15,69 @@ from collections import deque
 from . import sync_registry, utils
 
 IGNORED_SUFFIXES = (".json", ".ini", ".part", ".openbis-drive-part", ".tmp")
+_TRANSIENT_HTTP_STATUS_RE = re.compile(r"\b(408|429|500|502|503|504)\b")
+_TRANSIENT_ERROR_PHRASES = (
+    "proxy error",
+    "bad gateway",
+    "gateway timeout",
+    "service unavailable",
+    "temporarily unavailable",
+    "too many requests",
+    "connection reset",
+    "connection refused",
+    "connection aborted",
+    "read timed out",
+    "connect timed out",
+    "timed out",
+    "remote end closed connection",
+    "max retries exceeded",
+    "name or service not known",
+    "temporary failure in name resolution",
+)
+_NON_TRANSIENT_EXC_TYPES = (
+    TypeError,
+    KeyError,
+    AttributeError,
+    IndexError,
+    ZeroDivisionError,
+    NameError,
+    SyntaxError,
+)
 _LOG_LOCKS_GUARD = threading.Lock()
 _LOG_LOCKS: dict[str, threading.Lock] = {}
+
+
+def is_transient_upload_error(exc: BaseException | None) -> bool:
+    """Return True when an exception indicates a retryable network/5xx/proxy failure."""
+    if exc is None or isinstance(exc, _NON_TRANSIENT_EXC_TYPES):
+        return False
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+
+    try:
+        import requests
+
+        if isinstance(
+            exc,
+            (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.exceptions.ChunkedEncodingError,
+            ),
+        ):
+            return True
+        if isinstance(exc, requests.exceptions.HTTPError):
+            resp = getattr(exc, "response", None)
+            status_code = getattr(resp, "status_code", None)
+            if isinstance(status_code, int):
+                return status_code in (408, 429, 500, 502, 503, 504)
+    except Exception:
+        pass
+
+    msg = str(exc).lower()
+    if _TRANSIENT_HTTP_STATUS_RE.search(msg):
+        return True
+    return any(phrase in msg for phrase in _TRANSIENT_ERROR_PHRASES)
 
 
 def _get_log_lock(filepath: str | pathlib.Path) -> threading.Lock:

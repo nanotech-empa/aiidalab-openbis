@@ -1317,9 +1317,12 @@ def test_active_uploads_keep_heartbeat_fresh_and_update_current_action(tmp_path)
 
 
 def test_run_upload_cycle_returns_pending_count_and_clears_transient_error_on_retry_success(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
+    from nanonis_importer import nanonis_importer
     from src import measurements_uploader
+
+    monkeypatch.setattr(nanonis_importer, "DEFAULT_INLINE_RETRY_DELAYS", (0.0,))
 
     data_folder = tmp_path / "retry_clear_run"
     data_folder.mkdir()
@@ -1374,7 +1377,7 @@ def test_run_upload_cycle_returns_pending_count_and_clears_transient_error_on_re
     second_data = json.loads(open(log_fp, encoding="utf-8").read())
     assert str(dat_file) in second_data["processed_files"]
     assert second_data["last_error"] is None
-    assert len(second_data["recent_errors"]) == 1
+    assert len(second_data["recent_errors"]) == 2
 
 
 def test_uploader_retry_scheduler_backoff_cap_and_main_integration(tmp_path, monkeypatch):
@@ -1538,3 +1541,358 @@ def test_process_measurement_files_respects_stop_event_between_files(tmp_path):
         )
 
     assert uploaded == ["a_01.sxm"]
+
+
+def test_is_transient_upload_error_classifies_http_5xx_network_vs_parse_errors():
+    import requests
+
+    from src import measurement_monitor
+
+    assert measurement_monitor.is_transient_upload_error(
+        RuntimeError("502 Server Error: Proxy Error for url: https://openbis/ds")
+    )
+    assert measurement_monitor.is_transient_upload_error(
+        RuntimeError("general error while performing post request. 502:Proxy Error")
+    )
+    assert measurement_monitor.is_transient_upload_error(
+        RuntimeError("503 Service Unavailable")
+    )
+    assert measurement_monitor.is_transient_upload_error(
+        RuntimeError("504 Gateway Timeout")
+    )
+    assert measurement_monitor.is_transient_upload_error(
+        RuntimeError("429 Too Many Requests")
+    )
+    assert measurement_monitor.is_transient_upload_error(ConnectionError("reset"))
+    assert measurement_monitor.is_transient_upload_error(TimeoutError("timed out"))
+    assert measurement_monitor.is_transient_upload_error(
+        requests.exceptions.ConnectionError("network unreachable")
+    )
+
+    assert not measurement_monitor.is_transient_upload_error(
+        TypeError("must be real number, not str")
+    )
+    assert not measurement_monitor.is_transient_upload_error(
+        ValueError("Invalid Nanonis header")
+    )
+    assert not measurement_monitor.is_transient_upload_error(KeyError("Saved Date"))
+    assert not measurement_monitor.is_transient_upload_error(RuntimeError("bad sxm"))
+    assert not measurement_monitor.is_transient_upload_error(
+        RuntimeError("401 Unauthorized")
+    )
+
+
+def test_chronological_barrier_retries_transient_502_in_place_and_preserves_order(
+    tmp_path, monkeypatch
+):
+    from nanonis_importer import nanonis_importer
+    from src import measurements_uploader
+
+    monkeypatch.setattr(nanonis_importer, "DEFAULT_INLINE_RETRY_DELAYS", (0.0, 0.0))
+
+    # Case A: Transient 502 on DAT group recovers on inline retry before next SXM uploads
+    folder_a = tmp_path / "chrono_recover"
+    folder_a.mkdir()
+    for name in ("img0001.sxm", "spec_a.dat", "spec_b.dat", "img0002.sxm"):
+        (folder_a / name).write_text("data", encoding="utf-8")
+
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_a, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-CHR-A", str(folder_a), logs_dir=logs_dir
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    timestamps = {
+        "img0001.sxm": datetime.datetime(2026, 11, 26, 12, 0, 0),
+        "spec_a.dat": datetime.datetime(2026, 11, 26, 12, 1, 0),
+        "spec_b.dat": datetime.datetime(2026, 11, 26, 12, 2, 0),
+        "img0002.sxm": datetime.datetime(2026, 11, 26, 12, 3, 0),
+    }
+
+    def fake_spm(path):
+        name = os.path.basename(path)
+        obj = MagicMock()
+        obj.record_datetime = timestamps[name]
+        obj.signals = {"V": {}, "dIdV": {}}
+        obj.measurement_type = "bias spectroscopy dIdV vs V"
+        return obj
+
+    events_a = []
+    dat_attempts = {"n": 0}
+
+    def fake_sxm_a(_sess, fp, **_kw):
+        events_a.append(("SXM", os.path.basename(fp)))
+
+    def fake_dat_a(_sess, directory, **_kw):
+        dat_attempts["n"] += 1
+        files = sorted(os.listdir(directory))
+        if dat_attempts["n"] == 1:
+            raise RuntimeError("502 Server Error: Proxy Error")
+        events_a.append(("DAT", files))
+        return "DS-DAT-A1"
+
+    attachments_a = []
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch("nanonis_importer.nanonis_importer.demo_sxm_flow", side_effect=fake_sxm_a),
+        patch("nanonis_importer.nanonis_importer.demo_dat_flow", side_effect=fake_dat_a),
+        patch(
+            "src.utils.create_openbis_dataset",
+            side_effect=lambda *a, **kw: attachments_a.append(kw.get("files")),
+        ),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        pending_a = measurements_uploader.run_upload_cycle(
+            data_folder=str(folder_a),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-CHR-A",
+            logging_filepath=log_a,
+        )
+
+    assert pending_a == 0
+    assert dat_attempts["n"] == 2
+    assert attachments_a == []
+    assert events_a == [
+        ("SXM", "img0001.sxm"),
+        ("DAT", ["spec_a.dat", "spec_b.dat"]),
+        ("SXM", "img0002.sxm"),
+    ]
+
+    # Case B: Persistent 502 halts chronologically (does NOT upload img0002 or downgrade to ATTACHMENT),
+    # then next cycle resumes in exact chronological order once openBIS recovers.
+    folder_b = tmp_path / "chrono_halt"
+    folder_b.mkdir()
+    for name in ("img0001.sxm", "spec_a.dat", "spec_b.dat", "img0002.sxm"):
+        (folder_b / name).write_text("data", encoding="utf-8")
+    log_b, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-CHR-B", str(folder_b), logs_dir=logs_dir
+    )
+
+    events_b = []
+    attachments_b = []
+    outage = {"active": True}
+
+    def fake_sxm_b(_sess, fp, **_kw):
+        events_b.append(("SXM", os.path.basename(fp)))
+
+    def fake_dat_b(_sess, directory, **_kw):
+        if outage["active"]:
+            raise RuntimeError("502 Server Error: Proxy Error")
+        events_b.append(("DAT", sorted(os.listdir(directory))))
+        return "DS-DAT-B1"
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch("nanonis_importer.nanonis_importer.demo_sxm_flow", side_effect=fake_sxm_b),
+        patch("nanonis_importer.nanonis_importer.demo_dat_flow", side_effect=fake_dat_b),
+        patch(
+            "src.utils.create_openbis_dataset",
+            side_effect=lambda *a, **kw: attachments_b.append(kw.get("files")),
+        ),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        pending_b1 = measurements_uploader.run_upload_cycle(
+            data_folder=str(folder_b),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-CHR-B",
+            logging_filepath=log_b,
+        )
+        assert pending_b1 == 3
+        assert events_b == [("SXM", "img0001.sxm")]
+        assert attachments_b == []
+
+        # openBIS recovers -> next cycle uploads DAT group FIRST, then img0002.sxm
+        outage["active"] = False
+        pending_b2 = measurements_uploader.run_upload_cycle(
+            data_folder=str(folder_b),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-CHR-B",
+            logging_filepath=log_b,
+        )
+
+    assert pending_b2 == 0
+    assert attachments_b == []
+    assert events_b == [
+        ("SXM", "img0001.sxm"),
+        ("DAT", ["spec_a.dat", "spec_b.dat"]),
+        ("SXM", "img0002.sxm"),
+    ]
+
+
+def test_parse_error_uses_in_place_chronological_attachment_fallback(tmp_path):
+    from src import measurements_uploader
+
+    folder = tmp_path / "parse_fallback_order"
+    folder.mkdir()
+    for name in ("img0001.sxm", "bad_spec.dat", "img0002.sxm"):
+        (folder / name).write_text("data", encoding="utf-8")
+
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_fp, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-PARSE-FB", str(folder), logs_dir=logs_dir
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    timestamps = {
+        "img0001.sxm": datetime.datetime(2026, 11, 26, 12, 0, 0),
+        "bad_spec.dat": datetime.datetime(2026, 11, 26, 12, 1, 0),
+        "img0002.sxm": datetime.datetime(2026, 11, 26, 12, 2, 0),
+    }
+
+    def fake_spm(path):
+        name = os.path.basename(path)
+        obj = MagicMock()
+        obj.record_datetime = timestamps[name]
+        obj.signals = {"Z": {}, "I": {}}
+        obj.measurement_type = "Z spectroscopy I vs z"
+        return obj
+
+    order = []
+
+    def fake_sxm(_sess, fp, **_kw):
+        order.append(("SXM", os.path.basename(fp)))
+
+    def fake_dat(_sess, _directory, **_kw):
+        raise TypeError("must be real number, not str")
+
+    def fake_att(_sess, **kw):
+        order.append(("ATTACHMENT", os.path.basename(kw["files"][0])))
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch("nanonis_importer.nanonis_importer.demo_sxm_flow", side_effect=fake_sxm),
+        patch("nanonis_importer.nanonis_importer.demo_dat_flow", side_effect=fake_dat),
+        patch("src.utils.create_openbis_dataset", side_effect=fake_att),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        pending = measurements_uploader.run_upload_cycle(
+            data_folder=str(folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-PARSE-FB",
+            logging_filepath=log_fp,
+        )
+
+    assert pending == 0
+    assert order == [
+        ("SXM", "img0001.sxm"),
+        ("ATTACHMENT", "bad_spec.dat"),
+        ("SXM", "img0002.sxm"),
+    ]
+    data = json.loads(open(log_fp, encoding="utf-8").read())
+    assert "ATTACHMENT fallback" in data["last_error"]["message"]
+
+
+def test_dat_group_update_deletes_tracked_group_dataset_permid_not_latest_unrelated_dataset(
+    tmp_path,
+):
+    import pandas as pd
+
+    from nanonis_importer import nanonis_importer
+
+    folder = tmp_path / "dat_group_ids"
+    folder.mkdir()
+    (folder / "dIdV_1.dat").write_text("d1", encoding="utf-8")
+    (folder / "iv_1.dat").write_text("iv1", encoding="utf-8")
+    log_fp = tmp_path / "SESS-DAT-IDS.json"
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    # Simulate openBIS reporting DS-TYPE-B-1 as the most recently registered dataset
+    mock_ds_result = MagicMock()
+    mock_ds_result.df = pd.DataFrame(
+        [
+            {"permId": "DS-TYPE-A-1", "registrationDate": "2026-11-26 12:01:00"},
+            {"permId": "DS-TYPE-B-1", "registrationDate": "2026-11-26 12:02:00"},
+        ]
+    )
+    mock_sample.get_datasets.return_value = mock_ds_result
+
+    meta = {
+        "dIdV_1.dat": (
+            datetime.datetime(2026, 11, 26, 12, 1, 0),
+            "bias spectroscopy dIdV vs V",
+        ),
+        "iv_1.dat": (
+            datetime.datetime(2026, 11, 26, 12, 2, 0),
+            "bias spectroscopy I vs V",
+        ),
+        "dIdV_2.dat": (
+            datetime.datetime(2026, 11, 26, 12, 3, 0),
+            "bias spectroscopy dIdV vs V",
+        ),
+    }
+
+    def fake_spm(path):
+        dt, mtype = meta[os.path.basename(path)]
+        obj = MagicMock()
+        obj.record_datetime = dt
+        obj.signals = {"V": {}, "dIdV": {}, "I": {}}
+        obj.measurement_type = mtype
+        return obj
+
+    returned_ids = iter(["DS-TYPE-A-1", "DS-TYPE-B-1", "DS-TYPE-A-2"])
+    deleted_ids = []
+
+    def fake_get_dataset(perm_id):
+        ds = MagicMock()
+        ds.delete.side_effect = lambda _reason: deleted_ids.append(perm_id)
+        return ds
+
+    mock_session.get_dataset.side_effect = fake_get_dataset
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_dat_flow",
+            side_effect=lambda *_a, **_kw: next(returned_ids),
+        ),
+    ):
+        # Run 1: uploads dIdV_1.dat (DS-TYPE-A-1) and iv_1.dat (DS-TYPE-B-1)
+        nanonis_importer.process_measurement_files(
+            "https://openbis.local",
+            "tok-1",
+            str(folder),
+            "SESS-DAT-IDS",
+            logging_filepath=str(log_fp),
+        )
+        # Run 2: dIdV_2.dat arrives -> must replace DS-TYPE-A-1, NOT DS-TYPE-B-1!
+        (folder / "dIdV_2.dat").write_text("d2", encoding="utf-8")
+        nanonis_importer.process_measurement_files(
+            "https://openbis.local",
+            "tok-1",
+            str(folder),
+            "SESS-DAT-IDS",
+            logging_filepath=str(log_fp),
+        )
+
+    assert deleted_ids == ["DS-TYPE-A-1"]
+    data = json.loads(log_fp.read_text(encoding="utf-8"))
+    assert data["dat_group_datasets"][os.path.normpath(str(folder / "dIdV_1.dat"))] == "DS-TYPE-A-2"
+    assert data["dat_group_datasets"][os.path.normpath(str(folder / "dIdV_2.dat"))] == "DS-TYPE-A-2"
+    assert data["dat_group_datasets"][os.path.normpath(str(folder / "iv_1.dat"))] == "DS-TYPE-B-1"
