@@ -1867,3 +1867,210 @@ def test_generate_watchdog_resets_dropdowns_and_session_name_after_submit(
         assert widget2.select_sample_widget.sample_dropdown.value == "-1"
         assert widget2.select_instrument_widget.instrument_dropdown.value == "-1"
         assert widget2.measurement_session_name_text.value == ""
+
+
+def test_bulk_action_button_toggles_between_hidden_stop_all_and_resume_all(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    folder_a = tmp_path / "bulk_a"
+    folder_b = tmp_path / "bulk_b"
+    folder_a.mkdir()
+    folder_b.mkdir()
+
+    # 1. Empty registry -> bulk button hidden
+    empty_widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+        MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
+    )
+    assert empty_widget.bulk_action_button.layout.display == "none"
+
+    # 2. Mix of 1 RUNNING + 1 EXITED (TOKEN_EXPIRED) -> shows "Stop All"
+    (meas_dir / "SESS-A.json").write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-A",
+                "data_folder": str(folder_a),
+                "processed_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (meas_dir / "SESS-B.json").write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-B",
+                "data_folder": str(folder_b),
+                "processed_files": [],
+                "token_expired": True,
+                "last_error": {"stage": "auth", "message": "Token expired"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 61001,
+                    "monitored_folder": str(folder_a),
+                    "measurement_session_id": "SESS-A",
+                    "status": "RUNNING",
+                    "started_at": "2026-11-26T12:00:00+00:00",
+                },
+                {
+                    "pid": 61002,
+                    "monitored_folder": str(folder_b),
+                    "measurement_session_id": "SESS-B",
+                    "status": "EXITED",
+                    "user_stopped": False,
+                    "started_at": "2026-11-26T11:00:00+00:00",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    alive_pids = {61001}
+    kill_calls = []
+
+    def fake_kill(pid, sig):
+        kill_calls.append((pid, sig))
+        if sig in (signal.SIGTERM, signal.SIGKILL):
+            alive_pids.discard(pid)
+
+    spawned_pids = iter([62001, 62002])
+
+    def fake_popen(cmd, **kwargs):
+        pid = next(spawned_pids)
+        alive_pids.add(pid)
+        return MagicMock(pid=pid)
+
+    with (
+        patch("os.kill", side_effect=fake_kill),
+        patch(
+            "src.measurement_monitor.is_pid_running",
+            side_effect=lambda p: p in alive_pids,
+        ),
+        patch(
+            "src.utils.get_openbis_object",
+            side_effect=lambda _s, sample_ident=None: _fake_session(
+                sample_ident, f"MEAS_{sample_ident}"
+            ),
+        ),
+        patch("subprocess.Popen", side_effect=fake_popen) as mock_popen,
+        patch("time.sleep", return_value=None),
+    ):
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
+        )
+        assert widget.bulk_action_button.layout.display != "none"
+        assert widget.bulk_action_button.description == "Stop All"
+        assert widget.bulk_action_button.button_style == "danger"
+
+        # Click Stop All -> stops running PID, keeps cards, flips button to Resume All
+        widget.bulk_action_button.click()
+        assert (61001, signal.SIGTERM) in kill_calls
+        assert (61002, signal.SIGTERM) not in kill_calls
+        assert widget.bulk_action_button.description == "Resume All"
+        assert widget.bulk_action_button.button_style == "success"
+
+        # Click Resume All -> resumes both A and B, flips button back to Stop All
+        widget.bulk_action_button.click()
+        assert mock_popen.call_count == 2
+        assert widget.bulk_action_button.description == "Stop All"
+        assert widget.bulk_action_button.button_style == "danger"
+
+    entries = json.loads(active_file.read_text(encoding="utf-8"))
+    assert {e["status"] for e in entries} == {"RUNNING"}
+    log_b = json.loads((meas_dir / "SESS-B.json").read_text(encoding="utf-8"))
+    assert log_b["token_expired"] is False
+    assert log_b["last_error"] is None
+    assert log_b["eln_token"] == "tok-fresh"
+
+
+def test_resume_all_skips_invalid_or_duplicate_folder_entries_and_reports_summary(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    folder_ok = tmp_path / "resume_ok"
+    folder_ok.mkdir()
+    folder_missing = tmp_path / "resume_missing"
+    folder_del = tmp_path / "resume_deleted"
+    folder_del.mkdir()
+
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 71001,
+                    "monitored_folder": str(folder_ok),
+                    "measurement_session_id": "SESS-DUP-OLD",
+                    "status": "STOPPED",
+                    "user_stopped": True,
+                    "started_at": "2026-11-26T09:00:00+00:00",
+                },
+                {
+                    "pid": 71002,
+                    "monitored_folder": str(folder_ok),
+                    "measurement_session_id": "SESS-OK-NEW",
+                    "status": "STOPPED",
+                    "user_stopped": True,
+                    "started_at": "2026-11-26T12:00:00+00:00",
+                },
+                {
+                    "pid": 71003,
+                    "monitored_folder": str(folder_missing),
+                    "measurement_session_id": "SESS-GONE",
+                    "status": "STOPPED",
+                    "user_stopped": True,
+                    "started_at": "2026-11-26T11:00:00+00:00",
+                },
+                {
+                    "pid": 71004,
+                    "monitored_folder": str(folder_del),
+                    "measurement_session_id": "SESS-DEL",
+                    "status": "EXITED",
+                    "user_stopped": False,
+                    "started_at": "2026-11-26T10:00:00+00:00",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    alive_pids = set()
+
+    def fake_popen(cmd, **kwargs):
+        alive_pids.add(72001)
+        return MagicMock(pid=72001)
+
+    def fake_get_openbis(_s, sample_ident=None):
+        if sample_ident == "SESS-DEL":
+            raise ValueError("Deleted")
+        return _fake_session(sample_ident, f"MEAS_{sample_ident}")
+
+    with (
+        patch(
+            "src.measurement_monitor.is_pid_running",
+            side_effect=lambda p: p in alive_pids,
+        ),
+        patch("src.utils.get_openbis_object", side_effect=fake_get_openbis),
+        patch("subprocess.Popen", side_effect=fake_popen) as mock_popen,
+    ):
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
+        )
+        assert widget.bulk_action_button.description == "Resume All"
+        widget.bulk_action_button.click()
+
+    assert mock_popen.call_count == 1
+    assert "SESS-OK-NEW" in mock_popen.call_args.args[0]
+    assert widget.bulk_action_button.description == "Stop All"
+    assert "1" in widget.bulk_status.value
+    assert "3" in widget.bulk_status.value or "skipped" in widget.bulk_status.value.lower()

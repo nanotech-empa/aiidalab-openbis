@@ -121,13 +121,29 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             layout=ipw.Layout(width="500px")
         )
 
+        self.bulk_action_button = ipw.Button(
+            description="Stop All",
+            icon="stop",
+            button_style="danger",
+            layout=ipw.Layout(width="130px", display="none"),
+        )
+        self._bulk_action_mode = None
+        self._bulk_action_in_progress = False
+        self.bulk_action_button.on_click(self._on_bulk_action)
+        self.bulk_status = ipw.HTML(value="")
+
         self.refresh_button = ipw.Button(
             description="Refresh Status",
             icon="refresh",
             button_style="",
             layout=ipw.Layout(width="150px"),
         )
-        self.refresh_button.on_click(lambda _b: self.refresh_watchdog_list())
+
+        def _on_refresh(_b):
+            self.bulk_status.value = ""
+            self.refresh_watchdog_list()
+
+        self.refresh_button.on_click(_on_refresh)
 
         self.watchdogs_accordion = ipw.Accordion(selected_index=None)
         self._accordion_keys = []
@@ -141,14 +157,18 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                     ipw.HTML(
                         "<div style='font-weight: bold; font-size: 16px; color: #34495e;'>Tracked Measurement Watchdogs</div>"
                     ),
-                    self.refresh_button,
+                    ipw.HBox(
+                        [self.bulk_action_button, self.refresh_button],
+                        layout=ipw.Layout(gap="8px", align_items="center"),
+                    ),
                 ],
                 layout=ipw.Layout(
                     justify_content="space-between",
                     align_items="center",
-                    margin="0 0 12px 0",
+                    margin="0 0 8px 0",
                 ),
             ),
+            self.bulk_status,
             self.watchdogs_box,
         ]
 
@@ -322,6 +342,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         measurement_session_id,
         metadata=None,
         log_file=None,
+        render_ui=True,
     ):
         measurement_monitor.upsert_running_watchdog(
             self._active_watchdogs_file(),
@@ -335,8 +356,207 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             self._active_watchdogs_file()
         )
         self._sync_select_options(entries)
-        if hasattr(self, "watchdogs_box"):
+        if render_ui and hasattr(self, "watchdogs_box"):
             self.render_watchdogs(entries=entries)
+
+    def _update_bulk_action_button(self, entries):
+        btn = getattr(self, "bulk_action_button", None)
+        if btn is None:
+            return
+        if not entries:
+            self._bulk_action_mode = None
+            btn.layout.display = "none"
+            return
+
+        has_running = any(
+            entry.get("status") == "RUNNING" and entry.get("pid") is not None
+            for entry in entries
+        )
+        if has_running:
+            self._bulk_action_mode = "stop_all"
+            btn.description = "Stop All"
+            btn.button_style = "danger"
+            btn.icon = "stop"
+            btn.tooltip = "Stop all currently running watchdogs"
+        else:
+            self._bulk_action_mode = "resume_all"
+            btn.description = "Resume All"
+            btn.button_style = "success"
+            btn.icon = "play"
+            btn.tooltip = "Resume all stopped or exited watchdogs"
+        btn.layout.display = ""
+
+    def _resume_watchdog_entry(self, session_id, folder, render_ui=True):
+        """Validate and resume a single stopped/exited watchdog entry.
+
+        Returns (success: bool, error_message: str | None).
+        """
+        folder = folder or ""
+        if not folder or not os.path.isdir(folder):
+            return False, "Cannot resume: folder not found on disk."
+
+        if self.get_active_watchdogs_for_folder(folder, refresh_ui=False):
+            return (
+                False,
+                "Cannot resume: this folder is already being monitored by an active watchdog.",
+            )
+
+        if not session_id:
+            return False, "Cannot resume: missing Measurement Session ID."
+
+        openbis_url = (
+            self.session_data.get("url")
+            if isinstance(self.session_data, dict)
+            else None
+        )
+        openbis_token = (
+            self.session_data.get("token")
+            if isinstance(self.session_data, dict)
+            else None
+        )
+        if not openbis_url or not openbis_token:
+            return (
+                False,
+                "Cannot resume: missing openBIS session credentials (URL or token).",
+            )
+
+        try:
+            utils.get_openbis_object(self.openbis_session, sample_ident=session_id)
+        except Exception:
+            return (
+                False,
+                "Cannot resume: Measurement Session no longer exists in openBIS.",
+            )
+
+        logs_dir = self._measurement_logs_dir()
+        log_json_path = get_measurement_log_filepath(session_id, logs_dir=logs_dir)
+        prev_state = (
+            measurement_monitor.read_json_safe(log_json_path, default={}) or {}
+        )
+        prev_token_expired = prev_state.get("token_expired", False)
+        prev_last_error = prev_state.get("last_error")
+
+        measurement_monitor.update_measurement_log(
+            log_json_path,
+            lambda d: d.update(
+                {
+                    "eln_url": openbis_url,
+                    "eln_token": openbis_token,
+                    "measurement_session_id": session_id,
+                    "data_folder": os.path.normpath(folder),
+                    "token_expired": False,
+                    "last_error": None,
+                    "processed_files": d.get("processed_files", []),
+                }
+            ),
+        )
+        try:
+            proc, proc_log_path = measurement_monitor.start_watchdog_subprocess(
+                APP_FOLDER,
+                openbis_url,
+                openbis_token,
+                session_id,
+                folder,
+                logs_dir=logs_dir,
+            )
+        except Exception as exc:
+            measurement_monitor.update_measurement_log(
+                log_json_path,
+                lambda d: d.update(
+                    {
+                        "token_expired": prev_token_expired,
+                        "last_error": prev_last_error,
+                    }
+                ),
+            )
+            redacted = measurement_monitor.redact_secrets(str(exc), [openbis_token])
+            return False, f"Failed to start watchdog: {redacted}"
+
+        self.watchdog_processes.append(proc)
+        self.add_active_watchdog(
+            proc.pid,
+            folder,
+            session_id,
+            log_file=proc_log_path,
+            render_ui=render_ui,
+        )
+        return True, None
+
+    def _on_bulk_action(self, _b):
+        if getattr(self, "_bulk_action_in_progress", False):
+            return
+        self._bulk_action_in_progress = True
+        btn = getattr(self, "bulk_action_button", None)
+        status_out = getattr(self, "bulk_status", None)
+        if btn is not None:
+            btn.disabled = True
+        if status_out is not None:
+            status_out.value = ""
+
+        try:
+            self._reap_watchdog_processes()
+            entries = measurement_monitor.sync_watchdog_liveness(
+                self._active_watchdogs_file()
+            )
+            if not entries:
+                self.render_watchdogs(entries=entries)
+                return
+
+            running_pids = [
+                entry["pid"]
+                for entry in entries
+                if entry.get("status") == "RUNNING" and entry.get("pid") is not None
+            ]
+
+            if self._bulk_action_mode == "stop_all":
+                if running_pids:
+                    self.stop_watchdog_pids(
+                        running_pids, notify=False, remove_entries=False
+                    )
+                else:
+                    self.render_watchdogs(entries=entries)
+                return
+
+            if self._bulk_action_mode == "resume_all":
+                if running_pids:
+                    # Another watchdog became active since last render; just refresh
+                    self.render_watchdogs(entries=entries)
+                    return
+
+                candidates = sorted(
+                    entries,
+                    key=lambda e: e.get("started_at") or "",
+                    reverse=True,
+                )
+                resumed_count = 0
+                skipped = []
+                for entry in candidates:
+                    sid = entry.get("measurement_session_id")
+                    folder = entry.get("monitored_folder") or ""
+                    label = entry.get("session_name") or sid or folder or "Unknown"
+                    ok, err = self._resume_watchdog_entry(sid, folder, render_ui=False)
+                    if ok:
+                        resumed_count += 1
+                    else:
+                        skipped.append((str(label), str(err or "Skipped")))
+
+                self.refresh_watchdog_list()
+                if skipped and status_out is not None:
+                    items = "".join(
+                        f"<li><b>{html.escape(lbl)}</b>: {html.escape(reason)}</li>"
+                        for lbl, reason in skipped
+                    )
+                    status_out.value = (
+                        "<div style='background: #fffbeb; border-left: 4px solid #d97706; "
+                        "padding: 6px 10px; margin-bottom: 8px; color: #92400e; font-size: 12px; border-radius: 3px;'>"
+                        f"<b>Resumed {resumed_count}, skipped {len(skipped)}:</b>"
+                        f"<ul style='margin: 4px 0 0 18px;'>{items}</ul>"
+                        "</div>"
+                    )
+        finally:
+            self._bulk_action_in_progress = False
+            if btn is not None:
+                btn.disabled = False
 
     def stop_watchdog(self, b):
         selected_pids = self.running_watchdogs_widget.value
@@ -383,6 +603,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             entries = measurement_monitor.load_watchdog_entries(
                 self._active_watchdogs_file()
             )
+        self._update_bulk_action_button(entries)
         if not entries:
             self.watchdogs_accordion.children = []
             self.watchdogs_accordion.titles = ()
@@ -637,118 +858,14 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                 self._resuming_sessions.add(resume_key)
                 rbtn.disabled = True
                 try:
-                    if not folder or not os.path.isdir(folder):
+                    ok, err_msg = self._resume_watchdog_entry(
+                        session_id, folder, render_ui=True
+                    )
+                    if not ok and err_msg:
                         status_out.value = (
                             "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
-                            "⚠ Cannot resume: folder not found on disk.</div>"
+                            f"⚠ {html.escape(err_msg)}</div>"
                         )
-                        return
-
-                    if self.get_active_watchdogs_for_folder(folder, refresh_ui=False):
-                        status_out.value = (
-                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
-                            "⚠ Cannot resume: this folder is already being monitored by an active watchdog.</div>"
-                        )
-                        return
-
-                    if not session_id:
-                        status_out.value = (
-                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
-                            "⚠ Cannot resume: missing Measurement Session ID.</div>"
-                        )
-                        return
-
-                    openbis_url = (
-                        self.session_data.get("url")
-                        if isinstance(self.session_data, dict)
-                        else None
-                    )
-                    openbis_token = (
-                        self.session_data.get("token")
-                        if isinstance(self.session_data, dict)
-                        else None
-                    )
-                    if not openbis_url or not openbis_token:
-                        status_out.value = (
-                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
-                            "⚠ Cannot resume: missing openBIS session credentials (URL or token).</div>"
-                        )
-                        return
-
-                    try:
-                        utils.get_openbis_object(
-                            self.openbis_session, sample_ident=session_id
-                        )
-                    except Exception:
-                        status_out.value = (
-                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
-                            "⚠ Cannot resume: Measurement Session no longer exists in openBIS.</div>"
-                        )
-                        return
-
-                    logs_dir = self._measurement_logs_dir()
-                    log_json_path = get_measurement_log_filepath(
-                        session_id, logs_dir=logs_dir
-                    )
-                    prev_state = (
-                        measurement_monitor.read_json_safe(log_json_path, default={})
-                        or {}
-                    )
-                    prev_token_expired = prev_state.get("token_expired", False)
-                    prev_last_error = prev_state.get("last_error")
-
-                    measurement_monitor.update_measurement_log(
-                        log_json_path,
-                        lambda d: d.update(
-                            {
-                                "eln_url": openbis_url,
-                                "eln_token": openbis_token,
-                                "measurement_session_id": session_id,
-                                "data_folder": os.path.normpath(folder),
-                                "token_expired": False,
-                                "last_error": None,
-                                "processed_files": d.get("processed_files", []),
-                            }
-                        ),
-                    )
-                    try:
-                        proc, proc_log_path = (
-                            measurement_monitor.start_watchdog_subprocess(
-                                APP_FOLDER,
-                                openbis_url,
-                                openbis_token,
-                                session_id,
-                                folder,
-                                logs_dir=logs_dir,
-                            )
-                        )
-                    except Exception as exc:
-                        measurement_monitor.update_measurement_log(
-                            log_json_path,
-                            lambda d: d.update(
-                                {
-                                    "token_expired": prev_token_expired,
-                                    "last_error": prev_last_error,
-                                }
-                            ),
-                        )
-                        safe_err = html.escape(
-                            measurement_monitor.redact_secrets(
-                                str(exc), [openbis_token]
-                            )
-                        )
-                        status_out.value = (
-                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
-                            f"⚠ Failed to start watchdog: {safe_err}</div>"
-                        )
-                        return
-                    self.watchdog_processes.append(proc)
-                    self.add_active_watchdog(
-                        proc.pid,
-                        folder,
-                        session_id,
-                        log_file=proc_log_path,
-                    )
                 finally:
                     self._resuming_sessions.discard(resume_key)
                     rbtn.disabled = False
