@@ -434,18 +434,22 @@ def _make_full_generator_widget(
     running_widget = _make_running_widget(watchdog_module, logs_dir)
 
     fake_project = ipw.VBox()
-    fake_project.project_dropdown = ipw.Dropdown(options=[("P1", "PROJ-1")], value="PROJ-1")
+    fake_project.project_dropdown = ipw.Dropdown(
+        options=[("Select project...", "-1"), ("P1", "PROJ-1")], value="PROJ-1"
+    )
     fake_experiment = ipw.VBox()
     fake_experiment.experiment_dropdown = ipw.Dropdown(
-        options=[("E1", "EXP-1")], value="EXP-1"
+        options=[("Select experiment...", "-1"), ("E1", "EXP-1")], value="EXP-1"
     )
     fake_experiment.create_experiment_button = ipw.Button()
     fake_experiment.load_experiments = MagicMock()
     fake_sample = ipw.VBox()
-    fake_sample.sample_dropdown = ipw.Dropdown(options=[("S1", "SMP-1")], value="SMP-1")
+    fake_sample.sample_dropdown = ipw.Dropdown(
+        options=[("Select sample...", "-1"), ("S1", "SMP-1")], value="SMP-1"
+    )
     fake_instrument = ipw.VBox()
     fake_instrument.instrument_dropdown = ipw.Dropdown(
-        options=[("I1", "INST-1")], value="INST-1"
+        options=[("Select instrument...", "-1"), ("I1", "INST-1")], value="INST-1"
     )
 
     with (
@@ -1779,3 +1783,87 @@ def test_notebook_tab_switch_triggers_refresh():
     code = "\n".join("".join(c.get("source", [])) for c in cells if c["cell_type"] == "code")
     assert "selected_index" in code
     assert "running_watchdogs_vbox.refresh_watchdog_list" in code
+
+
+def test_generate_watchdog_resets_dropdowns_and_session_name_after_submit(
+    watchdog_module, tmp_path
+):
+    data_folder = tmp_path / "reset_submit_run"
+    data_folder.mkdir()
+    widget = _make_full_generator_widget(
+        watchdog_module, tmp_path, data_folder, session_name="MEAS_Sample1"
+    )
+    new_session = _fake_session("SESS-RST-1", "MEAS_Sample1")
+    fake_proc = MagicMock(pid=8101)
+
+    with (
+        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
+        patch.object(watchdog_module, "display"),
+    ):
+        widget.generate_watchdog(None)
+
+        # Metadata was captured BEFORE reset
+        log_data = json.loads(
+            (widget.measurement_logs_folder / "SESS-RST-1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert log_data["session_name"] == "MEAS_Sample1"
+        assert log_data["sample_name"] == "S1"
+        assert log_data["experiment_name"] == "E1"
+        assert log_data["instrument_name"] == "I1"
+
+        # All dropdowns and measurement name reset to defaults
+        assert widget.select_project_widget.project_dropdown.value == "-1"
+        assert widget.select_experiment_widget.experiment_dropdown.value == "-1"
+        assert widget.select_sample_widget.sample_dropdown.value == "-1"
+        assert widget.select_instrument_widget.instrument_dropdown.value == "-1"
+        assert widget.measurement_session_name_text.value == ""
+
+        # Immediately clicking Save again is blocked so no duplicate session is created
+        widget.generate_watchdog(None)
+        assert mock_create.call_count == 1
+        assert mock_popen.call_count == 1
+
+    # On Switch to new session, form also resets; on Cancel or failure, inputs stay intact
+    folder_conflict = tmp_path / "reset_switch_run"
+    folder_conflict.mkdir()
+    old_session = _fake_session("SESS-OLD-RST", "MEAS_Old")
+    switched_session = _fake_session("SESS-SW-RST", "MEAS_Switched")
+    (widget.measurement_logs_folder / "SESS-OLD-RST.json").write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-OLD-RST",
+                "data_folder": str(folder_conflict),
+                "processed_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    widget2 = _make_full_generator_widget(
+        watchdog_module, tmp_path, folder_conflict, session_name="MEAS_Switched"
+    )
+    with (
+        patch("src.utils.get_openbis_object", return_value=old_session),
+        patch("src.utils.create_openbis_object", return_value=switched_session),
+        patch("subprocess.Popen", return_value=MagicMock(pid=8102)),
+        patch.object(watchdog_module, "display"),
+    ):
+        # Cancel preserves inputs
+        widget2.generate_watchdog(None)
+        _, buttons = _extract_prompt_widgets(widget2.folder_conflict_box)
+        buttons["Cancel"].click()
+        assert widget2.select_sample_widget.sample_dropdown.value == "SMP-1"
+        assert widget2.measurement_session_name_text.value == "MEAS_Switched"
+
+        # Switch resets inputs
+        widget2.generate_watchdog(None)
+        _, buttons = _extract_prompt_widgets(widget2.folder_conflict_box)
+        buttons["Switch to new session"].click()
+        assert widget2.select_project_widget.project_dropdown.value == "-1"
+        assert widget2.select_experiment_widget.experiment_dropdown.value == "-1"
+        assert widget2.select_sample_widget.sample_dropdown.value == "-1"
+        assert widget2.select_instrument_widget.instrument_dropdown.value == "-1"
+        assert widget2.measurement_session_name_text.value == ""

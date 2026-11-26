@@ -1473,6 +1473,39 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.watchdog_processes.append(watchdog_process)
         return watchdog_process
 
+    @staticmethod
+    def _reset_dropdown(dropdown, default_value="-1"):
+        if dropdown is None:
+            return
+        option_values = [
+            opt[1] if isinstance(opt, (tuple, list)) and len(opt) >= 2 else opt
+            for opt in getattr(dropdown, "options", ())
+        ]
+        if default_value in option_values:
+            dropdown.value = default_value
+
+    def _reset_form_inputs(self):
+        """Resets all selection dropdowns and the session name back to defaults."""
+        project_widget = getattr(self, "select_project_widget", None)
+        if project_widget is not None:
+            self._reset_dropdown(getattr(project_widget, "project_dropdown", None))
+        experiment_widget = getattr(self, "select_experiment_widget", None)
+        if experiment_widget is not None:
+            self._reset_dropdown(
+                getattr(experiment_widget, "experiment_dropdown", None)
+            )
+        sample_widget = getattr(self, "select_sample_widget", None)
+        if sample_widget is not None:
+            self._reset_dropdown(getattr(sample_widget, "sample_dropdown", None))
+        instrument_widget = getattr(self, "select_instrument_widget", None)
+        if instrument_widget is not None:
+            self._reset_dropdown(
+                getattr(instrument_widget, "instrument_dropdown", None)
+            )
+        name_widget = getattr(self, "measurement_session_name_text", None)
+        if name_widget is not None:
+            name_widget.value = ""
+
     def _on_folder_changed(self, _chooser):
         self._clear_folder_conflict_prompt()
 
@@ -1582,6 +1615,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                         data="alert('Continuing upload to the existing measurement session.');"
                     )
                 )
+                self._reset_form_inputs()
                 return
 
             if (
@@ -1599,6 +1633,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                     norm_data_folder,
                     metadata=resume_meta,
                 )
+                self._reset_form_inputs()
                 return
 
             logger.warning(
@@ -1689,6 +1724,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             self._write_fresh_measurement_log(new_session.permId, norm_data_folder)
             self._clear_folder_conflict_prompt()
             self._start_watchdog_process(new_session.permId, norm_data_folder)
+            self._reset_form_inputs()
 
         def _on_cancel(_):
             if not _consume_pending():
@@ -1744,6 +1780,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         )
         self._write_fresh_measurement_log(measurement_session.permId, data_folder)
         self._start_watchdog_process(measurement_session.permId, data_folder)
+        self._reset_form_inputs()
 
     def cleanup_watchdog(self):
         if self.watchdog_processes:
