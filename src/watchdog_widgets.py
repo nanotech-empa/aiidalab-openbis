@@ -1,13 +1,17 @@
+import datetime
+import html
+import json
+import logging
 import os
 import pathlib
-import ipywidgets as ipw
 import signal
-from IPython.display import display, Javascript
-from . import utils, widgets
-import ipyfilechooser
 import subprocess
-import logging
-import json
+
+import ipyfilechooser
+import ipywidgets as ipw
+from IPython.display import Javascript, display
+
+from . import utils, widgets
 
 INTERFACE_CONFIG_INFO = utils.get_interface_config_info()
 OPENBIS_OBJECT_TYPES, _ = (
@@ -59,11 +63,31 @@ def find_measurement_logs_for_folder(data_folder, logs_dir=MEASUREMENT_LOGS_FOLD
     return matches
 
 
+def detach_measurement_logs_for_folder(
+    data_folder, replaced_by_session_id=None, logs_dir=MEASUREMENT_LOGS_FOLDER
+):
+    detached_paths = []
+    detached_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    for log_file, data in find_measurement_logs_for_folder(
+        data_folder, logs_dir=logs_dir
+    ):
+        updated = dict(data)
+        updated["previous_data_folder"] = updated.get("data_folder")
+        updated["data_folder"] = None
+        updated["detached_at"] = detached_at
+        if replaced_by_session_id is not None:
+            updated["replaced_by_session_id"] = replaced_by_session_id
+        utils.write_json(updated, str(log_file))
+        detached_paths.append(log_file)
+    return detached_paths
+
+
 class RunningMeasurementWatchdogsWidget(ipw.VBox):
     def __init__(self, openbis_session, session_data):
         super().__init__()
         self.openbis_session = openbis_session
         self.session_data = session_data
+        self.logs_folder = None
 
         self.notes = ipw.HTML(
             value="""
@@ -112,8 +136,12 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             self.stop_watchdog_button,
         ]
 
+    def _active_watchdogs_file(self):
+        logs_root = getattr(self, "logs_folder", None) or LOGS_FOLDER
+        return pathlib.Path(logs_root) / "active_watchdogs.json"
+
     def refresh_watchdog_list(self):
-        json_file = LOGS_FOLDER / "active_watchdogs.json"
+        json_file = self._active_watchdogs_file()
 
         folder_options = []
         valid_entries = []  # We will store only the alive processes here
@@ -163,50 +191,100 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         # Update the widget with only the actively running folders
         self.running_watchdogs_widget.options = folder_options
 
+    def get_active_watchdogs_for_folder(self, data_folder):
+        self.refresh_watchdog_list()
+        norm_target = os.path.normpath(data_folder)
+        json_file = self._active_watchdogs_file()
+        matches = []
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
+        if isinstance(data, list):
+            for entry in data:
+                folder = entry.get("monitored_folder")
+                pid = entry.get("pid")
+                if (
+                    folder
+                    and pid is not None
+                    and os.path.normpath(folder) == norm_target
+                ):
+                    matches.append(entry)
+        return matches
+
+    def stop_watchdog_pids(self, pids, notify=True):
+        target_pids = list(pids)
+        if not target_pids:
+            return []
+
+        pid_set = set(target_pids)
+        for pid in target_pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                logger.info(f"Terminating watchdog process with PID: {pid}")
+            except ProcessLookupError:
+                logger.warning(
+                    f"Process {pid} not found. It may have already exited."
+                )
+
+        if notify:
+            display(Javascript(data="alert('Watchdog(s) stopped.')"))
+
+        self.running_watchdogs_widget.options = [
+            (directory, pid)
+            for directory, pid in self.running_watchdogs_widget.options
+            if pid not in pid_set
+        ]
+
+        json_file = self._active_watchdogs_file()
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
+
+            updated_data = (
+                [entry for entry in data if entry.get("pid") not in pid_set]
+                if isinstance(data, list)
+                else []
+            )
+            with open(json_file, "w") as f:
+                json.dump(updated_data, f, indent=4)
+        except (FileNotFoundError, json.JSONDecodeError):
+            logger.error(f"Could not read {json_file} to clean up PIDs.")
+
+        return target_pids
+
+    def add_active_watchdog(self, pid, data_folder, measurement_session_id):
+        norm_data_folder = os.path.normpath(data_folder)
+        json_file = self._active_watchdogs_file()
+        json_file.parent.mkdir(parents=True, exist_ok=True)
+        data = []
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
+                if not isinstance(data, list):
+                    data = [data]
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        data.append(
+            {
+                "pid": pid,
+                "monitored_folder": norm_data_folder,
+                "measurement_session_id": measurement_session_id,
+            }
+        )
+        with open(json_file, "w") as f:
+            json.dump(data, f, indent=4)
+
+        self.running_watchdogs_widget.options += ((norm_data_folder, pid),)
+
     def stop_watchdog(self, b):
         selected_pids = self.running_watchdogs_widget.value
 
         if selected_pids:
-            # 1. Kill the actual processes safely
-            for pid in selected_pids:
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                    logger.info(f"Terminating watchdog process with PID: {pid}")
-                except ProcessLookupError:
-                    # The process might have already died/crashed on its own
-                    logger.warning(
-                        f"Process {pid} not found. It may have already exited."
-                    )
-
-            display(Javascript(data="alert('Watchdog(s) stopped.')"))
-
-            # 2. Remove them from the widget UI
-            self.running_watchdogs_widget.options = [
-                (directory, pid)
-                for directory, pid in self.running_watchdogs_widget.options
-                if pid not in selected_pids
-            ]
-
-            # 3. Remove them from the JSON log file
-            json_file = LOGS_FOLDER / "active_watchdogs.json"
-            try:
-                # Read the current file
-                with open(json_file, "r") as f:
-                    data = json.load(f)
-
-                # Filter out the dictionaries whose 'pid' is in selected_pids
-                if isinstance(data, list):
-                    updated_data = [
-                        entry for entry in data if entry.get("pid") not in selected_pids
-                    ]
-
-                # Write the clean list back to the file
-                with open(json_file, "w") as f:
-                    json.dump(updated_data, f, indent=4)
-
-            except (FileNotFoundError, json.JSONDecodeError):
-                logger.error(f"Could not read {json_file} to clean up PIDs.")
-
+            self.stop_watchdog_pids(selected_pids, notify=True)
         else:
             display(Javascript(data="alert('Select at least one directory.')"))
             logger.info("No directory selected.")
