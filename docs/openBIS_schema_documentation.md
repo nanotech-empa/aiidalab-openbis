@@ -177,6 +177,10 @@ To make navigating the object types easier, the tables below group them by funct
 
 The target defines thirteen result types, independently of the numerical method:
 
+Numeric sequences use `ARRAY_REAL` with `Multivalued` set to `False`. A sequence
+with one value is stored as an array, for example `[1e-7]`. OpenBIS does not
+index the individual elements for numeric property searches.
+
 | Object Type | Code | Prefix | Metadata | Scope |
 | :--- | :--- | :--- | :--- | :--- |
 | [Energy Calculation](#energy-calculation) | `ENERGY_CALCULATION` | `ENERGY` | *(None)* | Fixed-geometry total energy |
@@ -828,7 +832,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | ARRAY_REAL | False | False | False |  |  |
 | `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
 | `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
 | `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
@@ -1712,8 +1716,8 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
-| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | ARRAY_REAL | False | False | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | ARRAY_REAL | False | False | False |  |  |
 | `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
 | `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
 | `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
@@ -3540,8 +3544,8 @@ A structural or concept parent is required when applicable; simulation parents a
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
-| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | ARRAY_REAL | False | False | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | ARRAY_REAL | False | False | False |  |  |
 | `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
 | `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
 | `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
@@ -3604,7 +3608,7 @@ A structural or concept parent is required when applicable; simulation parents a
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | ARRAY_REAL | False | False | False |  |  |
 | `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
 | `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
 | `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
@@ -3766,6 +3770,10 @@ The CASSCF/correlation implementation and native-pilot limits are recorded in
 * **Metadata:**
 * **Description:** Scanning-probe-microscopy simulation.
 
+For a new SPM export, AiiDAlab sets `default_object_view` to
+`IMAGING_GALLERY_VIEW`. An experiment created from the same export form uses
+`default_collection_view = IMAGING_GALLERY_VIEW`.
+
 #### Parents:
 
 | Object Type | Minimum | Maximum |
@@ -3779,6 +3787,7 @@ The CASSCF/correlation implementation and native-pilot limits are recorded in
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
 | `name` | Name | Name | VARCHAR | True | False | False |  |  |
 | `comments` | Comments | Comments | MULTILINE_VARCHAR | False | False | False |  | `{'custom_widget': 'Word Processor'}` |
+| `default_object_view` | Default Object View | Default Object View | CONTROLLEDVOCABULARY (DEFAULT_OBJECT_VIEWS) | False | False | False |  |  |
 
 #### Section: Method
 
@@ -3800,10 +3809,10 @@ The CASSCF/correlation implementation and native-pilot limits are recorded in
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `bias_voltages_v` | Bias voltages (V) | Bias voltages (V) | REAL | False | True | False |  |  |
-| `heights_angstrom` | Heights (angstrom) | Heights (angstrom) | REAL | False | True | False |  |  |
-| `isovalues_au` | Isovalues (a.u.) | Isovalues (a.u.) | REAL | False | True | False |  |  |
-| `p_tip_ratios` | p-tip ratios | p-tip ratios | REAL | False | True | False |  |  |
+| `bias_voltages_v` | Bias voltages (V) | Bias voltages (V) | ARRAY_REAL | False | False | False |  |  |
+| `heights_angstrom` | Heights (angstrom) | Heights (angstrom) | ARRAY_REAL | False | False | False |  |  |
+| `isovalues_au` | Isovalues (a.u.) | Isovalues (a.u.) | ARRAY_REAL | False | False | False |  |  |
+| `p_tip_ratios` | p-tip ratios | p-tip ratios | ARRAY_REAL | False | False | False |  |  |
 | `tip_model` | Tip model | Tip model | VARCHAR | False | False | False |  |  |
 | `scan_area_angstrom2` | Scan area (angstrom^2) | Scan area (angstrom^2) | REAL | False | False | False |  |  |
 | `image_modes` | Image modes | Image modes | CONTROLLEDVOCABULARY (SPM_IMAGE_MODE_ENUM) | False | True | False |  |  |
@@ -3812,7 +3821,7 @@ The CASSCF/correlation implementation and native-pilot limits are recorded in
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `orbital_energies_ev` | Orbital energies (eV) | Orbital energies (eV) | REAL | False | True | False |  |  |
+| `orbital_energies_ev` | Orbital energies (eV) | Orbital energies (eV) | ARRAY_REAL | False | False | False |  |  |
 
 #### Section: AFM settings
 
@@ -3885,8 +3894,8 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
-| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | ARRAY_REAL | False | False | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | ARRAY_REAL | False | False | False |  |  |
 | `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
 | `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
 | `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
@@ -3947,8 +3956,8 @@ At least one `ATOMISTIC_MODEL`, `MOLECULE`, or `CRYSTAL_CONCEPT` parent is requi
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | REAL | False | True | False |  |  |
-| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | REAL | False | True | False |  |  |
+| `fermi_energy_ev` | Fermi energy (eV) | Fermi energy (eV) | ARRAY_REAL | False | False | False |  |  |
+| `electronic_gap_ev` | Electronic gap (eV) | Electronic gap (eV) | ARRAY_REAL | False | False | False |  |  |
 | `spin_multiplicity` | Spin multiplicity | Spin multiplicity | INTEGER | False | False | False |  |  |
 | `total_magnetization_bohr_magneton` | Total magnetization (Bohr magneton) | Total magnetization (Bohr magneton) | REAL | False | False | False |  |  |
 | `absolute_magnetization_bohr_magneton` | Absolute magnetization (Bohr magneton) | Absolute magnetization (Bohr magneton) | REAL | False | False | False |  |  |
@@ -4007,7 +4016,7 @@ The two required `ATOMISTIC_MODEL` parents are the initial and final structures.
 
 | Property Code | Label | Description | Datatype | Mandatory | Multivalued | Unique | Semantic Annotation | Metadata |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |
-| `relative_energies_ev` | Relative energies (eV) | Relative energies (eV) | REAL | True | True | False |  |  |
+| `relative_energies_ev` | Relative energies (eV) | Relative energies (eV) | ARRAY_REAL | True | False | False |  |  |
 | `forward_barrier_ev` | Forward barrier (eV) | Forward barrier (eV) | REAL | True | False | False |  |  |
 | `backward_barrier_ev` | Backward barrier (eV) | Backward barrier (eV) | REAL | True | False | False |  |  |
 | `converged` | Converged | Converged | BOOLEAN | True | False | False |  |  |

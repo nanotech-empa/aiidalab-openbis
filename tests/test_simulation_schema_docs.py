@@ -21,6 +21,27 @@ def test_linkml_view_matches_provisioner():
     )
 
 
+def test_ordered_numeric_simulation_fields_are_openbis_arrays():
+    codes = {
+        "BIAS_VOLTAGES_V",
+        "ELECTRONIC_GAP_EV",
+        "FERMI_ENERGY_EV",
+        "HEIGHTS_ANGSTROM",
+        "ISOVALUES_AU",
+        "ORBITAL_ENERGIES_EV",
+        "P_TIP_RATIOS",
+        "RELATIVE_ENERGIES_EV",
+    }
+    slots = document()["slots"]
+    for code in codes:
+        assert PROPERTY_TYPES[code]["dataType"] == "ARRAY_REAL"
+        assert not PROPERTY_TYPES[code]["multiValue"]
+        slot = slots[code.lower()]
+        assert slot["range"] == "float"
+        assert slot["multivalued"]
+        assert slot["annotations"]["openbis_multi_value"] is False
+
+
 def test_normative_document_matches_required_result_properties():
     text = (ROOT / "docs/openBIS_schema_documentation.md").read_text()
     for code, obj in OBJECT_TYPES.items():

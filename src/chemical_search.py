@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import html
 import json
 import tempfile
+import weakref
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -18,6 +21,7 @@ from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
 
+from . import utils
 from .chemical_structures import (
     periodic_formula,
     periodic_graph_from_cxsmiles,
@@ -46,6 +50,7 @@ class SearchRepresentation:
     periodic: bool = False
     periodic_key: str = ""
     warning: str = ""
+    fingerprint: str = ""
 
 
 @dataclass
@@ -61,6 +66,7 @@ class MoleculeRecord:
     smiles: str
     cxsmiles: str
     modification_date: str
+    chemdraw_name: str = ""
     representations: list[SearchRepresentation] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -349,6 +355,43 @@ class OpenbisChemicalIndex:
         self.manifest: dict = {}
         self._mol_cache: dict[str, Chem.Mol] = {}
         self._fp_cache = {}
+        from .local_search_index import account_index
+
+        self.shared = account_index(session) if cache_path is None else None
+        self._loaded_state = None
+
+    def load_shared(self):
+        """Read the prepared snapshot without calling openBIS or normalizing targets."""
+        scope = f"molecule:{self.collection}"
+        state = self.shared.state(scope)
+        if state is None or not state[2]:
+            raise FileNotFoundError(
+                "The local structural index is still being prepared"
+            )
+        if state == self._loaded_state:
+            return self
+        state, rows = self.shared.read(scope)
+        self.records = [
+            MoleculeRecord(
+                **{
+                    key: value
+                    for key, value in data.items()
+                    if key != "representations"
+                },
+                representations=[
+                    SearchRepresentation(**item) for item in data["representations"]
+                ],
+            )
+            for _, data in rows.values()
+        ]
+        self.generated_at = datetime.fromtimestamp(
+            state[0] / 1000, timezone.utc
+        ).strftime("%Y-%m-%d %H:%M UTC")
+        self.summary = self._summarize_records(self.records)
+        self._mol_cache.clear()
+        self._fp_cache.clear()
+        self._loaded_state = state
+        return self
 
     def load(self):
         """Load a cache only when it belongs to this server and collection."""
@@ -701,7 +744,13 @@ class OpenbisChemicalIndex:
         query_mol = Chem.MolFromSmiles(query.search_smiles)
         if query_mol is None:
             raise ValueError("Query SMILES is invalid")
-        query_fp = _MORGAN.GetFingerprint(query_mol)
+        query_fp = (
+            DataStructs.CreateFromBinaryText(
+                base64.b64decode(query.fingerprint, validate=True)
+            )
+            if query.fingerprint
+            else _MORGAN.GetFingerprint(query_mol)
+        )
         query_heavy = max(1, query_mol.GetNumHeavyAtoms())
         hits = []
 
@@ -710,17 +759,6 @@ class OpenbisChemicalIndex:
             for representation in record.representations:
                 if query.periodic != representation.periodic:
                     continue
-                try:
-                    target_mol = self._mol(representation.search_smiles)
-                    similarity = float(
-                        DataStructs.TanimotoSimilarity(
-                            query_fp,
-                            self._fingerprint(representation.search_smiles),
-                        )
-                    )
-                except Exception:
-                    continue
-
                 match_type = "similar"
                 rank = 4
                 query_coverage = 0.0
@@ -728,10 +766,32 @@ class OpenbisChemicalIndex:
                 if query.strict_key == representation.strict_key:
                     match_type, rank, similarity = "exact", 0, 1.0
                     query_coverage = target_coverage = 1.0
-                elif query.parent_key == representation.parent_key:
-                    match_type, rank, similarity = "equivalent", 1, 1.0
-                    query_coverage = target_coverage = 1.0
-                elif not query.periodic:
+                else:
+                    try:
+                        target_fp = (
+                            DataStructs.CreateFromBinaryText(
+                                base64.b64decode(
+                                    representation.fingerprint, validate=True
+                                )
+                            )
+                            if representation.fingerprint
+                            else self._fingerprint(representation.search_smiles)
+                        )
+                        similarity = float(
+                            DataStructs.TanimotoSimilarity(query_fp, target_fp)
+                        )
+                    except Exception:
+                        continue
+                    if query.parent_key == representation.parent_key:
+                        match_type, rank = "equivalent", 1
+                        query_coverage = target_coverage = 1.0
+                if similarity < min_similarity:
+                    continue
+                if rank == 4 and not query.periodic:
+                    try:
+                        target_mol = self._mol(representation.search_smiles)
+                    except ValueError:
+                        continue
                     target_heavy = max(1, target_mol.GetNumHeavyAtoms())
                     if target_mol.HasSubstructMatch(query_mol):
                         match_type, rank = "query contained in target", 2
@@ -742,8 +802,6 @@ class OpenbisChemicalIndex:
                         target_coverage = 1.0
                         query_coverage = min(1.0, target_heavy / query_heavy)
 
-                if rank == 4 and similarity < min_similarity:
-                    continue
                 candidate = (
                     rank,
                     -similarity,
@@ -825,7 +883,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.query_preview = ipw.Image(format="png", layout={"display": "none"})
         self.preview_message = ipw.HTML()
         self.quality = ipw.IntSlider(
-            value=0,
+            value=50,
             min=0,
             max=100,
             step=1,
@@ -845,8 +903,9 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             layout=ipw.Layout(width="320px"),
         )
         self.update_button = ipw.Button(
-            description="Update index",
-            tooltip="Read SMILES, CXSMILES, and CDXML attachments from this collection",
+            description="Update from openBIS",
+            tooltip="Refresh the local index and repeat your search",
+            layout=ipw.Layout(width="auto"),
         )
         self.search_button = ipw.Button(
             description="Search",
@@ -878,7 +937,7 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             [
                 ipw.HTML(
                     "Find an existing record by SMILES or CDXML. The quality scale "
-                    "starts at Tanimoto 75%."
+                    "runs from Tanimoto 75% to 100% and filters all matches."
                 ),
                 self.input_kind,
                 self.smiles,
@@ -894,7 +953,15 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 self.details,
             ]
         )
-        if self.index.cache_path.is_file():
+        if self.index.shared is not None:
+            try:
+                self.index.load_shared()
+                self._set_status(f"Local index updated {self.index.generated_at}.")
+            except FileNotFoundError:
+                self._set_status(
+                    "Preparing the local index. Search when the first update is ready."
+                )
+        elif self.index.cache_path.is_file():
             try:
                 self.index.load()
                 self._set_status(
@@ -1028,6 +1095,29 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         return filename, content
 
     def _update(self, _=None):
+        if self.index.shared is not None:
+            from .chemical_index_worker import prepare_index_in_background
+
+            old = self.index.shared.state(f"molecule:{self.index.collection}")
+            started = prepare_index_in_background(
+                self.index.session, [self.index.collection], force=True
+            )
+            self._set_status(
+                "Updating from openBIS …"
+                if started
+                else "An openBIS update is already running …"
+            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            self.update_button.disabled = True
+            loop.create_task(
+                _wait_for_update(
+                    weakref.ref(self), self.index.shared, self.index.collection, old
+                )
+            )
+            return
         self.update_button.disabled = True
         self.search_button.disabled = True
         try:
@@ -1041,20 +1131,49 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             self.update_button.disabled = False
             self.search_button.disabled = False
 
+    def _index_updated(self, successful):
+        self.update_button.disabled = False
+        if not successful:
+            self._set_status(
+                "No fresh index was saved. Try again or keep using the previous index.",
+                "error",
+            )
+        elif self.smiles.value.strip() or self.input_kind.value == "cdxml":
+            self._search()
+        else:
+            self.index.load_shared()
+            self._set_status(f"Local index updated {self.index.generated_at}.", "ok")
+
     def _query(self) -> SearchRepresentation:
         if self.input_kind.value == "smiles":
             value = self.smiles.value.strip()
             if not value:
                 raise ValueError("Enter a SMILES query")
+            if self.index.shared is not None:
+                return self._bounded_query("SMILES", value, "query:SMILES")
             return search_representation_from_smiles(
-                value,
-                source="SMILES query",
-                source_id="query:SMILES",
+                value, source="SMILES query", source_id="query:SMILES"
             )
         filename, content = self._active_cdxml_query()
         if content is None:
             raise ValueError("Upload or generate a CDXML query")
+        if self.index.shared is not None:
+            return self._bounded_query(
+                "CDXML",
+                base64.b64encode(content).decode("ascii"),
+                filename or "query.cdxml",
+            )
         return search_representation_from_cdxml(content, filename or "query.cdxml")
+
+    @staticmethod
+    def _bounded_query(kind, value, source_id):
+        from .chemical_index_worker import DescriptorWorker
+
+        with DescriptorWorker() as worker:
+            descriptors = worker.describe(kind, value, source_id=source_id)
+        if len(descriptors) != 1:
+            raise ValueError("Select one drawing or repeat unit to search.")
+        return SearchRepresentation(**descriptors[0])
 
     def _search(self, _=None):
         self.search_button.disabled = True
@@ -1062,14 +1181,28 @@ class MoleculeStructureSearchWidget(ipw.VBox):
         self.details.value = ""
         try:
             synchronization = ""
-            if not self.index.records:
+            if self.index.shared is not None:
                 try:
-                    self.index.load()
-                except Exception:
-                    self.index.refresh(progress=self._set_status)
-                    synchronization = "rebuilt"
-            if not synchronization:
-                synchronization = self.index.synchronize(progress=self._set_status)
+                    self.index.load_shared()
+                except FileNotFoundError:
+                    from .chemical_index_worker import prepare_index_in_background
+
+                    prepare_index_in_background(
+                        self.index.session, [self.index.collection]
+                    )
+                    self._set_status(
+                        "The first index is still being prepared. Use Update from openBIS to check when it finishes."
+                    )
+                    return
+            else:
+                if not self.index.records:
+                    try:
+                        self.index.load()
+                    except (OSError, ValueError):
+                        self.index.refresh(progress=self._set_status)
+                        synchronization = "rebuilt"
+                if not synchronization:
+                    synchronization = self.index.synchronize(progress=self._set_status)
             blocker = rdBase.BlockLogs()
             try:
                 query = self._query()
@@ -1097,6 +1230,12 @@ class MoleculeStructureSearchWidget(ipw.VBox):
                 "current": " Local index already current.",
                 "rebuilt": " Local index refreshed from openBIS.",
             }.get(synchronization, " Inactive cached records removed.")
+            if self.index.shared is not None:
+                total = len(self.index.records)
+                available = self.index.summary["with_any_representation"]
+                sync_message = f" Local index updated {self.index.generated_at}. {available}/{total} molecules searchable by structure."
+                if not hits:
+                    sync_message += " Update from openBIS to include recent changes."
             self._set_status(
                 f"Found {len(hits)} {periodic} matches in this collection."
                 f"{sync_message}"
@@ -1119,10 +1258,31 @@ class MoleculeStructureSearchWidget(ipw.VBox):
             self.details.value = ""
             return
         record = hit.record
+        url = utils.generate_openbis_object_url(self.index.session, record.permid)
         self.details.value = (
             f"<b>{html.escape(record.name or 'Unnamed molecule')}</b> · "
             f"{html.escape(record.formula or 'formula unavailable')} · "
-            f"{html.escape(hit.matched_source)} · {html.escape(record.permid)}"
+            f'<a href="{html.escape(url, quote=True)}" target="_blank" '
+            'rel="noopener noreferrer">Open in openBIS</a>'
         )
         if self.on_select is not None:
             self.on_select(record.permid)
+
+
+async def _wait_for_update(widget_ref, index, collection, previous):
+    """Observe one finite update without retaining the widget or its session."""
+    from .chemical_index_worker import refresh_in_progress
+
+    for _ in range(192):
+        await asyncio.sleep(1)
+        widget = widget_ref()
+        if widget is None or widget.comm is None:
+            return
+        if not refresh_in_progress(index):
+            state = index.state(f"molecule:{collection}")
+            widget._index_updated(bool(state and state != previous))
+            return
+        del widget
+    widget = widget_ref()
+    if widget is not None and widget.comm is not None:
+        widget._index_updated(False)

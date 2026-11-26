@@ -40,6 +40,15 @@ OBSOLETE_OBJECT_TYPES = (
 )
 
 
+# Provided by the openBIS Imaging extension. The provisioner reuses this
+# vocabulary; the generated LinkML view also needs its definition.
+PLATFORM_VOCABULARIES = {
+    "DEFAULT_OBJECT_VIEWS": [
+        ("IMAGING_DATASET_VIEWER", "Imaging dataset viewer"),
+        ("IMAGING_GALLERY_VIEW", "Imaging Gallery view"),
+    ],
+}
+
 VOCABULARIES = {
     "ELECTRONIC_RESULT_TYPE_ENUM": [
         ("ORBITAL_REFERENCE", "Orbital reference"),
@@ -150,6 +159,12 @@ PROPERTY_TYPES = {
     for item in [
         prop("NAME", "Name", "VARCHAR"),
         prop("COMMENTS", "Comments", "MULTILINE_VARCHAR"),
+        prop(
+            "DEFAULT_OBJECT_VIEW",
+            "Default Object View",
+            "CONTROLLEDVOCABULARY",
+            vocabulary="DEFAULT_OBJECT_VIEWS",
+        ),
         prop("CONSTRAINED", "Constrained", "BOOLEAN"),
         prop("BAND_GAP_EV", "Band gap (eV)", "REAL"),
         prop(
@@ -187,9 +202,9 @@ PROPERTY_TYPES = {
             "Absolute magnetization (Bohr magneton)",
             "REAL",
         ),
-        # These are multivalued globally to support spin-resolved values.
-        prop("FERMI_ENERGY_EV", "Fermi energy (eV)", "REAL", multi_value=True),
-        prop("ELECTRONIC_GAP_EV", "Electronic gap (eV)", "REAL", multi_value=True),
+        # Store spin-resolved values as ordered arrays, including singletons.
+        prop("FERMI_ENERGY_EV", "Fermi energy (eV)", "ARRAY_REAL"),
+        prop("ELECTRONIC_GAP_EV", "Electronic gap (eV)", "ARRAY_REAL"),
         prop(
             "EXECUTABLES",
             "Executables",
@@ -265,8 +280,7 @@ PROPERTY_TYPES = {
         prop(
             "RELATIVE_ENERGIES_EV",
             "Relative energies (eV)",
-            "REAL",
-            multi_value=True,
+            "ARRAY_REAL",
         ),
         prop("FORWARD_BARRIER_EV", "Forward barrier (eV)", "REAL"),
         prop("BACKWARD_BARRIER_EV", "Backward barrier (eV)", "REAL"),
@@ -288,10 +302,10 @@ PROPERTY_TYPES = {
             multi_value=True,
             vocabulary="SPM_MODE_ENUM",
         ),
-        prop("BIAS_VOLTAGES_V", "Bias voltages (V)", "REAL", multi_value=True),
-        prop("HEIGHTS_ANGSTROM", "Heights (angstrom)", "REAL", multi_value=True),
-        prop("ISOVALUES_AU", "Isovalues (a.u.)", "REAL", multi_value=True),
-        prop("P_TIP_RATIOS", "p-tip ratios", "REAL", multi_value=True),
+        prop("BIAS_VOLTAGES_V", "Bias voltages (V)", "ARRAY_REAL"),
+        prop("HEIGHTS_ANGSTROM", "Heights (angstrom)", "ARRAY_REAL"),
+        prop("ISOVALUES_AU", "Isovalues (a.u.)", "ARRAY_REAL"),
+        prop("P_TIP_RATIOS", "p-tip ratios", "ARRAY_REAL"),
         prop("TIP_MODEL", "Tip model", "VARCHAR"),
         prop("SCAN_AREA_ANGSTROM2", "Scan area (angstrom^2)", "REAL"),
         prop(
@@ -304,8 +318,7 @@ PROPERTY_TYPES = {
         prop(
             "ORBITAL_ENERGIES_EV",
             "Orbital energies (eV)",
-            "REAL",
-            multi_value=True,
+            "ARRAY_REAL",
         ),
         prop("AFM_AMPLITUDE_ANGSTROM", "AFM amplitude (angstrom)", "REAL"),
         prop("AFM_PROBE_TYPE", "AFM probe type", "VARCHAR"),
@@ -656,6 +669,10 @@ for _object_code, _definition in OBJECT_TYPES.items():
                 "Electronic properties",
             )
         ]
+
+_spm_default_view = assignment("DEFAULT_OBJECT_VIEW", False, "General information")
+OBJECT_TYPES["SPM_SIMULATION"]["assignments"].append(_spm_default_view)
+ADDITIVE_OBJECT_TYPE_ASSIGNMENTS["SPM_SIMULATION"].append(_spm_default_view)
 
 
 def base_assignments(object_code: str, assignments):

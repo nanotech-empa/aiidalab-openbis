@@ -10,6 +10,12 @@ This does not change `ATOMISTIC_MODEL` objects or their relationships. A
 simulation can link a molecular concept from either collection as a parent in
 the same way as before.
 
+**Find molecule** filters the local list by EMPA number, permID, recorded name
+or ChemDraw name, ignoring case. Use **Find by SMILES or CDXML** to identify
+a molecule by structure (benzene: `c1ccccc1`). An empty name filter result
+offers **Update from openBIS**. The current selection stays linked until you
+choose another record.
+
 A finite molecule stores canonical `SMILES`. A one-dimensional periodic
 molecular concept stores `CXSMILES` and leaves `SMILES` empty. The periodic
 value uses one head-to-tail SRU group and preserves every independent crossing
@@ -63,22 +69,29 @@ query even though the browser upload control correctly still shows zero files.
 Its periodic graph is validated through the same CDXML-to-CXSMILES round trip
 used for stored molecular concepts.
 
-The molecule selector searches only its configured collection. Queries may be
-SMILES or CDXML. Existing records are indexed from `SMILES`, `CXSMILES`, and all
-CDXML files in attachment or raw-data datasets. Finite and periodic structures
-are compared separately. Results are ranked as exact graph identity,
-standardized equivalence, substructure containment for finite molecules, then
-Morgan-fingerprint similarity.
+The molecule selector searches only its configured collection. At connection,
+a background worker prepares or refreshes the private, per-user and per-server
+index. It stores name and code metadata, canonical structures and fingerprints.
+SMILES and CXSMILES are used first. CDXML attachments supply structures when
+neither field can be indexed. A molecule that cannot be processed within the
+per-structure time limit remains available by name or code. SQLite is used
+when available, with atomic JSON snapshots as a fallback.
 
-The displayed match-quality scale maps 0 to Tanimoto 0.75 and 100 to Tanimoto
-1.00. A result must be selected explicitly before it becomes the linked
-molecule. Index construction is read-only, suppresses RDKit diagnostic output,
-and stores a collection-specific local cache. Before every search, the app
-compares that cache with a lightweight live manifest of object PermIDs,
-structural properties, modification dates, and CDXML datasets. An unchanged
-manifest uses the cache immediately; deletions are pruned; additions or changes
-trigger an automatic rebuild before matching. The **Update index** button
-remains available to force a full rebuild explicitly.
+**Search** canonicalizes the query and compares it with the local index.
+Finite and periodic structures are compared separately. Exact identity,
+standardized equivalence, substructure and fingerprint similarity remain
+separate result types. **Min quality** applies the Tanimoto threshold to all
+displayed matches. It defaults to 50 (Tanimoto 0.875) on a scale from Tanimoto
+0.75 to 1.00. Selecting a result shows its formula and a link to its openBIS
+record. The pre-creation identity check also considers equivalent structures
+below the display threshold.
+
+The search shows the index timestamp and how many molecules are searchable
+by structure. **Update from openBIS** refreshes the index and repeats the query.
+Connection-time refreshes read changes since the previous timestamp with an
+overlap, and periodically reconcile deletions. The index contains no login
+credentials. OpenBIS remains authoritative, including the fresh check before
+creating a molecule.
 
 After searching a generated CDXML, an exact or standardized-equivalent match
 blocks creation and the existing result must be selected. If no identity match

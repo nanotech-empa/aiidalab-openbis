@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import warnings
@@ -59,6 +60,11 @@ class Spm:
             print("Datatype not supported.")
             return
 
+        simulated = (
+            str(self.header.get("comment", "")).startswith("SIMULATED CP2K STM/STS;")
+            or self.header.get("Experiment") == "CP2K STM/STS simulation"
+        )
+        self.simulated = simulated
         self.signals = {}
         for key in self.napImport.signals.keys():
             channel_name = key
@@ -70,6 +76,14 @@ class Spm:
                 channel_nickname = config["Channels"][key]["nickname"]
                 channel_scaling = config["Channels"][key]["scaling"]
                 channel_unit = config["Channels"][key]["unit"]
+
+            elif simulated:
+                if self.type == "scan":
+                    names = list(self.header["data_info"]["Name"])
+                    channel_unit = self.header["data_info"]["Unit"][names.index(key)]
+                else:
+                    match = re.search(r"\(([^()]*)\)$", key)
+                    channel_unit = match.group(1) if match else "a.u."
 
             channel_info = {
                 "ChannelName": channel_name,
@@ -143,6 +157,11 @@ class Spm:
     def __get_default_channels(self):
         measurement_type = ""
         default_channels = []
+
+        if self.simulated:
+            return list(self.signals)[
+                : 1 if self.type == "scan" else 2
+            ], "CP2K STM/STS simulation"
 
         if self.type == "scan":
             """
@@ -411,6 +430,32 @@ class Spm:
         else:
             return self.napImport.header.get(param, None)
 
+    def _simulation_parameters(self):
+        comment = self.header.get("comment", self.header.get("Comment", ""))
+        start = comment.find("{")
+        payload = json.loads(comment[start:])
+        series = payload.get("series", {})
+        quantity = payload.get("quantity", {})
+        result = {
+            "Data origin": "CP2K STM/STS simulation",
+            "Mode": quantity.get("mode", series.get("type", "STM/STS curve")),
+            "Source workflow UUID": payload.get("source_uuid", ""),
+            "Export timestamp (not acquisition)": payload.get("exported_utc", ""),
+        }
+        if "bias_voltage_v" in payload:
+            result["Bias (V)"] = str(payload["bias_voltage_v"])
+        if "isovalue" in series:
+            result["3D-field isovalue (native)"] = str(series["isovalue"])
+        if "height" in series:
+            result["Height above highest atom (angstrom)"] = str(series["height"])
+        if quantity:
+            result["Image quantity"] = quantity["quantity"]
+            result["Native image unit"] = quantity["native_unit"]
+        if "y_quantity" in payload:
+            result["Curve quantity"] = payload["y_quantity"]
+            result["Curve unit"] = payload["y_unit"]
+        return result
+
     # print essential parameters for plotting
     def print_params(self, show: bool = True):
         """
@@ -427,6 +472,15 @@ class Spm:
             Set of important parameters.
 
         """
+
+        if self.simulated:
+            label = "\n".join(
+                f"{key}: {value}"
+                for key, value in self._simulation_parameters().items()
+            )
+            if show:
+                print(label)
+            return label
 
         label = []
 
@@ -540,6 +594,11 @@ class Spm:
         return label
 
     def print_params_dict(self, show=True):
+        if self.simulated:
+            result = self._simulation_parameters()
+            if show:
+                print(result)
+            return result
         label = dict()
 
         if self.type == "scan":

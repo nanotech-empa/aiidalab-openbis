@@ -34,7 +34,6 @@ from datetime import datetime
 import shutil
 import tempfile
 from collections import defaultdict
-from src import utils
 import logging
 
 SXM_ADAPTOR = (
@@ -48,12 +47,7 @@ DEFAULT_URL = "local.openbis.ch"
 
 logger = logging.getLogger(__name__)
 app_folder = pathlib.Path().resolve()
-logging.basicConfig(
-    filename="/home/jovyan/apps/aiidalab-openbis/logs/aiidalab_openbis_interface.log",
-    encoding="utf-8",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-)
+logger.addHandler(logging.NullHandler())
 
 
 def get_instance(url=None, user=None, pw=None, token=None):
@@ -286,7 +280,14 @@ def demo_dat_flow(session, folder_path, experiment, sample):
 
 
 def create_sxm_dataset(
-    session, experiment, file_path, sample=None, dataset_type="IMAGING_DATA"
+    session,
+    experiment,
+    file_path,
+    sample=None,
+    dataset_type="IMAGING_DATA",
+    *,
+    dataset_metadata=None,
+    auxiliary_files=(),
 ):
     img = spm(file_path)
     channels = list(img.signals.keys())
@@ -401,6 +402,9 @@ def create_sxm_dataset(
         "Line Subtraction": [],
     }
 
+    if img.simulated:
+        filters = {}  # Experimental background filters assume a measured Z channel.
+
     filterSemanticAnnotation = {
         "Gaussian": ImagingSemanticAnnotation(
             "schema.org",
@@ -417,7 +421,7 @@ def create_sxm_dataset(
         speeds=[1000, 2000, 5000],
         exports=exports,
         inputs=inputs,
-        metadata={},
+        metadata=dataset_metadata or {},
         filters=filters,
         filterSemanticAnnotation=filterSemanticAnnotation,
     )
@@ -429,7 +433,9 @@ def create_sxm_dataset(
             metadata=img.print_params_dict(False),
         )
     ]
-    imaging_property_config = ImagingDataSetPropertyConfig(images)
+    imaging_property_config = ImagingDataSetPropertyConfig(
+        images, metadata=dataset_metadata or {}
+    )
     if VERBOSE:
         logger.info(imaging_property_config.to_json())
 
@@ -438,12 +444,19 @@ def create_sxm_dataset(
         config=imaging_property_config,
         experiment=experiment,
         sample=sample,
-        files=[file_path],
+        files=[file_path, *map(str, auxiliary_files)],
     )
 
 
 def create_dat_dataset(
-    session, experiment, sample, folder_path, dataset_type="IMAGING_DATA"
+    session,
+    experiment,
+    sample,
+    folder_path,
+    dataset_type="IMAGING_DATA",
+    *,
+    dataset_metadata=None,
+    auxiliary_files=(),
 ):
     data = spm.importall(folder_path, "spec")
 
@@ -621,7 +634,9 @@ def create_dat_dataset(
     images = [
         ImagingDataSetImage(imaging_config, metadata=data[0].print_params_dict(False))
     ]
-    imaging_property_config = ImagingDataSetPropertyConfig(images)
+    imaging_property_config = ImagingDataSetPropertyConfig(
+        images, metadata=dataset_metadata or {}
+    )
     if VERBOSE:
         logger.info(imaging_property_config.to_json())
 
@@ -630,13 +645,16 @@ def create_dat_dataset(
         config=imaging_property_config,
         sample=sample,
         experiment=experiment,
-        files=[d.path for d in data],
+        files=[*[d.path for d in data], *map(str, auxiliary_files)],
     )
 
 
 def process_measurement_files(
     openbis_url, token, data_folder, measurements_id, logging_filepath=None
 ):
+    from aiida_openbis.export import _app_module
+
+    utils = _app_module("utils")
     session, _ = utils.connect_openbis(openbis_url, token)
     measurement_files = [f for f in os.listdir(data_folder)]
     if logging_filepath is None:
