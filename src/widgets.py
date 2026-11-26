@@ -1477,7 +1477,7 @@ class SelectSampleWidget(ipw.VBox):
         # Build a structured list of dictionaries for Pandas
         data = []
         for obj in samples:
-            name = obj.props["name"] if "name" in obj.props.all() else obj.code
+            name = str(obj.props.get("name") or "").strip()
             registrator = getattr(obj.registrator, "userId", obj.registrator)
             parents = obj.parents
 
@@ -1492,7 +1492,8 @@ class SelectSampleWidget(ipw.VBox):
 
                 data.append(
                     {
-                        "display_name": name,
+                        "display_name": name or obj.code,
+                        "sample_name": name,
                         "permId": obj.permId,  # Using permId as a proxy for registration date
                         "registrator": registrator,
                         "is_mine": registrator == self.current_user,
@@ -1563,11 +1564,9 @@ class SelectSampleWidget(ipw.VBox):
         # Disable the dropdown so user cannot switch selections during editing
         self.sample_dropdown.disabled = True
 
-        # Grab current display name to pre-populate textbox
-        current_label = [
-            opt[0] for opt in self.sample_dropdown.options if opt[1] == sample_id
-        ][0]
-        self.edit_name_textbox.value = current_label
+        # The fallback code identifies unnamed samples but is not their name.
+        selected = self.raw_data_df.loc[self.raw_data_df["permId"] == sample_id]
+        self.edit_name_textbox.value = selected.iloc[0]["sample_name"]
 
         # Render panel
         self.edit_sample_widgets.children = self.edit_panel_content

@@ -51,6 +51,7 @@ class CreateSampleWidget(ipw.VBox):
 
         self.material_details_vbox = ipw.VBox()
         self.sample_name_textbox = ipw.Text(placeholder="Write sample name...")
+        self.sample_name_error = ipw.HTML()
 
         self.create_sample_notes = ipw.HTML(
             value="""
@@ -95,6 +96,7 @@ class CreateSampleWidget(ipw.VBox):
             self.material_details_vbox,
             self.sample_name_title,
             self.sample_name_textbox,
+            self.sample_name_error,
             self.save_button,
         ]
 
@@ -316,6 +318,15 @@ class CreateSampleWidget(ipw.VBox):
             material_dropdown.observe(load_material_details, names="value")
 
     def save_sample(self, b):
+        sample_name = self.sample_name_textbox.value.strip()
+        if not sample_name:
+            self.sample_name_error.value = (
+                "<div class='alert alert-danger' role='alert'>"
+                "Sample name cannot be empty.</div>"
+            )
+            return
+        self.sample_name_error.value = ""
+
         if self.material_type_dropdown.value == "-1":
             logger.info("Material type is not selected.")
             return
@@ -385,7 +396,6 @@ class CreateSampleWidget(ipw.VBox):
                             if sample.props["object_status"] == "DISPOSED":
                                 break
 
-                    sample_name = self.sample_name_textbox.value
                     sample_type = OPENBIS_OBJECT_TYPES["Sample"]
                     sample_props = {"name": sample_name, "object_status": "ACTIVE"}
 
