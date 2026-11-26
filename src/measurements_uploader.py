@@ -38,12 +38,85 @@ class TokenExpiredError(RuntimeError):
 
 is_session_token_expired = measurement_monitor.is_session_token_expired
 
+DEFAULT_RETRY_BACKOFF_SECONDS = (30.0, 60.0, 120.0, 300.0)
+DEFAULT_MAX_RETRY_ATTEMPTS = 5
+
+
+class RetryScheduler:
+    """Bounded exponential-backoff scheduler for retrying failed pending uploads."""
+
+    def __init__(
+        self,
+        backoff_schedule=DEFAULT_RETRY_BACKOFF_SECONDS,
+        max_attempts: int = DEFAULT_MAX_RETRY_ATTEMPTS,
+    ):
+        self.backoff_schedule = tuple(backoff_schedule) or (30.0,)
+        self.max_attempts = max(1, int(max_attempts))
+        self._lock = threading.Lock()
+        self.attempts = 0
+        self.pending_count = 0
+        self.next_retry_at: float | None = None
+
+    def _idle_action_unlocked(self) -> str:
+        if self.pending_count <= 0:
+            return "Watching for new files"
+        if self.next_retry_at is not None:
+            return (
+                f"Retry scheduled for {self.pending_count} pending file(s) "
+                f"(attempt {self.attempts + 1}/{self.max_attempts})"
+            )
+        return (
+            f"Watching for new files "
+            f"({self.pending_count} file(s) failed after {self.max_attempts} retries)"
+        )
+
+    def record_result(
+        self,
+        pending_count: int,
+        now_mono: float | None = None,
+        reset_attempts: bool = False,
+    ) -> str:
+        now = time.monotonic() if now_mono is None else now_mono
+        with self._lock:
+            if not pending_count or pending_count <= 0:
+                self.attempts = 0
+                self.pending_count = 0
+                self.next_retry_at = None
+                return "Watching for new files"
+            if reset_attempts:
+                self.attempts = 0
+            self.pending_count = int(pending_count)
+            if self.attempts < self.max_attempts:
+                delay = self.backoff_schedule[
+                    min(self.attempts, len(self.backoff_schedule) - 1)
+                ]
+                self.next_retry_at = now + delay
+            else:
+                self.next_retry_at = None
+            return self._idle_action_unlocked()
+
+    def is_due(self, now_mono: float | None = None) -> bool:
+        now = time.monotonic() if now_mono is None else now_mono
+        with self._lock:
+            return self.next_retry_at is not None and now >= self.next_retry_at
+
+    def mark_attempt_started(self) -> tuple[int, int]:
+        with self._lock:
+            self.attempts += 1
+            self.next_retry_at = None
+            return self.attempts, self.pending_count
+
+    def idle_action(self) -> str:
+        with self._lock:
+            return self._idle_action_unlocked()
+
 
 def write_heartbeat(
     logging_filepath,
     data_folder,
     upload_in_progress=None,
     stop_event=None,
+    idle_action_fn=None,
 ):
     folder_ok = os.path.isdir(data_folder)
 
@@ -53,9 +126,10 @@ def write_heartbeat(
         busy = upload_in_progress is not None and upload_in_progress.is_set()
         stopping = stop_event is not None and stop_event.is_set()
         if not busy and not stopping and not d.get("token_expired"):
-            d["current_action"] = (
-                "Watching for new files" if folder_ok else "Folder inaccessible"
+            idle_label = (
+                idle_action_fn() if callable(idle_action_fn) else "Watching for new files"
             )
+            d["current_action"] = idle_label if folder_ok else "Folder inaccessible"
         return d
 
     measurement_monitor.update_measurement_log(logging_filepath, _upd)
@@ -161,6 +235,7 @@ def monitor_folder(
     heartbeat_callback=None,
     heartbeat_interval=15.0,
     stop_event=None,
+    retry_callback=None,
 ):
     if stop_event is not None and stop_event.is_set():
         return
@@ -180,6 +255,10 @@ def monitor_folder(
     try:
         while stop_event is None or not stop_event.is_set():
             time.sleep(1)
+            if stop_event is not None and stop_event.is_set():
+                break
+            if retry_callback is not None:
+                retry_callback()
             if heartbeat_callback is not None and (
                 stop_event is None or not stop_event.is_set()
             ):
@@ -335,15 +414,37 @@ def run_upload_cycle(
             logger.info(f"Uploaded file: {file_path}")
             print(f"Uploaded file as ATTACHMENT: {basename}", flush=True)
 
-        measurement_monitor.update_measurement_log(
-            logging_filepath,
-            lambda d: d.update(
-                {
-                    "current_action": "Watching for new files",
-                    "last_heartbeat_at": measurement_monitor.utc_now_iso(),
-                }
-            ),
-        )
+        remaining_pending = {"count": 0}
+
+        def _finalize(d):
+            processed_norm = {
+                os.path.normpath(p)
+                for p in d.get("processed_files", [])
+                if isinstance(p, str)
+            }
+            still_pending = [
+                f
+                for f in candidate_files
+                if os.path.normpath(f) not in processed_norm
+                and os.path.isfile(f)
+                and not is_ignored_file(f)
+            ]
+            remaining_pending["count"] = len(still_pending)
+            processed_names = {os.path.basename(p) for p in processed_norm}
+            last_err = d.get("last_error")
+            if (
+                isinstance(last_err, dict)
+                and last_err.get("file")
+                and "ATTACHMENT fallback" not in str(last_err.get("message", ""))
+                and last_err.get("file") in processed_names
+            ):
+                d["last_error"] = None
+            d["current_action"] = "Watching for new files"
+            d["last_heartbeat_at"] = measurement_monitor.utc_now_iso()
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _finalize)
+        return remaining_pending["count"]
     finally:
         if upload_in_progress is not None:
             upload_in_progress.clear()
@@ -361,11 +462,11 @@ def process_new_file(
     upload_in_progress=None,
 ):
     if is_ignored_file(file_path) or not wait_for_file_ready(file_path):
-        return
+        return None
 
     data_folder = os.path.dirname(file_path)
     try:
-        run_upload_cycle(
+        return run_upload_cycle(
             data_folder=data_folder,
             openbis_session=openbis_session,
             openbis_url=openbis_url,
@@ -381,6 +482,7 @@ def process_new_file(
             stop_event.set()
         else:
             raise
+        return None
 
 
 def main(argv=None) -> int:
@@ -447,6 +549,20 @@ def main(argv=None) -> int:
     sigterm_received = threading.Event()
     token_expired_event = threading.Event()
     upload_in_progress = threading.Event()
+    cycle_lock = threading.Lock()
+    retry_scheduler = RetryScheduler(
+        backoff_schedule=DEFAULT_RETRY_BACKOFF_SECONDS,
+        max_attempts=DEFAULT_MAX_RETRY_ATTEMPTS,
+    )
+
+    def _apply_idle_action(action_text: str):
+        if action_text and not stop_event.is_set():
+            measurement_monitor.update_measurement_log(
+                logging_filepath,
+                lambda d: d.update({"current_action": action_text})
+                if not d.get("token_expired")
+                else d,
+            )
 
     def _handle_sigterm(_signum, _frame):
         sigterm_received.set()
@@ -477,31 +593,90 @@ def main(argv=None) -> int:
             data_folder,
             upload_in_progress=upload_in_progress,
             stop_event=stop_event,
+            idle_action_fn=retry_scheduler.idle_action,
         )
 
     def custom_function(file_path):
-        return process_new_file(
-            file_path,
-            openbis_session=openbis_session,
-            openbis_url=openbis_url,
-            openbis_token=openbis_token,
-            measurement_session_id=measurement_session_id,
-            logging_filepath=logging_filepath,
-            stop_event=stop_event,
-            token_expired_event=token_expired_event,
-            upload_in_progress=upload_in_progress,
-        )
+        with cycle_lock:
+            pending = process_new_file(
+                file_path,
+                openbis_session=openbis_session,
+                openbis_url=openbis_url,
+                openbis_token=openbis_token,
+                measurement_session_id=measurement_session_id,
+                logging_filepath=logging_filepath,
+                stop_event=stop_event,
+                token_expired_event=token_expired_event,
+                upload_in_progress=upload_in_progress,
+            )
+            if pending is not None:
+                action = retry_scheduler.record_result(pending, reset_attempts=True)
+                _apply_idle_action(action)
+
+    def _maybe_retry():
+        if not retry_scheduler.is_due():
+            return
+        if not cycle_lock.acquire(blocking=False):
+            return
+        try:
+            if not retry_scheduler.is_due() or stop_event.is_set():
+                return
+            attempt_num, pending_before = retry_scheduler.mark_attempt_started()
+            print(
+                f"Retrying {pending_before} pending file(s) "
+                f"(attempt {attempt_num}/{retry_scheduler.max_attempts})...",
+                flush=True,
+            )
+            try:
+                pending_after = (
+                    run_upload_cycle(
+                        data_folder=data_folder,
+                        openbis_session=openbis_session,
+                        openbis_url=openbis_url,
+                        openbis_token=openbis_token,
+                        measurement_session_id=measurement_session_id,
+                        logging_filepath=logging_filepath,
+                        upload_in_progress=upload_in_progress,
+                    )
+                    or 0
+                )
+            except TokenExpiredError:
+                token_expired_event.set()
+                stop_event.set()
+                return
+            except Exception as exc:
+                safe_exc = measurement_monitor.redact_secrets(
+                    str(exc), [openbis_token]
+                )
+                logger.exception(f"Unexpected error during retry cycle: {safe_exc}")
+                measurement_monitor.update_measurement_log(
+                    logging_filepath,
+                    lambda d: measurement_monitor.append_error_event(
+                        d, safe_exc, stage="watcher"
+                    ),
+                )
+                pending_after = pending_before
+            action = retry_scheduler.record_result(pending_after)
+            _apply_idle_action(action)
+        finally:
+            cycle_lock.release()
 
     try:
-        run_upload_cycle(
-            data_folder=data_folder,
-            openbis_session=openbis_session,
-            openbis_url=openbis_url,
-            openbis_token=openbis_token,
-            measurement_session_id=measurement_session_id,
-            logging_filepath=logging_filepath,
-            upload_in_progress=upload_in_progress,
-        )
+        with cycle_lock:
+            initial_pending = (
+                run_upload_cycle(
+                    data_folder=data_folder,
+                    openbis_session=openbis_session,
+                    openbis_url=openbis_url,
+                    openbis_token=openbis_token,
+                    measurement_session_id=measurement_session_id,
+                    logging_filepath=logging_filepath,
+                    upload_in_progress=upload_in_progress,
+                )
+                or 0
+            )
+            action = retry_scheduler.record_result(initial_pending)
+            _apply_idle_action(action)
     except TokenExpiredError:
         return 1
     except Exception as exc:
@@ -522,6 +697,7 @@ def main(argv=None) -> int:
             heartbeat_callback=_heartbeat,
             heartbeat_interval=15.0,
             stop_event=stop_event,
+            retry_callback=_maybe_retry,
         )
 
     if sigterm_received.is_set() and not token_expired_event.is_set():

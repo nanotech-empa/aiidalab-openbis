@@ -1314,3 +1314,177 @@ def test_active_uploads_keep_heartbeat_fresh_and_update_current_action(tmp_path)
     assert len(observed_actions) == 1
     assert observed_actions[0][0] == "Uploading img0029.sxm..."
     assert observed_actions[0][1] != "2026-11-26T10:00:00+00:00"
+
+
+def test_run_upload_cycle_returns_pending_count_and_clears_transient_error_on_retry_success(
+    tmp_path,
+):
+    from src import measurements_uploader
+
+    data_folder = tmp_path / "retry_clear_run"
+    data_folder.mkdir()
+    dat_file = data_folder / "dIdV_00010.dat"
+    dat_file.write_text("dat", encoding="utf-8")
+    logs_dir = tmp_path / "logs" / "measurements"
+    log_fp, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", "tok-1", "SESS-RETRY", str(data_folder), logs_dir=logs_dir
+    )
+
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+
+    with (
+        patch.object(measurements_uploader, "process_measurement_files"),
+        patch(
+            "src.utils.create_openbis_dataset",
+            side_effect=RuntimeError("502:Proxy Error"),
+        ),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        pending = measurements_uploader.run_upload_cycle(
+            data_folder=str(data_folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-RETRY",
+            logging_filepath=log_fp,
+        )
+
+    assert pending == 1
+    first_data = json.loads(open(log_fp, encoding="utf-8").read())
+    assert first_data["last_error"]["file"] == "dIdV_00010.dat"
+    assert "502" in first_data["last_error"]["message"]
+
+    # Retry succeeds -> pending becomes 0, last_error clears, recent_errors history kept
+    with (
+        patch.object(measurements_uploader, "process_measurement_files"),
+        patch("src.utils.create_openbis_dataset"),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        pending_after = measurements_uploader.run_upload_cycle(
+            data_folder=str(data_folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token="tok-1",
+            measurement_session_id="SESS-RETRY",
+            logging_filepath=log_fp,
+        )
+
+    assert pending_after == 0
+    second_data = json.loads(open(log_fp, encoding="utf-8").read())
+    assert str(dat_file) in second_data["processed_files"]
+    assert second_data["last_error"] is None
+    assert len(second_data["recent_errors"]) == 1
+
+
+def test_uploader_retry_scheduler_backoff_cap_and_main_integration(tmp_path, monkeypatch):
+    from src import measurements_uploader
+
+    # 1. Pure scheduler unit check: exponential backoff, cap at max_attempts, reset on success
+    sched = measurements_uploader.RetryScheduler(
+        backoff_schedule=(10.0, 20.0), max_attempts=3
+    )
+    sched.record_result(pending_count=1, now_mono=100.0)
+    assert sched.is_due(105.0) is False
+    assert sched.is_due(110.0) is True
+    assert "retry" in sched.idle_action().lower()
+
+    sched.mark_attempt_started()
+    sched.record_result(pending_count=1, now_mono=110.0)
+    assert sched.is_due(125.0) is False
+    assert sched.is_due(130.0) is True
+
+    sched.mark_attempt_started()
+    sched.record_result(pending_count=1, now_mono=130.0)
+    assert sched.is_due(150.0) is True
+
+    sched.mark_attempt_started()
+    sched.record_result(pending_count=1, now_mono=150.0)
+    # 3 attempts exhausted -> no longer due
+    assert sched.is_due(9999.0) is False
+    assert "3 retries" in sched.idle_action().lower()
+
+    # Reset on success
+    sched.record_result(pending_count=0, now_mono=200.0)
+    assert sched.idle_action() == "Watching for new files"
+    assert sched.is_due(9999.0) is False
+
+    # 2. Integration with main(): transient failure on startup triggers automatic retry in monitor_folder
+    data_folder = tmp_path / "auto_retry_main"
+    data_folder.mkdir()
+    logs_dir = tmp_path / "logs" / "measurements"
+    monkeypatch.setattr(measurements_uploader, "MEASUREMENT_LOGS_FOLDER", logs_dir)
+    monkeypatch.setattr(
+        measurements_uploader, "DEFAULT_RETRY_BACKOFF_SECONDS", (0.0,)
+    )
+
+    cycle_calls = {"n": 0}
+
+    def fake_cycle(**_kwargs):
+        cycle_calls["n"] += 1
+        return 1 if cycle_calls["n"] == 1 else 0
+
+    sleep_ticks = {"n": 0}
+
+    def fake_sleep(_sec):
+        sleep_ticks["n"] += 1
+        if sleep_ticks["n"] >= 3:
+            raise KeyboardInterrupt
+
+    mock_openbis = MagicMock()
+    with (
+        patch.object(measurements_uploader, "Openbis", return_value=mock_openbis),
+        patch.object(measurements_uploader, "run_upload_cycle", side_effect=fake_cycle),
+        patch("time.sleep", side_effect=fake_sleep),
+    ):
+        rc = measurements_uploader.main(
+            [
+                "--openbis_url",
+                "https://openbis.local",
+                "--openbis_token",
+                "tok-ok",
+                "--measurement_session_id",
+                "SESS-AUTORETRY",
+                "--data_folder",
+                str(data_folder),
+            ]
+        )
+
+    assert rc == 0
+    assert cycle_calls["n"] == 2
+    final_log = json.loads(
+        (logs_dir / "SESS-AUTORETRY.json").read_text(encoding="utf-8")
+    )
+    assert final_log["current_action"] == "Watching for new files"
+
+    # 3. TokenExpiredError during scheduled retry exits cleanly with code 1
+    cycle_calls_exp = {"n": 0}
+
+    def fake_cycle_exp(**_kwargs):
+        cycle_calls_exp["n"] += 1
+        if cycle_calls_exp["n"] == 1:
+            return 1
+        raise measurements_uploader.TokenExpiredError("expired during retry")
+
+    with (
+        patch.object(measurements_uploader, "Openbis", return_value=mock_openbis),
+        patch.object(
+            measurements_uploader, "run_upload_cycle", side_effect=fake_cycle_exp
+        ),
+        patch("time.sleep", return_value=None),
+    ):
+        rc_exp = measurements_uploader.main(
+            [
+                "--openbis_url",
+                "https://openbis.local",
+                "--openbis_token",
+                "tok-ok",
+                "--measurement_session_id",
+                "SESS-RETRY-EXP",
+                "--data_folder",
+                str(data_folder),
+            ]
+        )
+
+    assert rc_exp == 1
+    assert cycle_calls_exp["n"] == 2
