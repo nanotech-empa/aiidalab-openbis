@@ -11,7 +11,7 @@ import time
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 import ipywidgets as ipw
 import pandas as pd
@@ -715,6 +715,53 @@ class ImportSimulationsWidget(ipw.VBox):
         for simulation in selected_simulations:
             visit(simulation)
         return ordered
+
+    def select_simulation_from_url(self, notebook_url):
+        """Preselect the exact search result on the connected openBIS instance."""
+        query = parse_qs(urlsplit(notebook_url).query, keep_blank_values=True)
+        if "simulation_permid" not in query:
+            return
+        identifiers = query["simulation_permid"]
+        expected = query.get("openbis_instance", [])
+        connected = str(self.openbis_session.url).rstrip("/")
+        if expected != [connected]:
+            self.import_simulations_message_html.value = (
+                "The selected simulation belongs to another openBIS connection. "
+                "Connect to that instance and reopen the import link."
+            )
+            return
+        if len(identifiers) != 1 or not re.fullmatch(r"[0-9]+-[0-9]+", identifiers[0]):
+            self.import_simulations_message_html.value = (
+                "Invalid simulation permID in the import link."
+            )
+            return
+        permid = identifiers[0]
+        try:
+            simulation = utils.get_openbis_object(
+                self.openbis_session, sample_ident=permid
+            )
+            if (
+                str(simulation.permId) != permid
+                or self._simulation_type_code(simulation) not in SIMULATION_TYPES.values()
+            ):
+                raise ValueError("Not an importable simulation")
+            options = self._simulation_options([simulation])
+            has_archive = self._simulation_has_archive(simulation)
+        except Exception as error:  # pyBIS exceptions may contain authenticated requests.
+            logger.info("Import handoff selection unavailable (%s)", type(error).__name__)
+            self.import_simulations_message_html.value = (
+                "The selected simulation is unavailable in this openBIS connection."
+            )
+            return
+        self._simulation_archive_by_permid = {permid: has_archive}
+        self.found_simulations_select_multiple.options = options
+        self.found_simulations_select_multiple.value = (permid,)
+        self.found_simulations_label.value = "Found simulations: 1"
+        self._update_action_buttons()
+        self.import_simulations_message_html.value = (
+            "Simulation selected. Click Import into AiiDA to import its archive."
+            if has_archive else "This simulation has no linked AiiDA archive. Use Download data instead."
+        )
 
     def search_simulations(self, _button=None):
         parent_permids = self._selected_parent_permids()
