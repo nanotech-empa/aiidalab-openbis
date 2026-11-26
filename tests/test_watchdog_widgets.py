@@ -1511,6 +1511,12 @@ def test_card_resume_blocks_when_folder_missing_already_running_or_session_delet
             raise ValueError("Deleted in openBIS")
         return _fake_session(sample_ident, f"MEAS_{sample_ident}")
 
+    def _find_live_card(w, sid):
+        for c in w.watchdogs_box.children:
+            if sid in "\n".join(_collect_html(c)):
+                return c
+        raise AssertionError(f"Card for {sid} not found in live watchdogs_box.children")
+
     with (
         patch("src.utils.get_openbis_object", side_effect=fake_get_openbis),
         patch("subprocess.Popen") as mock_popen,
@@ -1518,22 +1524,172 @@ def test_card_resume_blocks_when_folder_missing_already_running_or_session_delet
         widget = watchdog_module.RunningMeasurementWatchdogsWidget(
             MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
         )
-        cards_by_id = {}
-        for card in widget.watchdogs_box.children:
-            text = "\n".join(_collect_html(card))
-            for sid in ("SESS-CONFLICT", "SESS-MISSING", "SESS-DEL"):
-                if sid in text:
-                    cards_by_id[sid] = card
 
-        _collect_buttons(cards_by_id["SESS-CONFLICT"])["Resume"].click()
-        assert "already" in "\n".join(_collect_html(cards_by_id["SESS-CONFLICT"])).lower()
+        _collect_buttons(_find_live_card(widget, "SESS-CONFLICT"))["Resume"].click()
+        assert (
+            "already"
+            in "\n".join(_collect_html(_find_live_card(widget, "SESS-CONFLICT"))).lower()
+        )
 
-        _collect_buttons(cards_by_id["SESS-MISSING"])["Resume"].click()
-        assert "not found" in "\n".join(_collect_html(cards_by_id["SESS-MISSING"])).lower()
+        _collect_buttons(_find_live_card(widget, "SESS-MISSING"))["Resume"].click()
+        assert (
+            "not found"
+            in "\n".join(_collect_html(_find_live_card(widget, "SESS-MISSING"))).lower()
+        )
 
-        _collect_buttons(cards_by_id["SESS-DEL"])["Resume"].click()
-        assert "openbis" in "\n".join(_collect_html(cards_by_id["SESS-DEL"])).lower()
+        _collect_buttons(_find_live_card(widget, "SESS-DEL"))["Resume"].click()
+        assert (
+            "openbis"
+            in "\n".join(_collect_html(_find_live_card(widget, "SESS-DEL"))).lower()
+        )
 
+    assert mock_popen.call_count == 0
+
+
+def test_generate_watchdog_switch_from_stopped_folder_removes_old_registry_entry(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    data_folder = tmp_path / "stopped_switch_run"
+    data_folder.mkdir()
+
+    (meas_dir / "SESS-OLD-STOP.json").write_text(
+        json.dumps(
+            {
+                "eln_url": "https://openbis.local",
+                "eln_token": "tok-old",
+                "measurement_session_id": "SESS-OLD-STOP",
+                "data_folder": str(data_folder),
+                "processed_files": [str(data_folder / "a.sxm")],
+            }
+        ),
+        encoding="utf-8",
+    )
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 55555,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-OLD-STOP",
+                    "status": "STOPPED",
+                    "user_stopped": True,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    new_session = _fake_session("SESS-NEW-SW", "MEAS_NewSwitch")
+    old_session = _fake_session("SESS-OLD-STOP", "MEAS_OldStopped")
+
+    def fake_get_openbis(session, sample_ident=None):
+        if sample_ident == "SESS-OLD-STOP":
+            return old_session
+        return new_session
+
+    with (
+        patch("src.utils.get_openbis_object", side_effect=fake_get_openbis),
+        patch("src.utils.create_openbis_object", return_value=new_session),
+        patch("subprocess.Popen", return_value=MagicMock(pid=77777)),
+        patch.object(watchdog_module, "display"),
+        patch("os.kill"),
+    ):
+        gen_widget = _make_full_generator_widget(
+            watchdog_module, tmp_path, data_folder, session_name="MEAS_NewSwitch"
+        )
+        gen_widget.generate_watchdog(None)
+        _, buttons = _extract_prompt_widgets(gen_widget.folder_conflict_box)
+        buttons["Switch to new session"].click()
+
+    entries = json.loads(active_file.read_text(encoding="utf-8"))
+    assert [e["measurement_session_id"] for e in entries] == ["SESS-NEW-SW"]
+    assert entries[0]["pid"] == 77777
+
+
+def test_stop_watchdog_pids_ignores_non_positive_pids(watchdog_module, tmp_path):
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    with patch("os.kill") as mock_kill:
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-1"}
+        )
+        widget.stop_watchdog_pids([0, -1, True, "bad"], notify=False)
+    mock_kill.assert_not_called()
+
+
+def test_card_resume_handles_missing_credentials_or_popen_error_without_wiping_error_state(
+    watchdog_module, tmp_path
+):
+    logs_dir = tmp_path / "logs"
+    meas_dir = logs_dir / "measurements"
+    meas_dir.mkdir(parents=True, exist_ok=True)
+    data_folder = tmp_path / "resume_err_run"
+    data_folder.mkdir()
+
+    log_json = meas_dir / "SESS-POPEN-ERR.json"
+    orig_err = {"stage": "auth", "message": "Token expired"}
+    log_json.write_text(
+        json.dumps(
+            {
+                "eln_url": "https://openbis.local",
+                "eln_token": "tok-old",
+                "measurement_session_id": "SESS-POPEN-ERR",
+                "data_folder": str(data_folder),
+                "processed_files": [],
+                "token_expired": True,
+                "last_error": orig_err,
+                "recent_errors": [orig_err],
+            }
+        ),
+        encoding="utf-8",
+    )
+    active_file = logs_dir / "active_watchdogs.json"
+    active_file.write_text(
+        json.dumps(
+            [
+                {
+                    "pid": 8889,
+                    "monitored_folder": str(data_folder),
+                    "measurement_session_id": "SESS-POPEN-ERR",
+                    "status": "EXITED",
+                    "user_stopped": False,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    session_obj = _fake_session("SESS-POPEN-ERR", "MEAS_Err")
+
+    # Case A: Popen raises OSError -> inline error shown & token_expired/last_error restored
+    with (
+        patch("src.utils.get_openbis_object", return_value=session_obj),
+        patch("subprocess.Popen", side_effect=OSError("spawn failed")),
+    ):
+        widget = watchdog_module.RunningMeasurementWatchdogsWidget(
+            MagicMock(), {"url": "https://openbis.local", "token": "tok-fresh"}
+        )
+        _collect_buttons(widget.watchdogs_box.children[0])["Resume"].click()
+        live_html = "\n".join(_collect_html(widget.watchdogs_box.children[0]))
+        assert "spawn failed" in live_html.lower() or "failed to start" in live_html.lower()
+
+    after_err = json.loads(log_json.read_text(encoding="utf-8"))
+    assert after_err["token_expired"] is True
+    assert after_err["last_error"] == orig_err
+
+    # Case B: Missing url/token in session_data -> inline error & no Popen
+    with (
+        patch("src.utils.get_openbis_object", return_value=session_obj),
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        widget2 = watchdog_module.RunningMeasurementWatchdogsWidget(MagicMock(), {})
+        _collect_buttons(widget2.watchdogs_box.children[0])["Resume"].click()
+        live_html2 = "\n".join(_collect_html(widget2.watchdogs_box.children[0]))
+        assert "token" in live_html2.lower() or "credentials" in live_html2.lower()
     assert mock_popen.call_count == 0
 
 

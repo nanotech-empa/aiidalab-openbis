@@ -191,17 +191,17 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         ]
         self.running_watchdogs_widget.options = folder_options
 
-    def refresh_watchdog_list(self):
+    def refresh_watchdog_list(self, refresh_ui=True):
         self._reap_watchdog_processes()
         entries = measurement_monitor.sync_watchdog_liveness(
             self._active_watchdogs_file()
         )
         self._sync_select_options(entries)
-        if hasattr(self, "watchdogs_box"):
+        if refresh_ui and hasattr(self, "watchdogs_box"):
             self.render_watchdogs(entries=entries)
 
-    def get_active_watchdogs_for_folder(self, data_folder):
-        self.refresh_watchdog_list()
+    def get_active_watchdogs_for_folder(self, data_folder, refresh_ui=True):
+        self.refresh_watchdog_list(refresh_ui=refresh_ui)
         norm_target = os.path.normpath(data_folder)
         entries = measurement_monitor.load_watchdog_entries(
             self._active_watchdogs_file()
@@ -216,7 +216,11 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         ]
 
     def stop_watchdog_pids(self, pids, notify=True, remove_entries=True):
-        target_pids = list(dict.fromkeys(pids))
+        target_pids = [
+            pid
+            for pid in dict.fromkeys(pids)
+            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+        ]
         if not target_pids:
             return []
 
@@ -256,6 +260,17 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             self.render_watchdogs(entries=entries)
 
         return target_pids
+
+    def remove_watchdog_entries_for_folder(self, data_folder, session_ids=None):
+        entries = measurement_monitor.remove_watchdog_entries(
+            self._active_watchdogs_file(),
+            data_folder=data_folder,
+            session_ids=session_ids,
+        )
+        self._sync_select_options(entries)
+        if hasattr(self, "watchdogs_box"):
+            self.render_watchdogs(entries=entries)
+        return entries
 
     def add_active_watchdog(
         self,
@@ -307,12 +322,18 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         default_url = (
             self.session_data.get("url") if isinstance(self.session_data, dict) else None
         )
+        active_token = (
+            self.session_data.get("token")
+            if isinstance(self.session_data, dict)
+            else None
+        )
         snapshots = [
             measurement_monitor.build_watchdog_card_snapshot(
                 entry,
                 measurement_logs_dir=self._measurement_logs_dir(),
                 sync_registry_path=self._sync_registry_file(),
                 default_eln_url=default_url,
+                secret_tokens=[active_token] if active_token else None,
             )
             for entry in entries
         ]
@@ -378,7 +399,10 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         safe_name = html.escape(str(snap.get("session_name") or "Unknown Session"))
         safe_sid = html.escape(str(snap.get("session_id") or "N/A"))
         session_url = snap.get("session_url")
-        if session_url:
+        if (
+            isinstance(session_url, str)
+            and session_url.lower().startswith(("http://", "https://"))
+        ):
             safe_url = html.escape(session_url, quote=True)
             session_title = (
                 f"<a href='{safe_url}' target='_blank' rel='noopener noreferrer' "
@@ -524,7 +548,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                         )
                         return
 
-                    if self.get_active_watchdogs_for_folder(folder):
+                    if self.get_active_watchdogs_for_folder(folder, refresh_ui=False):
                         status_out.value = (
                             "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
                             "⚠ Cannot resume: this folder is already being monitored by an active watchdog.</div>"
@@ -535,6 +559,23 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                         status_out.value = (
                             "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
                             "⚠ Cannot resume: missing Measurement Session ID.</div>"
+                        )
+                        return
+
+                    openbis_url = (
+                        self.session_data.get("url")
+                        if isinstance(self.session_data, dict)
+                        else None
+                    )
+                    openbis_token = (
+                        self.session_data.get("token")
+                        if isinstance(self.session_data, dict)
+                        else None
+                    )
+                    if not openbis_url or not openbis_token:
+                        status_out.value = (
+                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
+                            "⚠ Cannot resume: missing openBIS session credentials (URL or token).</div>"
                         )
                         return
 
@@ -553,12 +594,19 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                     log_json_path = get_measurement_log_filepath(
                         session_id, logs_dir=logs_dir
                     )
+                    prev_state = (
+                        measurement_monitor.read_json_safe(log_json_path, default={})
+                        or {}
+                    )
+                    prev_token_expired = prev_state.get("token_expired", False)
+                    prev_last_error = prev_state.get("last_error")
+
                     measurement_monitor.update_measurement_log(
                         log_json_path,
                         lambda d: d.update(
                             {
-                                "eln_url": self.session_data["url"],
-                                "eln_token": self.session_data["token"],
+                                "eln_url": openbis_url,
+                                "eln_token": openbis_token,
                                 "measurement_session_id": session_id,
                                 "data_folder": os.path.normpath(folder),
                                 "token_expired": False,
@@ -567,14 +615,37 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                             }
                         ),
                     )
-                    proc, proc_log_path = measurement_monitor.start_watchdog_subprocess(
-                        APP_FOLDER,
-                        self.session_data["url"],
-                        self.session_data["token"],
-                        session_id,
-                        folder,
-                        logs_dir=logs_dir,
-                    )
+                    try:
+                        proc, proc_log_path = (
+                            measurement_monitor.start_watchdog_subprocess(
+                                APP_FOLDER,
+                                openbis_url,
+                                openbis_token,
+                                session_id,
+                                folder,
+                                logs_dir=logs_dir,
+                            )
+                        )
+                    except Exception as exc:
+                        measurement_monitor.update_measurement_log(
+                            log_json_path,
+                            lambda d: d.update(
+                                {
+                                    "token_expired": prev_token_expired,
+                                    "last_error": prev_last_error,
+                                }
+                            ),
+                        )
+                        safe_err = html.escape(
+                            measurement_monitor.redact_secrets(
+                                str(exc), [openbis_token]
+                            )
+                        )
+                        status_out.value = (
+                            "<div style='color: #b91c1c; font-size: 12px; margin-top: 4px;'>"
+                            f"⚠ Failed to start watchdog: {safe_err}</div>"
+                        )
+                        return
                     self.watchdog_processes.append(proc)
                     self.add_active_watchdog(
                         proc.pid,
@@ -1504,10 +1575,14 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                         remaining_processes.append(process)
                 self.watchdog_processes = remaining_processes
 
-            detach_measurement_logs_for_folder(
+            detached_paths = detach_measurement_logs_for_folder(
                 norm_data_folder,
                 replaced_by_session_id=new_session.permId,
                 logs_dir=logs_dir,
+            )
+            detached_session_ids = [p.stem for p in detached_paths]
+            self.running_watchdogs_widget.remove_watchdog_entries_for_folder(
+                norm_data_folder, session_ids=detached_session_ids
             )
             self._write_fresh_measurement_log(new_session.permId, norm_data_folder)
             self._clear_folder_conflict_prompt()

@@ -782,3 +782,425 @@ def test_monitor_folder_invokes_heartbeat_callback_and_stops_on_interrupt(tmp_pa
         )
 
     assert len(beats) >= 2
+
+
+def test_dismiss_watchdog_entry_matches_only_session_id_when_folder_shared(tmp_path):
+    from src import measurement_monitor
+
+    registry = tmp_path / "active_watchdogs.json"
+    shared_a = str(tmp_path / "shared_a")
+    shared_b = str(tmp_path / "shared_b")
+    measurement_monitor.save_watchdog_entries(
+        [
+            {
+                "pid": os.getpid(),
+                "monitored_folder": shared_a,
+                "measurement_session_id": "SESS-LIVE",
+                "status": "RUNNING",
+            },
+            {
+                "pid": 2002,
+                "monitored_folder": shared_a,
+                "measurement_session_id": "SESS-OLD",
+                "status": "STOPPED",
+                "user_stopped": True,
+            },
+            {
+                "pid": 2003,
+                "monitored_folder": shared_b,
+                "measurement_session_id": "SESS-STOP-1",
+                "status": "STOPPED",
+                "user_stopped": True,
+            },
+            {
+                "pid": 2004,
+                "monitored_folder": shared_b,
+                "measurement_session_id": "SESS-STOP-2",
+                "status": "EXITED",
+                "user_stopped": False,
+            },
+        ],
+        registry,
+    )
+
+    assert (
+        measurement_monitor.dismiss_watchdog_entry(
+            registry,
+            measurement_session_id="SESS-OLD",
+            pid=2002,
+            data_folder=shared_a,
+        )
+        is True
+    )
+    remaining_ids = [
+        e["measurement_session_id"]
+        for e in measurement_monitor.load_watchdog_entries(registry)
+    ]
+    assert remaining_ids == ["SESS-LIVE", "SESS-STOP-1", "SESS-STOP-2"]
+
+    assert (
+        measurement_monitor.dismiss_watchdog_entry(
+            registry,
+            measurement_session_id="SESS-STOP-2",
+            pid=2004,
+            data_folder=shared_b,
+        )
+        is True
+    )
+    remaining_ids = [
+        e["measurement_session_id"]
+        for e in measurement_monitor.load_watchdog_entries(registry)
+    ]
+    assert remaining_ids == ["SESS-LIVE", "SESS-STOP-1"]
+
+
+def test_update_measurement_log_and_nanonis_importer_preserve_concurrent_heartbeat(
+    tmp_path,
+):
+    import threading
+
+    from nanonis_importer import nanonis_importer
+    from src import measurement_monitor, measurements_uploader
+
+    # 1. Multi-threaded update_measurement_log serialization
+    concurrent_log = tmp_path / "concurrent.json"
+    measurement_monitor.atomic_write_json({"items": []}, concurrent_log)
+
+    def _worker(idx):
+        measurement_monitor.update_measurement_log(
+            concurrent_log, lambda d, i=idx: d["items"].append(i)
+        )
+
+    threads = [threading.Thread(target=_worker, args=(i,)) for i in range(25)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(json.loads(concurrent_log.read_text(encoding="utf-8"))["items"]) == list(
+        range(25)
+    )
+
+    # 2. nanonis_importer must not clobber heartbeat written during upload
+    data_folder = tmp_path / "concurrent_importer"
+    data_folder.mkdir()
+    sxm_path = data_folder / "scan_hb.sxm"
+    sxm_path.write_text("sxm", encoding="utf-8")
+    log_file = tmp_path / "SESS-CONC.json"
+    measurement_monitor.atomic_write_json(
+        {
+            "eln_url": "https://openbis.local",
+            "eln_token": "tok-1",
+            "measurement_session_id": "SESS-CONC",
+            "data_folder": str(data_folder),
+            "processed_files": [],
+        },
+        log_file,
+    )
+
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    def fake_spm(_path):
+        obj = MagicMock()
+        obj.record_datetime = datetime.datetime(2026, 11, 26, 10, 0, 1)
+        return obj
+
+    def fake_sxm_flow(*_args, **_kwargs):
+        # Heartbeat arrives on main thread mid-upload
+        measurement_monitor.update_measurement_log(
+            log_file,
+            lambda d: d.update({"last_heartbeat_at": "2026-11-26T12:34:56+00:00"}),
+        )
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow",
+            side_effect=fake_sxm_flow,
+        ),
+    ):
+        nanonis_importer.process_measurement_files(
+            openbis_url="https://openbis.local",
+            token="tok-1",
+            data_folder=str(data_folder),
+            measurements_id="SESS-CONC",
+            logging_filepath=str(log_file),
+        )
+
+    final_data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert final_data["last_heartbeat_at"] == "2026-11-26T12:34:56+00:00"
+    assert str(sxm_path) in final_data["processed_files"]
+
+    # 3. Heartbeat helper does not clobber active upload action
+    upload_in_progress = threading.Event()
+    upload_in_progress.set()
+    measurement_monitor.update_measurement_log(
+        log_file, lambda d: d.update({"current_action": "Uploading big.sxm..."})
+    )
+    measurements_uploader.write_heartbeat(
+        str(log_file),
+        str(data_folder),
+        upload_in_progress=upload_in_progress,
+    )
+    hb_data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert hb_data["current_action"] == "Uploading big.sxm..."
+
+
+def test_uploader_main_missing_directory_at_startup_logs_error_and_returns_1(
+    tmp_path, monkeypatch
+):
+    from nanonis_importer import nanonis_importer
+    from src import measurements_uploader
+
+    missing_dir = tmp_path / "does_not_exist"
+    logs_dir = tmp_path / "logs" / "measurements"
+    monkeypatch.setattr(measurements_uploader, "MEASUREMENT_LOGS_FOLDER", logs_dir)
+
+    mock_openbis = MagicMock()
+    with patch.object(measurements_uploader, "Openbis", return_value=mock_openbis):
+        rc = measurements_uploader.main(
+            [
+                "--openbis_url",
+                "https://openbis.local",
+                "--openbis_token",
+                "tok-ok",
+                "--measurement_session_id",
+                "SESS-NODIR",
+                "--data_folder",
+                str(missing_dir),
+            ]
+        )
+
+    assert rc == 1
+    data = json.loads((logs_dir / "SESS-NODIR.json").read_text(encoding="utf-8"))
+    assert data["folder_accessible"] is False
+    assert data["last_error"]["stage"] == "watcher"
+    assert "does not exist" in data["current_action"].lower()
+
+    # nanonis_importer.process_measurement_files must also catch missing folder and still logout
+    imp_log = tmp_path / "SESS-IMP-NODIR.json"
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+    with patch("src.utils.connect_openbis", return_value=(mock_session, None)):
+        nanonis_importer.process_measurement_files(
+            "https://openbis.local",
+            "tok-ok",
+            str(missing_dir),
+            "SESS-IMP-NODIR",
+            logging_filepath=str(imp_log),
+        )
+    mock_session.logout.assert_called_once()
+    imp_data = json.loads(imp_log.read_text(encoding="utf-8"))
+    assert imp_data["last_error"]["stage"] == "importer"
+
+
+def test_uploader_main_sigterm_sets_stopped_cleanly_without_monitor_overwrite(
+    tmp_path, monkeypatch
+):
+    from src import measurement_monitor, measurements_uploader
+
+    data_folder = tmp_path / "sigterm_folder"
+    data_folder.mkdir()
+    logs_dir = tmp_path / "logs" / "measurements"
+    monkeypatch.setattr(measurements_uploader, "MEASUREMENT_LOGS_FOLDER", logs_dir)
+
+    registered = {}
+    real_update = measurement_monitor.update_measurement_log
+    in_handler = {"active": False}
+    io_inside_handler = {"called": False}
+
+    def tracked_update(filepath, updater):
+        if in_handler["active"]:
+            io_inside_handler["called"] = True
+        return real_update(filepath, updater)
+
+    def fake_signal(sig, handler):
+        registered[sig] = handler
+
+    def fake_cycle(**_kwargs):
+        # Deliver SIGTERM during initial startup scan
+        handler = registered[measurements_uploader.signal.SIGTERM]
+        in_handler["active"] = True
+        try:
+            handler(measurements_uploader.signal.SIGTERM, None)
+        finally:
+            in_handler["active"] = False
+
+    mock_openbis = MagicMock()
+    with (
+        patch.object(measurements_uploader, "Openbis", return_value=mock_openbis),
+        patch.object(measurements_uploader.signal, "signal", side_effect=fake_signal),
+        patch.object(
+            measurements_uploader, "run_upload_cycle", side_effect=fake_cycle
+        ),
+        patch.object(
+            measurement_monitor, "update_measurement_log", side_effect=tracked_update
+        ),
+    ):
+        rc = measurements_uploader.main(
+            [
+                "--openbis_url",
+                "https://openbis.local",
+                "--openbis_token",
+                "tok-ok",
+                "--measurement_session_id",
+                "SESS-TERM",
+                "--data_folder",
+                str(data_folder),
+            ]
+        )
+
+    assert rc == 0
+    assert io_inside_handler["called"] is False
+    data = json.loads((logs_dir / "SESS-TERM.json").read_text(encoding="utf-8"))
+    assert data["current_action"] == "Stopped"
+
+
+def test_process_measurement_files_midrun_expired_token_marks_token_expired_and_stops(
+    tmp_path,
+):
+    from nanonis_importer import nanonis_importer
+
+    data_folder = tmp_path / "midrun_imp_exp"
+    data_folder.mkdir()
+    (data_folder / "a_first.sxm").write_text("sxm1", encoding="utf-8")
+    (data_folder / "b_second.sxm").write_text("sxm2", encoding="utf-8")
+    log_file = tmp_path / "SESS-IMP-MIDEXP.json"
+
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+    mock_session.is_session_active.return_value = False
+
+    def fake_spm(path):
+        obj = MagicMock()
+        obj.record_datetime = datetime.datetime(
+            2026, 11, 26, 10, 0, 1 if "a_first" in path else 2
+        )
+        return obj
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow",
+            side_effect=ValueError("Session token expired"),
+        ) as mock_sxm_flow,
+    ):
+        nanonis_importer.process_measurement_files(
+            openbis_url="https://openbis.local",
+            token="tok-expired",
+            data_folder=str(data_folder),
+            measurements_id="SESS-IMP-MIDEXP",
+            logging_filepath=str(log_file),
+        )
+
+    assert mock_sxm_flow.call_count == 1
+    data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert data["token_expired"] is True
+    assert data["last_error"]["stage"] == "auth"
+
+
+def test_build_watchdog_card_snapshot_redacts_eln_token_and_rejects_non_http_url(
+    tmp_path,
+):
+    from src import measurement_monitor, measurements_uploader
+
+    data_folder = tmp_path / "redact_run"
+    data_folder.mkdir()
+    txt_file = data_folder / "notes.txt"
+    txt_file.write_text("hi", encoding="utf-8")
+    meas_logs = tmp_path / "logs" / "measurements"
+    meas_logs.mkdir(parents=True)
+
+    secret_a = "super-secret-token-xyz"
+    secret_b = "extra-active-token-999"
+    proc_log = meas_logs / "SESS-SEC.log"
+    proc_log.write_text(
+        f"debug header token={secret_a}\nother line {secret_b}\n", encoding="utf-8"
+    )
+    (meas_logs / "SESS-SEC.json").write_text(
+        json.dumps(
+            {
+                "eln_url": "javascript:alert(1)",
+                "eln_token": secret_a,
+                "measurement_session_id": "SESS-SEC",
+                "data_folder": str(data_folder),
+                "processed_files": [],
+                "current_action": f"Failed with {secret_a}",
+                "last_error": {
+                    "stage": "attachment",
+                    "file": "notes.txt",
+                    "message": f"HTTP 401 token={secret_a}",
+                    "timestamp": "2026-11-26T10:00:00+00:00",
+                },
+                "recent_errors": [
+                    {
+                        "stage": "attachment",
+                        "file": "notes.txt",
+                        "message": f"HTTP 401 token={secret_a} {secret_b}",
+                        "timestamp": "2026-11-26T10:00:00+00:00",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    snap = measurement_monitor.build_watchdog_card_snapshot(
+        {
+            "pid": os.getpid(),
+            "monitored_folder": str(data_folder),
+            "measurement_session_id": "SESS-SEC",
+            "status": "RUNNING",
+            "log_file": str(proc_log),
+        },
+        measurement_logs_dir=meas_logs,
+        secret_tokens=[secret_b],
+    )
+
+    assert snap["session_url"] is None
+    assert measurement_monitor.build_openbis_session_url(
+        "javascript:alert(1)", "SESS-SEC"
+    ) is None
+    combined = "\n".join(
+        snap["log_tail"]
+        + [
+            snap["current_action"],
+            snap["last_error"]["message"],
+            snap["recent_errors"][0]["message"],
+        ]
+    )
+    assert secret_a not in combined
+    assert secret_b not in combined
+    assert "[REDACTED]" in combined
+
+    # Exception message containing openbis_token is redacted in run_upload_cycle too
+    log_fp, _ = measurements_uploader.init_or_load_measurement_log(
+        "https://openbis.local", secret_a, "SESS-REDACT", str(data_folder), logs_dir=meas_logs
+    )
+    mock_session = MagicMock()
+    mock_session.is_session_active.return_value = True
+    with (
+        patch.object(measurements_uploader, "process_measurement_files"),
+        patch(
+            "src.utils.create_openbis_dataset",
+            side_effect=RuntimeError(f"request failed with {secret_a}"),
+        ),
+        patch.object(measurements_uploader, "wait_for_file_ready", return_value=True),
+    ):
+        measurements_uploader.run_upload_cycle(
+            data_folder=str(data_folder),
+            openbis_session=mock_session,
+            openbis_url="https://openbis.local",
+            openbis_token=secret_a,
+            measurement_session_id="SESS-REDACT",
+            logging_filepath=log_fp,
+        )
+    redacted_data = json.loads(open(log_fp, encoding="utf-8").read())
+    assert secret_a not in redacted_data["last_error"]["message"]
+    assert "[REDACTED]" in redacted_data["last_error"]["message"]

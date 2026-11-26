@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import io
 import logging
 import os
 import pathlib
@@ -34,18 +36,29 @@ class TokenExpiredError(RuntimeError):
     """Raised when the openBIS session token is invalid or expired."""
 
 
-def is_session_token_expired(openbis_session) -> bool:
-    if openbis_session is None:
-        return True
-    check_active = getattr(openbis_session, "is_session_active", None)
-    if callable(check_active):
-        try:
-            active = check_active()
-            if active is False:
-                return True
-        except Exception:
-            return False
-    return False
+is_session_token_expired = measurement_monitor.is_session_token_expired
+
+
+def write_heartbeat(
+    logging_filepath,
+    data_folder,
+    upload_in_progress=None,
+    stop_event=None,
+):
+    folder_ok = os.path.isdir(data_folder)
+
+    def _upd(d):
+        d["last_heartbeat_at"] = measurement_monitor.utc_now_iso()
+        d["folder_accessible"] = folder_ok
+        busy = upload_in_progress is not None and upload_in_progress.is_set()
+        stopping = stop_event is not None and stop_event.is_set()
+        if not busy and not stopping and not d.get("token_expired"):
+            d["current_action"] = (
+                "Watching for new files" if folder_ok else "Folder inaccessible"
+            )
+        return d
+
+    measurement_monitor.update_measurement_log(logging_filepath, _upd)
 
 
 def get_measurement_log_filepath(
@@ -149,20 +162,27 @@ def monitor_folder(
     heartbeat_interval=15.0,
     stop_event=None,
 ):
+    if stop_event is not None and stop_event.is_set():
+        return
+
     event_handler = NewFileHandler(custom_function)
     observer = Observer()
     observer.schedule(event_handler, path=path_to_watch, recursive=False)
     observer.start()
     print(f"Started monitoring {path_to_watch}...", flush=True)
     last_heartbeat = 0.0
-    if heartbeat_callback is not None:
+    if heartbeat_callback is not None and (
+        stop_event is None or not stop_event.is_set()
+    ):
         heartbeat_callback()
         last_heartbeat = time.monotonic()
 
     try:
         while stop_event is None or not stop_event.is_set():
             time.sleep(1)
-            if heartbeat_callback is not None:
+            if heartbeat_callback is not None and (
+                stop_event is None or not stop_event.is_set()
+            ):
                 now_mono = time.monotonic()
                 if now_mono - last_heartbeat >= heartbeat_interval:
                     heartbeat_callback()
@@ -181,132 +201,152 @@ def run_upload_cycle(
     openbis_token,
     measurement_session_id,
     logging_filepath,
+    upload_in_progress=None,
 ):
-    initial_logging_data = (
-        measurement_monitor.read_json_safe(logging_filepath, default={}) or {}
-    )
-    candidate_files = get_candidate_files(
-        data_folder, initial_logging_data.get("processed_files", [])
-    )
+    if upload_in_progress is not None:
+        upload_in_progress.set()
+    try:
+        initial_logging_data = (
+            measurement_monitor.read_json_safe(logging_filepath, default={}) or {}
+        )
+        candidate_files = get_candidate_files(
+            data_folder, initial_logging_data.get("processed_files", [])
+        )
 
-    measurement_monitor.update_measurement_log(
-        logging_filepath,
-        lambda d: d.update(
-            {
-                "current_action": "Scanning & uploading files...",
-                "last_heartbeat_at": measurement_monitor.utc_now_iso(),
-            }
-        ),
-    )
-
-    process_measurement_files(
-        openbis_url,
-        openbis_token,
-        data_folder,
-        measurement_session_id,
-        logging_filepath,
-    )
-
-    logging_data = (
-        measurement_monitor.read_json_safe(logging_filepath, default={}) or {}
-    )
-    logging_data.setdefault("processed_files", [])
-
-    if logging_data.get("token_expired"):
-        msg = "Stopped — openBIS token invalid or expired"
-        logging_data["current_action"] = msg
-        measurement_monitor.atomic_write_json(logging_data, logging_filepath)
-        print(msg, flush=True)
-        raise TokenExpiredError(msg)
-
-    uploaded_files = logging_data.get("processed_files", [])
-
-    # Determine which files from the pre-processing snapshot still need uploading
-    missing_files = [
-        f
-        for f in candidate_files
-        if f not in uploaded_files and os.path.isfile(f) and not is_ignored_file(f)
-    ]
-
-    for file_path in missing_files:
-        basename = os.path.basename(file_path)
         measurement_monitor.update_measurement_log(
             logging_filepath,
-            lambda d, name=basename: d.update(
+            lambda d: d.update(
                 {
-                    "current_action": f"Uploading {name}...",
+                    "current_action": "Scanning & uploading files...",
                     "last_heartbeat_at": measurement_monitor.utc_now_iso(),
                 }
             ),
         )
-        try:
-            measurement_session_obj = openbis_session.get_object(measurement_session_id)
-            utils.create_openbis_dataset(
-                openbis_session,
-                type="ATTACHMENT",
-                sample=measurement_session_obj,
-                files=[file_path],
+
+        process_measurement_files(
+            openbis_url,
+            openbis_token,
+            data_folder,
+            measurement_session_id,
+            logging_filepath,
+        )
+
+        logging_data = (
+            measurement_monitor.read_json_safe(logging_filepath, default={}) or {}
+        )
+        logging_data.setdefault("processed_files", [])
+
+        if logging_data.get("token_expired"):
+            msg = "Stopped — openBIS token invalid or expired"
+            measurement_monitor.update_measurement_log(
+                logging_filepath, lambda d: d.update({"current_action": msg})
             )
-        except Exception as exc:
-            if is_session_token_expired(openbis_session):
-                auth_msg = f"openBIS token expired while uploading {basename}: {exc}"
-                logger.error(auth_msg)
-                print(auth_msg, flush=True)
+            print(msg, flush=True)
+            raise TokenExpiredError(msg)
 
-                def _mark_expired(d):
-                    d["token_expired"] = True
-                    d["current_action"] = "Stopped — openBIS token invalid or expired"
-                    measurement_monitor.append_error_event(
-                        d, auth_msg, stage="auth", file_path=file_path
-                    )
+        uploaded_files = logging_data.get("processed_files", [])
 
-                measurement_monitor.update_measurement_log(
-                    logging_filepath, _mark_expired
-                )
-                raise TokenExpiredError(auth_msg) from exc
+        # Determine which files from the pre-processing snapshot still need uploading
+        missing_files = [
+            f
+            for f in candidate_files
+            if f not in uploaded_files and os.path.isfile(f) and not is_ignored_file(f)
+        ]
 
-            err_msg = f"Failed to upload attachment {basename}: {exc}"
-            logger.error(err_msg)
-            print(err_msg, flush=True)
+        for file_path in missing_files:
+            basename = os.path.basename(file_path)
             measurement_monitor.update_measurement_log(
                 logging_filepath,
-                lambda d, m=str(exc), fp=file_path: measurement_monitor.append_error_event(
-                    d, m, stage="attachment", file_path=fp
+                lambda d, name=basename: d.update(
+                    {
+                        "current_action": f"Uploading {name}...",
+                        "last_heartbeat_at": measurement_monitor.utc_now_iso(),
+                    }
                 ),
             )
-            continue
-
-        def _record_attachment(d, fp=file_path, name=basename):
-            d.setdefault("processed_files", [])
-            if fp not in d["processed_files"]:
-                d["processed_files"].append(fp)
-            measurement_monitor.append_upload_event(d, fp, "ATTACHMENT")
-            last_err = d.get("last_error")
-            if (
-                isinstance(last_err, dict)
-                and last_err.get("file") == name
-                and last_err.get("stage") in ("sxm", "dat")
-                and "ATTACHMENT fallback" not in str(last_err.get("message", ""))
-            ):
-                last_err["message"] = (
-                    f"{last_err['message']} (uploaded as raw ATTACHMENT fallback)"
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    measurement_session_obj = openbis_session.get_object(
+                        measurement_session_id
+                    )
+                utils.create_openbis_dataset(
+                    openbis_session,
+                    type="ATTACHMENT",
+                    sample=measurement_session_obj,
+                    files=[file_path],
                 )
-                if isinstance(d.get("recent_errors"), list) and d["recent_errors"]:
-                    d["recent_errors"][-1]["message"] = last_err["message"]
+            except Exception as exc:
+                safe_exc = measurement_monitor.redact_secrets(
+                    str(exc), [openbis_token]
+                )
+                if is_session_token_expired(openbis_session):
+                    auth_msg = (
+                        f"openBIS token expired while uploading {basename}: {safe_exc}"
+                    )
+                    logger.error(auth_msg)
+                    print(auth_msg, flush=True)
 
-        measurement_monitor.update_measurement_log(logging_filepath, _record_attachment)
-        logger.info(f"Uploaded file: {file_path}")
-        print(f"Uploaded file as ATTACHMENT: {basename}", flush=True)
+                    def _mark_expired(d):
+                        d["token_expired"] = True
+                        d["current_action"] = (
+                            "Stopped — openBIS token invalid or expired"
+                        )
+                        measurement_monitor.append_error_event(
+                            d, auth_msg, stage="auth", file_path=file_path
+                        )
 
-    measurement_monitor.update_measurement_log(
-        logging_filepath,
-        lambda d: d.update(
-            {
-                "current_action": "Watching for new files",
-                "last_heartbeat_at": measurement_monitor.utc_now_iso(),
-            }
-        ),
-    )
+                    measurement_monitor.update_measurement_log(
+                        logging_filepath, _mark_expired
+                    )
+                    raise TokenExpiredError(auth_msg) from exc
+
+                err_msg = f"Failed to upload attachment {basename}: {safe_exc}"
+                logger.error(err_msg)
+                print(err_msg, flush=True)
+                measurement_monitor.update_measurement_log(
+                    logging_filepath,
+                    lambda d, m=safe_exc, fp=file_path: measurement_monitor.append_error_event(
+                        d, m, stage="attachment", file_path=fp
+                    ),
+                )
+                continue
+
+            def _record_attachment(d, fp=file_path, name=basename):
+                d.setdefault("processed_files", [])
+                if fp not in d["processed_files"]:
+                    d["processed_files"].append(fp)
+                measurement_monitor.append_upload_event(d, fp, "ATTACHMENT")
+                last_err = d.get("last_error")
+                if (
+                    isinstance(last_err, dict)
+                    and last_err.get("file") == name
+                    and last_err.get("stage") in ("sxm", "dat")
+                    and "ATTACHMENT fallback" not in str(last_err.get("message", ""))
+                ):
+                    last_err["message"] = (
+                        f"{last_err['message']} (uploaded as raw ATTACHMENT fallback)"
+                    )
+                    if isinstance(d.get("recent_errors"), list) and d["recent_errors"]:
+                        d["recent_errors"][-1]["message"] = last_err["message"]
+
+            measurement_monitor.update_measurement_log(
+                logging_filepath, _record_attachment
+            )
+            logger.info(f"Uploaded file: {file_path}")
+            print(f"Uploaded file as ATTACHMENT: {basename}", flush=True)
+
+        measurement_monitor.update_measurement_log(
+            logging_filepath,
+            lambda d: d.update(
+                {
+                    "current_action": "Watching for new files",
+                    "last_heartbeat_at": measurement_monitor.utc_now_iso(),
+                }
+            ),
+        )
+    finally:
+        if upload_in_progress is not None:
+            upload_in_progress.clear()
 
 
 def process_new_file(
@@ -318,6 +358,7 @@ def process_new_file(
     logging_filepath,
     stop_event=None,
     token_expired_event=None,
+    upload_in_progress=None,
 ):
     if is_ignored_file(file_path) or not wait_for_file_ready(file_path):
         return
@@ -331,6 +372,7 @@ def process_new_file(
             openbis_token=openbis_token,
             measurement_session_id=measurement_session_id,
             logging_filepath=logging_filepath,
+            upload_in_progress=upload_in_progress,
         )
     except TokenExpiredError:
         if token_expired_event is not None:
@@ -382,12 +424,14 @@ def main(argv=None) -> int:
     )
 
     try:
-        openbis_session = Openbis(openbis_url, verify_certificates=False)
-        openbis_session.set_token(openbis_token)
+        with contextlib.redirect_stdout(io.StringIO()):
+            openbis_session = Openbis(openbis_url, verify_certificates=False)
+            openbis_session.set_token(openbis_token)
     except ValueError as exc:
         msg = "Session is no longer valid. Please check if the token is still valid."
+        safe_exc = measurement_monitor.redact_secrets(str(exc), [openbis_token])
         print(msg, flush=True)
-        logger.error(f"{msg} ({exc})")
+        logger.error(f"{msg} ({safe_exc})")
 
         def _mark_startup_expired(d):
             d["token_expired"] = True
@@ -400,14 +444,12 @@ def main(argv=None) -> int:
         return 1
 
     stop_event = threading.Event()
+    sigterm_received = threading.Event()
     token_expired_event = threading.Event()
+    upload_in_progress = threading.Event()
 
     def _handle_sigterm(_signum, _frame):
-        print("Received SIGTERM; stopping watchdog.", flush=True)
-        measurement_monitor.update_measurement_log(
-            logging_filepath,
-            lambda d: d.update({"current_action": "Stopped"}),
-        )
+        sigterm_received.set()
         stop_event.set()
 
     try:
@@ -415,21 +457,26 @@ def main(argv=None) -> int:
     except ValueError:
         pass
 
+    if not os.path.isdir(data_folder):
+        msg = f"Monitored directory does not exist: {data_folder}"
+        print(msg, flush=True)
+        logger.error(msg)
+
+        def _mark_missing_dir(d):
+            d["folder_accessible"] = False
+            d["current_action"] = msg
+            measurement_monitor.append_error_event(d, msg, stage="watcher")
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _mark_missing_dir)
+        return 1
+
     def _heartbeat():
-        folder_ok = os.path.isdir(data_folder)
-        measurement_monitor.update_measurement_log(
+        write_heartbeat(
             logging_filepath,
-            lambda d: d.update(
-                {
-                    "last_heartbeat_at": measurement_monitor.utc_now_iso(),
-                    "folder_accessible": folder_ok,
-                    "current_action": (
-                        "Watching for new files"
-                        if folder_ok
-                        else "Folder inaccessible"
-                    ),
-                }
-            ),
+            data_folder,
+            upload_in_progress=upload_in_progress,
+            stop_event=stop_event,
         )
 
     def custom_function(file_path):
@@ -442,6 +489,7 @@ def main(argv=None) -> int:
             logging_filepath=logging_filepath,
             stop_event=stop_event,
             token_expired_event=token_expired_event,
+            upload_in_progress=upload_in_progress,
         )
 
     try:
@@ -452,30 +500,37 @@ def main(argv=None) -> int:
             openbis_token=openbis_token,
             measurement_session_id=measurement_session_id,
             logging_filepath=logging_filepath,
+            upload_in_progress=upload_in_progress,
         )
     except TokenExpiredError:
         return 1
-
-    if not os.path.isdir(data_folder):
-        msg = f"Monitored directory does not exist: {data_folder}"
-        print(msg, flush=True)
-        logger.error(msg)
+    except Exception as exc:
+        safe_exc = measurement_monitor.redact_secrets(str(exc), [openbis_token])
+        logger.exception(f"Unexpected error during initial upload cycle: {safe_exc}")
         measurement_monitor.update_measurement_log(
             logging_filepath,
-            lambda d: (
-                d.update({"folder_accessible": False, "current_action": msg}),
-                measurement_monitor.append_error_event(d, msg, stage="watcher"),
-            )[0],
+            lambda d: measurement_monitor.append_error_event(
+                d, safe_exc, stage="watcher"
+            ),
         )
         return 1
 
-    monitor_folder(
-        data_folder,
-        custom_function,
-        heartbeat_callback=_heartbeat,
-        heartbeat_interval=15.0,
-        stop_event=stop_event,
-    )
+    if not stop_event.is_set():
+        monitor_folder(
+            data_folder,
+            custom_function,
+            heartbeat_callback=_heartbeat,
+            heartbeat_interval=15.0,
+            stop_event=stop_event,
+        )
+
+    if sigterm_received.is_set() and not token_expired_event.is_set():
+        print("Received SIGTERM; stopping watchdog.", flush=True)
+        measurement_monitor.update_measurement_log(
+            logging_filepath,
+            lambda d: d.update({"current_action": "Stopped"}),
+        )
+
     return 1 if token_expired_event.is_set() else 0
 
 

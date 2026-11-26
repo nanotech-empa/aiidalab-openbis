@@ -637,6 +637,9 @@ def create_dat_dataset(
 def process_measurement_files(
     openbis_url, token, data_folder, measurements_id, logging_filepath=None
 ):
+    import contextlib
+    import io
+
     session, _ = utils.connect_openbis(openbis_url, token)
     if logging_filepath is None:
         logs_dir = (
@@ -644,37 +647,85 @@ def process_measurement_files(
         )
         logs_dir.mkdir(parents=True, exist_ok=True)
         logging_filepath = str(logs_dir / f"{measurements_id}.json")
+
+    norm_data_folder = os.path.normpath(data_folder)
+
+    def _init_log(d):
+        d.setdefault("eln_url", openbis_url)
+        d.setdefault("eln_token", token)
+        d.setdefault("measurement_session_id", measurements_id)
+        d.setdefault("data_folder", norm_data_folder)
+        d.setdefault("processed_files", [])
+        return d
+
     if os.path.exists(logging_filepath):
-        logging_file = measurement_monitor.read_json_safe(logging_filepath, default={})
-        if not isinstance(logging_file, dict):
-            logging_file = {}
-        logging_file.setdefault("processed_files", [])
+        existing_log = measurement_monitor.read_json_safe(logging_filepath, default={})
+        if not isinstance(existing_log, dict):
+            existing_log = {}
+        processed_files = list(existing_log.get("processed_files") or [])
     else:
-        pathlib.Path(logging_filepath).parent.mkdir(parents=True, exist_ok=True)
-        logging_file = {
-            "eln_url": openbis_url,
-            "eln_token": token,
-            "measurement_session_id": measurements_id,
-            "data_folder": os.path.normpath(data_folder),
-            "processed_files": [],
-        }
-        measurement_monitor.atomic_write_json(logging_file, logging_filepath)
+        init_log = measurement_monitor.update_measurement_log(
+            logging_filepath, _init_log
+        )
+        processed_files = list(init_log.get("processed_files") or [])
+
+    def _record_uploads(paths, upload_type):
+        def _upd(d):
+            _init_log(d)
+            for p in paths:
+                if p not in d["processed_files"]:
+                    d["processed_files"].append(p)
+                measurement_monitor.append_upload_event(d, p, upload_type)
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _upd)
+        for p in paths:
+            if p not in processed_files:
+                processed_files.append(p)
+
+    def _record_error_and_check_auth(exc, stage, file_path=None) -> bool:
+        safe_msg = measurement_monitor.redact_secrets(str(exc), [token])
+        expired = measurement_monitor.is_session_token_expired(session)
+
+        def _upd(d):
+            _init_log(d)
+            if expired:
+                d["token_expired"] = True
+                measurement_monitor.append_error_event(
+                    d,
+                    f"openBIS token expired: {safe_msg}",
+                    stage="auth",
+                    file_path=file_path,
+                )
+            else:
+                measurement_monitor.append_error_event(
+                    d, safe_msg, stage=stage, file_path=file_path
+                )
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _upd)
+        return expired
 
     if session is None:
         msg = "Could not connect to openBIS (session invalid or expired)."
         logger.error(msg)
-        logging_file["token_expired"] = True
-        measurement_monitor.append_error_event(logging_file, msg, stage="auth")
-        measurement_monitor.atomic_write_json(logging_file, logging_filepath)
-        return
 
-    measurement_files = [f for f in os.listdir(data_folder)]
+        def _mark_conn_failed(d):
+            _init_log(d)
+            d["token_expired"] = True
+            measurement_monitor.append_error_event(d, msg, stage="auth")
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _mark_conn_failed)
+        return
 
     readable_measurement_files = []
     measurement_datetimes = []
 
     # Check measurement files and measurement datetimes
     try:
+        measurement_files = [f for f in os.listdir(data_folder)]
+
         for f in measurement_files:
             # sxm and dat files
             if f.endswith((".sxm", ".dat")):
@@ -735,15 +786,19 @@ def process_measurement_files(
         if len(group) > 0:
             grouped_measurement_files.append(group)
 
+        token_expired_midrun = False
         for group in grouped_measurement_files:
+            if token_expired_midrun:
+                break
             # Save sxm files
             if group[0].endswith(".sxm"):
                 file_path = os.path.join(data_folder, group[0])
                 logger.info(f"SXM file: {file_path}")
 
-                if file_path not in logging_file["processed_files"]:
+                if file_path not in processed_files:
                     try:
-                        measurements_object = session.get_sample(measurements_id)
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            measurements_object = session.get_sample(measurements_id)
                         experiment = measurements_object.experiment
                         demo_sxm_flow(
                             session,
@@ -751,22 +806,16 @@ def process_measurement_files(
                             sample=measurements_id,
                             experiment=experiment,
                         )
-                        logging_file["processed_files"].append(file_path)
-                        measurement_monitor.append_upload_event(
-                            logging_file, file_path, "SXM"
-                        )
-                        measurement_monitor.atomic_write_json(
-                            logging_file, logging_filepath
-                        )
+                        _record_uploads([file_path], "SXM")
 
                     except Exception as e:
-                        logger.info(f"Cannot upload {file_path}. Reason: {e}")
-                        measurement_monitor.append_error_event(
-                            logging_file, str(e), stage="sxm", file_path=file_path
-                        )
-                        measurement_monitor.atomic_write_json(
-                            logging_file, logging_filepath
-                        )
+                        safe_err = measurement_monitor.redact_secrets(str(e), [token])
+                        logger.info(f"Cannot upload {file_path}. Reason: {safe_err}")
+                        if _record_error_and_check_auth(
+                            e, stage="sxm", file_path=file_path
+                        ):
+                            token_expired_midrun = True
+                            break
                 else:
                     logger.info(f"{file_path} already in openBIS.")
             else:
@@ -785,6 +834,8 @@ def process_measurement_files(
 
                 # Save dat files
                 for dat_files_group in dat_files_grouped_by_type:
+                    if token_expired_midrun:
+                        break
                     dat_files_directory = tempfile.mkdtemp(prefix="nanonis_dat_files_")
                     try:
                         delete_original_openBIS_dataset = False
@@ -797,7 +848,7 @@ def process_measurement_files(
                             )
                             shutil.copy(original_dat_path, temporary_dat_path)
 
-                            if original_dat_path in logging_file["processed_files"]:
+                            if original_dat_path in processed_files:
                                 group_in_openbis = True
                             else:
                                 delete_original_openBIS_dataset = True
@@ -806,9 +857,10 @@ def process_measurement_files(
                         if group_in_openbis:
                             if delete_original_openBIS_dataset:
                                 try:
-                                    measurements_object = session.get_sample(
-                                        measurements_id
-                                    )
+                                    with contextlib.redirect_stdout(io.StringIO()):
+                                        measurements_object = session.get_sample(
+                                            measurements_id
+                                        )
                                     experiment = measurements_object.experiment
 
                                     # Identify old dataset in order to update it after upload succeeds
@@ -828,24 +880,19 @@ def process_measurement_files(
                                         sample=measurements_id,
                                         experiment=experiment,
                                     )
-                                    logging_file["processed_files"].extend(
-                                        new_dat_paths
-                                    )
-                                    for dat_path in new_dat_paths:
-                                        measurement_monitor.append_upload_event(
-                                            logging_file, dat_path, "DAT"
-                                        )
-                                    measurement_monitor.atomic_write_json(
-                                        logging_file, logging_filepath
-                                    )
+                                    _record_uploads(new_dat_paths, "DAT")
                                     if dataset_to_remove:
-                                        session.get_dataset(dataset_to_remove).delete(
-                                            "update dataset group"
-                                        )
+                                        with contextlib.redirect_stdout(io.StringIO()):
+                                            session.get_dataset(
+                                                dataset_to_remove
+                                            ).delete("update dataset group")
 
                                 except Exception as e:
+                                    safe_err = measurement_monitor.redact_secrets(
+                                        str(e), [token]
+                                    )
                                     logger.info(
-                                        f"Cannot upload {dat_files_directory}. Reason: {e}"
+                                        f"Cannot upload {dat_files_directory}. Reason: {safe_err}"
                                     )
                                     first_dat = (
                                         new_dat_paths[0]
@@ -854,21 +901,18 @@ def process_measurement_files(
                                             data_folder, dat_files_group[0]
                                         )
                                     )
-                                    measurement_monitor.append_error_event(
-                                        logging_file,
-                                        str(e),
-                                        stage="dat",
-                                        file_path=first_dat,
-                                    )
-                                    measurement_monitor.atomic_write_json(
-                                        logging_file, logging_filepath
-                                    )
+                                    if _record_error_and_check_auth(
+                                        e, stage="dat", file_path=first_dat
+                                    ):
+                                        token_expired_midrun = True
+                                        break
 
                         else:
                             try:
-                                measurements_object = session.get_sample(
-                                    measurements_id
-                                )
+                                with contextlib.redirect_stdout(io.StringIO()):
+                                    measurements_object = session.get_sample(
+                                        measurements_id
+                                    )
                                 experiment = measurements_object.experiment
                                 # Upload dat files
                                 demo_dat_flow(
@@ -877,44 +921,38 @@ def process_measurement_files(
                                     sample=measurements_id,
                                     experiment=experiment,
                                 )
-                                logging_file["processed_files"].extend(new_dat_paths)
-                                for dat_path in new_dat_paths:
-                                    measurement_monitor.append_upload_event(
-                                        logging_file, dat_path, "DAT"
-                                    )
-                                measurement_monitor.atomic_write_json(
-                                    logging_file, logging_filepath
-                                )
+                                _record_uploads(new_dat_paths, "DAT")
                             except Exception as e:
+                                safe_err = measurement_monitor.redact_secrets(
+                                    str(e), [token]
+                                )
                                 logger.info(
-                                    f"Cannot upload {dat_files_directory}. Reason: {e}"
+                                    f"Cannot upload {dat_files_directory}. Reason: {safe_err}"
                                 )
                                 first_dat = (
                                     new_dat_paths[0]
                                     if new_dat_paths
                                     else os.path.join(data_folder, dat_files_group[0])
                                 )
-                                measurement_monitor.append_error_event(
-                                    logging_file,
-                                    str(e),
-                                    stage="dat",
-                                    file_path=first_dat,
-                                )
-                                measurement_monitor.atomic_write_json(
-                                    logging_file, logging_filepath
-                                )
+                                if _record_error_and_check_auth(
+                                    e, stage="dat", file_path=first_dat
+                                ):
+                                    token_expired_midrun = True
+                                    break
                     finally:
                         shutil.rmtree(dat_files_directory, ignore_errors=True)
 
     except Exception as e:
-        logger.info(f"Error processing measurement files: {e}")
-        measurement_monitor.append_error_event(
-            logging_file, str(e), stage="importer"
-        )
-        measurement_monitor.atomic_write_json(logging_file, logging_filepath)
+        safe_err = measurement_monitor.redact_secrets(str(e), [token])
+        logger.info(f"Error processing measurement files: {safe_err}")
+        _record_error_and_check_auth(e, stage="importer")
     finally:
         if session is not None:
-            session.logout()
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    session.logout()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

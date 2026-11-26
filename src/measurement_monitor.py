@@ -8,11 +8,50 @@ import os
 import pathlib
 import subprocess
 import threading
+import uuid
 from collections import deque
 
 from . import sync_registry, utils
 
 IGNORED_SUFFIXES = (".json", ".ini", ".part", ".openbis-drive-part", ".tmp")
+_LOG_LOCKS_GUARD = threading.Lock()
+_LOG_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _get_log_lock(filepath: str | pathlib.Path) -> threading.Lock:
+    key = os.path.abspath(str(filepath))
+    with _LOG_LOCKS_GUARD:
+        lock = _LOG_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _LOG_LOCKS[key] = lock
+        return lock
+
+
+def is_session_token_expired(openbis_session) -> bool:
+    if openbis_session is None:
+        return True
+    check_active = getattr(openbis_session, "is_session_active", None)
+    if callable(check_active):
+        try:
+            active = check_active()
+            if active is False:
+                return True
+        except Exception:
+            return False
+    return False
+
+
+def redact_secrets(
+    text: str, secrets: list[str | None] | tuple[str | None, ...] | None
+) -> str:
+    if not text or not secrets:
+        return text
+    redacted = str(text)
+    for secret in secrets:
+        if isinstance(secret, str) and secret:
+            redacted = redacted.replace(secret, "[REDACTED]")
+    return redacted
 
 
 def utc_now() -> datetime.datetime:
@@ -32,7 +71,7 @@ def atomic_write_json(data, filepath: str | pathlib.Path) -> None:
     path = pathlib.Path(filepath)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(
-        f"{path.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+        f"{path.name}.tmp.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}"
     )
     try:
         with open(tmp_path, "w", encoding="utf-8") as fh:
@@ -58,13 +97,15 @@ def read_json_safe(filepath: str | pathlib.Path, default=None):
 
 
 def update_measurement_log(logging_filepath: str | pathlib.Path, updater) -> dict:
-    current = read_json_safe(logging_filepath, default={})
-    if not isinstance(current, dict):
-        current = {}
-    result = updater(current)
-    updated = result if isinstance(result, dict) else current
-    atomic_write_json(updated, logging_filepath)
-    return updated
+    lock = _get_log_lock(logging_filepath)
+    with lock:
+        current = read_json_safe(logging_filepath, default={})
+        if not isinstance(current, dict):
+            current = {}
+        result = updater(current)
+        updated = result if isinstance(result, dict) else current
+        atomic_write_json(updated, logging_filepath)
+        return updated
 
 
 def append_upload_event(
@@ -309,6 +350,38 @@ def mark_watchdogs_stopped(
     return updated
 
 
+def remove_watchdog_entries(
+    registry_file: str | pathlib.Path,
+    data_folder: str | None = None,
+    session_ids: list[str] | set[str] | None = None,
+) -> list[dict]:
+    entries = load_watchdog_entries(registry_file)
+    norm_folder = os.path.normpath(data_folder) if data_folder else None
+    target_sessions = {sid for sid in (session_ids or []) if sid}
+
+    remaining = []
+    changed = False
+    for entry in entries:
+        matches_session = (
+            bool(target_sessions)
+            and entry.get("measurement_session_id") in target_sessions
+        )
+        matches_folder = (
+            norm_folder is not None
+            and isinstance(entry.get("monitored_folder"), str)
+            and bool(entry.get("monitored_folder"))
+            and os.path.normpath(entry["monitored_folder"]) == norm_folder
+        )
+        if matches_session or matches_folder:
+            changed = True
+            continue
+        remaining.append(entry)
+
+    if changed:
+        save_watchdog_entries(remaining, registry_file)
+    return remaining
+
+
 def dismiss_watchdog_entry(
     registry_file: str | pathlib.Path,
     measurement_session_id: str | None = None,
@@ -322,19 +395,15 @@ def dismiss_watchdog_entry(
 
     for entry in entries:
         matches = False
-        if (
-            measurement_session_id is not None
-            and entry.get("measurement_session_id") == measurement_session_id
-        ):
-            matches = True
-        elif pid is not None and entry.get("pid") == pid:
-            matches = True
-        elif (
-            norm_folder is not None
-            and entry.get("monitored_folder")
-            and os.path.normpath(entry["monitored_folder"]) == norm_folder
-        ):
-            matches = True
+        if measurement_session_id is not None:
+            matches = entry.get("measurement_session_id") == measurement_session_id
+        elif pid is not None:
+            matches = entry.get("pid") == pid
+        elif norm_folder is not None:
+            matches = bool(
+                entry.get("monitored_folder")
+                and os.path.normpath(entry["monitored_folder"]) == norm_folder
+            )
 
         if matches and not dismissed:
             if entry.get("status") in (None, "RUNNING") or is_pid_running(
@@ -355,7 +424,9 @@ def build_openbis_session_url(
 ) -> str | None:
     if not eln_url or not measurement_session_id:
         return None
-    base_url = utils.normalize_openbis_eln_url(eln_url)
+    base_url = utils.normalize_openbis_eln_url(str(eln_url)).strip()
+    if not base_url.lower().startswith(("http://", "https://")):
+        return None
     return (
         f"{base_url}?viewName=showViewSamplePageFromPermId"
         f"&viewData=%7B%22permIdOrIdentifier%22:%22{measurement_session_id}%22%7D"
@@ -531,6 +602,7 @@ def build_watchdog_card_snapshot(
     log_tail_lines: int = 30,
     stale_heartbeat_seconds: float = 120.0,
     now: datetime.datetime | None = None,
+    secret_tokens: list[str | None] | None = None,
 ) -> dict:
     ref_now = now or utc_now()
     session_id = entry.get("measurement_session_id")
@@ -547,6 +619,14 @@ def build_watchdog_card_snapshot(
     if not isinstance(session_log, dict):
         session_log = {}
 
+    secrets_to_redact: list[str] = []
+    if isinstance(session_log.get("eln_token"), str) and session_log["eln_token"]:
+        secrets_to_redact.append(session_log["eln_token"])
+    if secret_tokens:
+        for tok in secret_tokens:
+            if isinstance(tok, str) and tok and tok not in secrets_to_redact:
+                secrets_to_redact.append(tok)
+
     raw_status = entry.get("status") or "RUNNING"
     token_expired = bool(session_log.get("token_expired"))
     if raw_status == "EXITED" and token_expired:
@@ -562,13 +642,24 @@ def build_watchdog_card_snapshot(
     if not isinstance(upload_history, list):
         upload_history = []
 
-    recent_errors = session_log.get("recent_errors")
-    if not isinstance(recent_errors, list):
-        recent_errors = []
+    recent_errors_raw = session_log.get("recent_errors")
+    if not isinstance(recent_errors_raw, list):
+        recent_errors_raw = []
 
-    last_error = session_log.get("last_error")
-    if not isinstance(last_error, dict):
-        last_error = None
+    def _redact_error(err: dict) -> dict:
+        copied = dict(err)
+        if copied.get("message") is not None:
+            copied["message"] = redact_secrets(str(copied["message"]), secrets_to_redact)
+        return copied
+
+    recent_errors = [
+        _redact_error(e) if isinstance(e, dict) else e for e in recent_errors_raw
+    ]
+
+    last_error_raw = session_log.get("last_error")
+    last_error = (
+        _redact_error(last_error_raw) if isinstance(last_error_raw, dict) else None
+    )
 
     scan = scan_folder_files(norm_folder, processed_files, is_ignored_fn=is_ignored_fn)
     type_counts = compute_type_counts(processed_files, upload_history)
@@ -615,6 +706,12 @@ def build_watchdog_card_snapshot(
             if isinstance(p, str)
         ]
 
+    raw_tail = tail_log_file(log_file_path, max_lines=log_tail_lines)
+    redacted_tail = [redact_secrets(line, secrets_to_redact) for line in raw_tail]
+    current_action = redact_secrets(
+        str(session_log.get("current_action") or ""), secrets_to_redact
+    )
+
     return {
         "status": display_status,
         "raw_status": raw_status,
@@ -636,7 +733,7 @@ def build_watchdog_card_snapshot(
         "last_heartbeat_at": last_heartbeat_at,
         "heartbeat_relative": format_relative_time(last_heartbeat_at, now=ref_now),
         "heartbeat_stale": heartbeat_stale,
-        "current_action": session_log.get("current_action") or "",
+        "current_action": current_action,
         "last_upload_at": session_log.get("last_upload_at"),
         "last_upload_relative": format_relative_time(
             session_log.get("last_upload_at"), now=ref_now
@@ -651,6 +748,6 @@ def build_watchdog_card_snapshot(
         "error_count": len(recent_errors),
         "last_error": last_error,
         "log_file_path": log_file_path,
-        "log_tail": tail_log_file(log_file_path, max_lines=log_tail_lines),
+        "log_tail": redacted_tail,
         "afs_sync_status": get_afs_sync_status(norm_folder, sync_registry_path),
     }
