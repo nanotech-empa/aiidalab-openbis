@@ -108,6 +108,13 @@ def update_measurement_log(logging_filepath: str | pathlib.Path, updater) -> dic
         return updated
 
 
+def _touch_heartbeat(logging_data: dict, ts: str) -> None:
+    existing = _parse_iso_datetime(logging_data.get("last_heartbeat_at"))
+    incoming = _parse_iso_datetime(ts)
+    if existing is None or incoming is None or incoming >= existing:
+        logging_data["last_heartbeat_at"] = ts
+
+
 def append_upload_event(
     logging_data: dict,
     file_path: str,
@@ -133,6 +140,7 @@ def append_upload_event(
     logging_data["upload_history"] = history
     logging_data["last_upload_at"] = ts
     logging_data["last_uploaded_file"] = filename
+    _touch_heartbeat(logging_data, ts)
     return logging_data
 
 
@@ -159,6 +167,7 @@ def append_error_event(
         errors = errors[-max_errors:]
     logging_data["recent_errors"] = errors
     logging_data["last_error"] = event
+    _touch_heartbeat(logging_data, ts)
     return logging_data
 
 
@@ -665,13 +674,20 @@ def build_watchdog_card_snapshot(
     type_counts = compute_type_counts(processed_files, upload_history)
 
     last_heartbeat_at = session_log.get("last_heartbeat_at")
+    last_upload_at = session_log.get("last_upload_at")
+    parsed_hb = _parse_iso_datetime(last_heartbeat_at)
+    parsed_up = _parse_iso_datetime(last_upload_at)
+    effective_activity_at = last_heartbeat_at
+    effective_dt = parsed_hb
+    if parsed_up is not None and (effective_dt is None or parsed_up > effective_dt):
+        effective_activity_at = last_upload_at
+        effective_dt = parsed_up
+
     heartbeat_stale = False
-    if display_status == "RUNNING" and last_heartbeat_at:
-        parsed_hb = _parse_iso_datetime(last_heartbeat_at)
-        if parsed_hb is not None:
-            heartbeat_stale = (
-                ref_now - parsed_hb
-            ).total_seconds() > stale_heartbeat_seconds
+    if display_status == "RUNNING" and effective_dt is not None:
+        heartbeat_stale = (
+            ref_now - effective_dt
+        ).total_seconds() > stale_heartbeat_seconds
 
     log_file_path = entry.get("log_file")
     if not log_file_path and session_id:
@@ -730,8 +746,8 @@ def build_watchdog_card_snapshot(
         or entry.get("instrument_name"),
         "started_at": entry.get("started_at") or session_log.get("started_at"),
         "stopped_at": entry.get("stopped_at"),
-        "last_heartbeat_at": last_heartbeat_at,
-        "heartbeat_relative": format_relative_time(last_heartbeat_at, now=ref_now),
+        "last_heartbeat_at": effective_activity_at,
+        "heartbeat_relative": format_relative_time(effective_activity_at, now=ref_now),
         "heartbeat_stale": heartbeat_stale,
         "current_action": current_action,
         "last_upload_at": session_log.get("last_upload_at"),

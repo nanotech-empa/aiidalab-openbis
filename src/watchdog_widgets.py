@@ -106,7 +106,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                     </div>
 
                     <ul style="margin: 0; padding-left: 20px; color: #34495e; font-size: 14px; line-height: 1.5;">
-                        <li style="margin-bottom: 6px;"><b>Status cards:</b> Show running, stopped, and unexpectedly exited watchdogs along with openBIS links, upload progress, heartbeats, errors, and recent logs.</li>
+                        <li style="margin-bottom: 6px;"><b>Status cards:</b> Show running, stopped, and unexpectedly exited watchdogs along with openBIS links, upload progress, last activity, errors, and recent logs.</li>
                         <li style="margin-bottom: 6px;"><b>Refresh Status:</b> Click to re-check process liveness, disk file counts, and recent logs (also refreshes automatically when opening this tab).</li>
                         <li><b>Stop / Resume / Dismiss:</b> Stop a running watchdog, resume a stopped or token-expired watchdog with your current openBIS session, or dismiss old cards without touching openBIS records.</li>
                     </ul>
@@ -462,7 +462,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         if snap["heartbeat_stale"]:
             warnings_html += (
                 f"<div style='color: #b45309; font-weight: bold; margin-top: 4px;'>"
-                f"⚠ Heartbeat stale ({html.escape(snap['heartbeat_relative'])}) — worker may be busy or hung.</div>"
+                f"⚠ Last active {html.escape(snap['heartbeat_relative'])} — worker may be busy on a large upload or hung.</div>"
             )
 
         error_banner = ""
@@ -492,7 +492,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             f"<div style='font-size: 12px; color: #374151; margin: 8px 0; line-height: 1.5;'>"
             f"<div><b>Folder:</b> <code>{safe_folder}</code></div>"
             f"{meta_line}"
-            f"<div><b>Status:</b> {safe_action} · <b>Heartbeat:</b> {html.escape(snap['heartbeat_relative'])} · <b>Last upload:</b> {last_upload_info}</div>"
+            f"<div><b>Status:</b> {safe_action} · <b>Last active:</b> {html.escape(snap['heartbeat_relative'])} · <b>Last upload:</b> {last_upload_info}</div>"
             f"<div><b>Progress:</b> {progress_text}</div>"
             f"{warnings_html}"
             f"{error_banner}"

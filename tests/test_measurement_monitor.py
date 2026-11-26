@@ -911,7 +911,12 @@ def test_update_measurement_log_and_nanonis_importer_preserve_concurrent_heartbe
         # Heartbeat arrives on main thread mid-upload
         measurement_monitor.update_measurement_log(
             log_file,
-            lambda d: d.update({"last_heartbeat_at": "2026-11-26T12:34:56+00:00"}),
+            lambda d: d.update(
+                {
+                    "last_heartbeat_at": "2099-01-01T12:34:56+00:00",
+                    "concurrent_marker": "from_heartbeat",
+                }
+            ),
         )
 
     with (
@@ -931,7 +936,8 @@ def test_update_measurement_log_and_nanonis_importer_preserve_concurrent_heartbe
         )
 
     final_data = json.loads(log_file.read_text(encoding="utf-8"))
-    assert final_data["last_heartbeat_at"] == "2026-11-26T12:34:56+00:00"
+    assert final_data["last_heartbeat_at"] == "2099-01-01T12:34:56+00:00"
+    assert final_data["concurrent_marker"] == "from_heartbeat"
     assert str(sxm_path) in final_data["processed_files"]
 
     # 3. Heartbeat helper does not clobber active upload action
@@ -1204,3 +1210,107 @@ def test_build_watchdog_card_snapshot_redacts_eln_token_and_rejects_non_http_url
     redacted_data = json.loads(open(log_fp, encoding="utf-8").read())
     assert secret_a not in redacted_data["last_error"]["message"]
     assert "[REDACTED]" in redacted_data["last_error"]["message"]
+
+
+def test_active_uploads_keep_heartbeat_fresh_and_update_current_action(tmp_path):
+    from nanonis_importer import nanonis_importer
+    from src import measurement_monitor
+
+    now = datetime.datetime(2026, 11, 26, 14, 18, 0, tzinfo=datetime.timezone.utc)
+    data_folder = tmp_path / "active_upload_run"
+    data_folder.mkdir()
+    meas_logs = tmp_path / "logs" / "measurements"
+    meas_logs.mkdir(parents=True)
+
+    # 1. Exact screenshot bug: last_heartbeat_at is 11m old, last_upload_at is 19s ago
+    (meas_logs / "SESS-ACTIVE.json").write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-ACTIVE",
+                "data_folder": str(data_folder),
+                "processed_files": [str(data_folder / "img0028.sxm")],
+                "last_heartbeat_at": (now - datetime.timedelta(minutes=11)).isoformat(),
+                "last_upload_at": (now - datetime.timedelta(seconds=19)).isoformat(),
+                "last_uploaded_file": "img0028.sxm",
+                "current_action": "Scanning & uploading files...",
+            }
+        ),
+        encoding="utf-8",
+    )
+    snap = measurement_monitor.build_watchdog_card_snapshot(
+        {
+            "pid": os.getpid(),
+            "monitored_folder": str(data_folder),
+            "measurement_session_id": "SESS-ACTIVE",
+            "status": "RUNNING",
+        },
+        measurement_logs_dir=meas_logs,
+        now=now,
+    )
+    assert snap["heartbeat_stale"] is False
+    assert snap["heartbeat_relative"] == "19s ago"
+
+    # 2. append_upload_event & append_error_event refresh last_heartbeat_at
+    log_dict = {}
+    measurement_monitor.append_upload_event(
+        log_dict, str(data_folder / "a.sxm"), "SXM", uploaded_at="2026-11-26T14:17:00+00:00"
+    )
+    assert log_dict["last_heartbeat_at"] == "2026-11-26T14:17:00+00:00"
+    measurement_monitor.append_error_event(
+        log_dict, "oops", stage="sxm", timestamp="2026-11-26T14:17:30+00:00"
+    )
+    assert log_dict["last_heartbeat_at"] == "2026-11-26T14:17:30+00:00"
+
+    # 3. nanonis_importer updates current_action & last_heartbeat_at during SXM/DAT upload
+    sxm_file = data_folder / "img0029.sxm"
+    sxm_file.write_text("sxm", encoding="utf-8")
+    imp_log = meas_logs / "SESS-IMP-PROG.json"
+    imp_log.write_text(
+        json.dumps(
+            {
+                "measurement_session_id": "SESS-IMP-PROG",
+                "data_folder": str(data_folder),
+                "processed_files": [],
+                "last_heartbeat_at": "2026-11-26T10:00:00+00:00",
+                "current_action": "Scanning & uploading files...",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    observed_actions = []
+    mock_session = MagicMock()
+    mock_sample = MagicMock()
+    mock_sample.experiment = "/SPACE/PROJ/EXP"
+    mock_session.get_sample.return_value = mock_sample
+
+    def fake_spm(_p):
+        obj = MagicMock()
+        obj.record_datetime = datetime.datetime(2026, 11, 26, 10, 0, 1)
+        return obj
+
+    def fake_sxm_flow(*_args, **_kwargs):
+        snap_during = json.loads(imp_log.read_text(encoding="utf-8"))
+        observed_actions.append(
+            (snap_during.get("current_action"), snap_during.get("last_heartbeat_at"))
+        )
+
+    with (
+        patch("src.utils.connect_openbis", return_value=(mock_session, None)),
+        patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow",
+            side_effect=fake_sxm_flow,
+        ),
+    ):
+        nanonis_importer.process_measurement_files(
+            "https://openbis.local",
+            "tok-1",
+            str(data_folder),
+            "SESS-IMP-PROG",
+            logging_filepath=str(imp_log),
+        )
+
+    assert len(observed_actions) == 1
+    assert observed_actions[0][0] == "Uploading img0029.sxm..."
+    assert observed_actions[0][1] != "2026-11-26T10:00:00+00:00"

@@ -669,6 +669,15 @@ def process_measurement_files(
         )
         processed_files = list(init_log.get("processed_files") or [])
 
+    def _set_action(action_text: str):
+        def _upd(d):
+            _init_log(d)
+            d["current_action"] = action_text
+            measurement_monitor._touch_heartbeat(d, measurement_monitor.utc_now_iso())
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _upd)
+
     def _record_uploads(paths, upload_type):
         def _upd(d):
             _init_log(d)
@@ -796,6 +805,7 @@ def process_measurement_files(
                 logger.info(f"SXM file: {file_path}")
 
                 if file_path not in processed_files:
+                    _set_action(f"Uploading {os.path.basename(file_path)}...")
                     try:
                         with contextlib.redirect_stdout(io.StringIO()):
                             measurements_object = session.get_sample(measurements_id)
@@ -856,6 +866,11 @@ def process_measurement_files(
 
                         if group_in_openbis:
                             if delete_original_openBIS_dataset:
+                                _set_action(
+                                    f"Uploading {os.path.basename(new_dat_paths[0])}..."
+                                    if len(new_dat_paths) == 1
+                                    else f"Uploading {len(new_dat_paths)} DAT files..."
+                                )
                                 try:
                                     with contextlib.redirect_stdout(io.StringIO()):
                                         measurements_object = session.get_sample(
@@ -908,6 +923,11 @@ def process_measurement_files(
                                         break
 
                         else:
+                            _set_action(
+                                f"Uploading {os.path.basename(new_dat_paths[0])}..."
+                                if len(new_dat_paths) == 1
+                                else f"Uploading {len(new_dat_paths)} DAT files..."
+                            )
                             try:
                                 with contextlib.redirect_stdout(io.StringIO()):
                                     measurements_object = session.get_sample(
