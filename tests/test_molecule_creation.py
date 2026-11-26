@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import pandas as pd
 import pytest
@@ -10,6 +11,9 @@ from src import molecule_creation
 from src.chemical_structures import representation_from_cdxml
 
 GNR_CDXML = Path(__file__).parent / "data" / "periodic_gnr.cdxml"
+COLLECTIONS = json.loads(
+    (Path(__file__).parents[1] / "config/openbis_config.json").read_text()
+)["Collections"]["Paths"]
 PNG = b"\x89PNG\r\n\x1a\nreviewed-sketch"
 
 
@@ -63,7 +67,7 @@ def test_periodic_molecule_creation_preserves_reviewed_files(monkeypatch):
 
     result = molecule_creation.create_molecule_from_cdxml(
         session,
-        collection="/PRODUCTS",
+        collection=COLLECTIONS["Product Molecule"],
         name="Reviewed GNR",
         description="Generated from AiiDA structure",
         comments="Checked bonds",
@@ -77,7 +81,7 @@ def test_periodic_molecule_creation_preserves_reviewed_files(monkeypatch):
     assert object_calls == [
         {
             "type": "MOLECULE",
-            "collection": "/PRODUCTS",
+            "collection": COLLECTIONS["Product Molecule"],
             "props": {
                 "name": "Reviewed GNR",
                 "sum_formula": representation.formula,
@@ -98,6 +102,42 @@ def test_periodic_molecule_creation_preserves_reviewed_files(monkeypatch):
         path.name in {"reviewed.cdxml", "reviewed.png"} for path in temporary_paths
     )
     assert not any(path.exists() for path in temporary_paths)
+
+
+def test_precursor_creation_uses_the_same_molecule_type(monkeypatch):
+    session = FakeSession(("NAME", "SUM_FORMULA", "SMILES"))
+    cdxml = b"""<CDXML><page><fragment>
+      <n id="1" p="0 0"/><n id="2" p="1 0"/>
+      <b id="3" B="1" E="2" Order="1"/>
+    </fragment></page></CDXML>"""
+    written = []
+    created = SimpleNamespace(permId="precursor")
+
+    def create_object(_session, **kwargs):
+        written.append(kwargs)
+        return created
+
+    monkeypatch.setattr(molecule_creation.utils, "create_openbis_object", create_object)
+    monkeypatch.setattr(
+        molecule_creation.utils, "create_openbis_dataset", lambda *_a, **_kw: None
+    )
+    assert (
+        molecule_creation.create_molecule_from_cdxml(
+            session,
+            collection=COLLECTIONS["Precursor Molecule"],
+            name="Ethane",
+            cdxml=cdxml,
+            png=PNG,
+        )
+        is created
+    )
+    assert written == [
+        {
+            "type": "MOLECULE",
+            "collection": COLLECTIONS["Precursor Molecule"],
+            "props": {"name": "Ethane", "sum_formula": "C2H6", "smiles": "CC"},
+        }
+    ]
 
 
 def test_missing_cxsmiles_assignment_fails_before_remote_write(monkeypatch):

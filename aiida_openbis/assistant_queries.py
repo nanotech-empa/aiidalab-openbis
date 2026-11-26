@@ -10,9 +10,12 @@ from pathlib import Path
 MATERIALS = {
     "molecule": (
         "MOLECULE",
-        {"name", "empa_number", "smiles", "sum_formula", "iupac_name"},
+        {"name", "empa_number", "smiles", "cxsmiles", "sum_formula", "iupac_name"},
     ),
-    "product_molecule": ("MOLECULE", {"name", "smiles", "sum_formula", "iupac_name"}),
+    "product_molecule": (
+        "MOLECULE",
+        {"name", "smiles", "cxsmiles", "sum_formula", "iupac_name"},
+    ),
     "substance": ("SUBSTANCE", {"name", "empa_number", "batch"}),
     "crystal_concept": ("CRYSTAL_CONCEPT", {"name", "face", "material"}),
     "crystal": ("CRYSTAL", {"name"}),
@@ -20,7 +23,6 @@ MATERIALS = {
         "2D_LAYER_MATERIAL",
         {"name", "top_layer_material", "layer_count", "substrate", "growth_method"},
     ),
-    "reaction_product": ("REACTION_PRODUCT", {"name"}),
     "sample": ("SAMPLE", {"name", "object_status"}),
 }
 
@@ -80,13 +82,15 @@ def search_materials(
     offset=0,
 ):
     """Paginate candidate records; linked chemistry is matched within that page."""
+    if kind not in MATERIALS:
+        raise ValueError("Unsupported material kind.")
     code, allowed = MATERIALS[kind]
     filters, molecules = filters or {}, molecules or []
     if set(filters) - allowed or not 1 <= limit <= 100 or offset < 0:
         raise ValueError("Unsupported material filters or page.")
-    if molecules and kind not in {"substance", "product_molecule", "reaction_product"}:
+    if molecules and kind not in {"substance", "product_molecule"}:
         raise ValueError(
-            "Molecule-parent filters need substance/product/reaction-product records."
+            "Linked molecule filters need a substance or product molecule."
         )
     if crystal_concept and kind != "crystal":
         raise ValueError("Crystal-concept filters apply to crystals.")
@@ -116,15 +120,6 @@ def search_materials(
     linked = (
         _index(_fetch(client, records, links)) if (molecules or crystal_concept) else {}
     )
-    # Reaction products reference product MOLECULEs, whose parents are precursors.
-    if kind == "reaction_product" and molecules:
-        precursor_ids = {
-            v
-            for row in linked.values()
-            if row.get("type") == "MOLECULE"
-            for v in _references(_lower(row).get("parents"))
-        }
-        linked.update(_index(_fetch(client, records, precursor_ids)))
 
     def matches(row, criteria):
         values = _lower(row)
@@ -146,16 +141,9 @@ def search_materials(
             ):
                 continue
         if molecules:
-            refs = _references(
-                data.get("molecules") if kind == "substance" else data.get("parents")
-            )
-            if kind == "reaction_product":
-                refs = [
-                    v
-                    for parent in refs
-                    if parent in linked and linked[parent].get("type") == "MOLECULE"
-                    for v in _references(_lower(linked[parent]).get("parents"))
-                ]
+            refs = _references(data.get("parents"))
+            if kind == "substance":
+                refs.extend(_references(data.get("molecules")))
             unresolved.update(v for v in refs if v not in linked)
             targets = [
                 linked[v]
@@ -271,6 +259,7 @@ def register_tools(registry):
                 "name",
                 "empa_number",
                 "smiles",
+                "cxsmiles",
                 "sum_formula",
                 "iupac_name",
             )

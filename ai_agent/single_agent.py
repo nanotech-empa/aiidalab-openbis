@@ -71,7 +71,7 @@ class OpenBISAgent:
                 temperature=0.5,
                 max_retries=3,
             )
-        
+
         elif os.environ["LLM_PROVIDER"] == "CSCS":
             self.llm_api_key = os.environ["LLM_API_KEY"]
             self.llm_model = ChatOpenAI(
@@ -96,11 +96,11 @@ class OpenBISAgent:
             tools.get_substances_by_properties,
             tools.get_crystals_by_properties,
             tools.get_2d_materials_by_properties,
-            tools.get_reacprods_by_properties,
+            tools.get_product_molecules_by_properties,
             # Simulations
             tools.get_simulations_by_molecule,
             tools.get_simulations_by_crystal_concept,
-            tools.get_simulations_by_reacprod_concept,
+            tools.get_simulations_by_product_molecule,
             tools.import_simulation_from_openbis,
             # Experiments
             tools.get_samples_by_substance,
