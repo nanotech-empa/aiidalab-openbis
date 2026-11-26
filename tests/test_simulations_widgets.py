@@ -5,6 +5,7 @@ import sys
 import weakref
 from pathlib import Path
 from types import MethodType, SimpleNamespace
+from urllib.parse import urlencode
 
 import pandas as pd
 import pytest
@@ -30,6 +31,41 @@ def simulations_widgets(monkeypatch):
     sys.modules.pop("src.simulations_widgets", None)
     module = importlib.import_module("src.simulations_widgets")
     return module
+
+
+def test_import_handoff_selects_exact_stm_without_import(monkeypatch, simulations_widgets):
+    permid = "20261126131236981-4292"
+    instance = "https://example.org/openbis"
+    session = SimpleNamespace(url=instance + "/")
+    widget = simulations_widgets.ImportSimulationsWidget(session)
+    calls = []
+
+    def get_object(connection, *, sample_ident):
+        assert connection is session
+        calls.append(sample_ident)
+        return SimpleNamespace(
+            permId=permid,
+            type="SPM_SIMULATION",
+            props={"name": "STM phenalenyl on Au(111)", "aiida_node": "20261126131229794-4287"},
+        )
+
+    monkeypatch.setattr(simulations_widgets.utils, "get_openbis_object", get_object)
+
+    def url(server, identifier=permid):
+        return "import.ipynb?" + urlencode({"simulation_permid": identifier, "openbis_instance": server})
+
+    widget.select_simulation_from_url(url("https://another.example.org/openbis"))
+    assert "another openBIS connection" in widget.import_simulations_message_html.value
+    assert widget.import_simulations_button.disabled and not calls
+    widget.select_simulation_from_url(url(instance, "28665"))
+    assert widget.import_simulations_button.disabled and not calls
+    widget.select_simulation_from_url(url(instance))
+    assert calls == [permid]
+    assert widget.found_simulations_select_multiple.value == (permid,)
+    assert "phenalenyl on Au(111)" in widget.found_simulations_select_multiple.options[0][0]
+    assert not widget.import_simulations_button.disabled
+    assert "Click Import into AiiDA" in widget.import_simulations_message_html.value
+    widget.close()
 
 
 def _stub_project_selector(monkeypatch, module):
