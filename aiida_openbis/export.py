@@ -38,7 +38,7 @@ def _app_module(name):
     return importlib.import_module(namespace + "." + name)
 
 
-def make_export_widget(source_uuid):
+def make_export_widget(source_uuid, *, microscopy_review=None):
     """Open the common interface with a process UUID; never click Export."""
     simulations_widgets, utils = (
         _app_module("simulations_widgets"),
@@ -47,9 +47,10 @@ def make_export_widget(source_uuid):
     session, _ = utils.connect_openbis_aiida()
     if session is None:
         raise ValueError("Configure your openBIS connection in the ELN app first.")
-    return simulations_widgets.ExportSimulationsWidget(
-        session, source_uuid=str(source_uuid)
-    )
+    kwargs = {"source_uuid": str(source_uuid)}
+    if microscopy_review is not None:
+        kwargs["microscopy_review"] = microscopy_review
+    return simulations_widgets.ExportSimulationsWidget(session, **kwargs)
 
 
 def plan_export(source_uuid):
@@ -88,3 +89,24 @@ def available_results(source_uuid):
             if model.supported(item) and item.is_finished_ok
         ]
     return _app_module("orca_export").related_results(source_uuid)
+
+
+def review_stm_imaging(source_uuid, selections, *, image_area=None, sampling=None):
+    """Inspect selected stored maps without connecting to openBIS."""
+    from .stm_imaging import review
+
+    return review(source_uuid, selections, image_area=image_area, sampling=sampling)
+
+
+def describe_stm_imaging(source_uuid):
+    """Read the native simulation cell/PBC for the viewer and chat area controls."""
+    from .stm_imaging import describe
+
+    return describe(source_uuid)
+
+
+def download_stm_sampling(source_uuid, sampling):
+    """Return DAT/metadata ZIP bytes without publishing or altering AiiDA data."""
+    from .stm_imaging import sampling_zip
+
+    return sampling_zip(source_uuid, sampling)

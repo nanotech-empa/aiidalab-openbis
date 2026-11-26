@@ -589,6 +589,16 @@ def _objects_by_property(
 def get_uuids_from_oBIS(openbis_session):
     aiida_node_type = OPENBIS_OBJECT_TYPES["AiiDA Node"]
     atom_model_type = OPENBIS_OBJECT_TYPES["Atomistic Model"]
+    from .local_search_index import account_index, refresh_uuid_list
+
+    index = account_index(openbis_session)
+    if index is not None:
+        return {
+            "wc_uuids": refresh_uuid_list(openbis_session, index, aiida_node_type),
+            "structure_uuids": refresh_uuid_list(
+                openbis_session, index, atom_model_type
+            ),
+        }
     aiida_nodes_oBIS = _objects_by_property(
         openbis_session, aiida_node_type, "WFMS_UUID", "*"
     )
@@ -3797,15 +3807,19 @@ def _spm_series_details(info):
         details.append(f"isovalue {float(info['isovalue']):.2g} a.u.")
     if info.get("p_tip_ratio") is not None:
         details.append(_tip_model_summary([info["p_tip_ratio"]]))
+    if info.get("fwhm") is not None:
+        details.append(f"FWHM {float(info['fwhm']):g} eV")
     return ", ".join(details)
 
 
-def _highest_contrast_image(candidates):
-    def contrast(candidate):
-        finite = np.asarray(candidate[0])[np.isfinite(candidate[0])]
-        return float(np.ptp(finite)) if finite.size else -1.0
+def _finite_image_contrast(image):
+    values = np.asarray(image, dtype=float)
+    finite = values[np.isfinite(values)]
+    return float(np.ptp(finite)) if finite.size else -1.0
 
-    return max(candidates, key=contrast)
+
+def _highest_contrast_image(candidates):
+    return max(candidates, key=lambda candidate: _finite_image_contrast(candidate[0]))
 
 
 def _spm_preview_panels(workchain):
@@ -3884,7 +3898,11 @@ def _spm_preview_panels(workchain):
             return panels
         raise ValueError("The orbital archive contains no explicit HOMO/LUMO maps.")
 
-    general_info, series_info, series_data = _stm_archive_metadata(workchain)
+    return _stm_preview_panels_from_archive(*_stm_archive_metadata(workchain))
+
+
+def _stm_preview_panels_from_archive(general_info, series_info, series_data):
+    """Default illustration choice from plain arrays, shared with the selector."""
     energies = np.asarray(general_info.get("energies", []), dtype=float)
     panels = []
     selected = set()
@@ -3902,6 +3920,8 @@ def _spm_preview_panels(workchain):
         if not candidates:
             continue
         image, info, series_index = _highest_contrast_image(candidates)
+        if _finite_image_contrast(image) <= 0:
+            continue
         identity = (series_index, energy_index)
         if identity in selected:
             continue
@@ -3919,17 +3939,118 @@ def _spm_preview_panels(workchain):
                 "cmap": "gist_heat",
                 "center_zero": False,
                 "general_info": general_info,
+                "series_index": series_index,
+                "energy_index": energy_index,
             }
         )
     if panels:
         return panels
-    raise ValueError("The STM archive has no map near the requested biases.")
+
+    # A gapped system may have uniform maps at both nominal biases. Prefer
+    # actual nonuniform stored maps, comparing contrast only within one
+    # observable/unit family. Show up to one per bias sign; never invent data
+    # or a missing positive-bias panel. The actual bias/series stays in its title.
+    for kind in (
+        "const-height stm",
+        "const-isovalue stm",
+        "const-height sts",
+        "const-isovalue sts",
+    ):
+        best = {}
+        for series_index, info in enumerate(series_info):
+            if str(info.get("type", "")).lower() != kind:
+                continue
+            maps = np.asarray(series_data[series_index])
+            for index, energy in enumerate(energies[: len(maps)]):
+                if not np.isfinite(energy):
+                    continue
+                contrast = _finite_image_contrast(maps[index])
+                if contrast <= 0:
+                    continue
+                sign = int(np.sign(energy))
+                if sign not in best or contrast > best[sign][0]:
+                    best[sign] = (contrast, maps[index], info, index, series_index)
+        if not best:
+            continue
+        signs = [sign for sign in (-1, 1) if sign in best] or [0]
+        for sign in signs:
+            _contrast, image, info, index, series_index = best[sign]
+            mode = "STS dI/dV" if kind.endswith("sts") else "STM"
+            title = f"{mode} at {energies[index]:+.2f} V"
+            details = _spm_series_details(info)
+            if details:
+                title += f"; {details}"
+            panels.append(
+                {
+                    "image": image,
+                    "title": title,
+                    "extent": None,
+                    "cmap": "gist_heat",
+                    "center_zero": False,
+                    "general_info": general_info,
+                    "series_index": series_index,
+                    "energy_index": index,
+                }
+            )
+        return panels
+    raise ValueError(
+        "No stored STM/STS map has spatial contrast. Select a replacement ELN preview image."
+    )
 
 
 def _render_spm_preview(workchain, path):
+    return _render_spm_panels(_spm_preview_panels(workchain), path)
+
+
+def _render_stm_selected_preview(archive, series_index, energy_index, path):
+    """Render the user's exact stored frame, including an explicitly chosen uniform map."""
+    general_info, series_info, series_data = archive
+    if type(series_index) is not int or not 0 <= series_index < len(series_info):
+        raise ValueError("Select a stored STM/STS series.")
+    energies = np.asarray(general_info.get("energies", []), dtype=float)
+    if type(energy_index) is not int or not 0 <= energy_index < len(energies):
+        raise ValueError("Select a stored bias.")
+    info = series_info[series_index]
+    kind = str(info.get("type", "")).lower()
+    if kind not in {
+        "const-height stm",
+        "const-isovalue stm",
+        "const-height sts",
+        "const-isovalue sts",
+    }:
+        raise ValueError("Select a stored STM or STS map.")
+    image = np.asarray(series_data[series_index][energy_index])
+    mode = "STS dI/dV" if kind.endswith("sts") else "STM"
+    title = f"{mode} at {energies[energy_index]:+.2f} V"
+    details = _spm_series_details(info)
+    if details:
+        title += f"; {details}"
+    if _finite_image_contrast(image) == 0:
+        title += " (uniform map)"
+    panel = {
+        "image": image,
+        "title": title,
+        "extent": None,
+        "cmap": "gist_heat",
+        "center_zero": False,
+        "general_info": general_info,
+    }
+    return _render_spm_panels([panel], path, allow_uniform=True)
+
+
+def _render_spm_panels(panels, path, *, allow_uniform=False):
     from matplotlib.figure import Figure
 
-    panels = _spm_preview_panels(workchain)
+    panels = [
+        panel
+        for panel in panels
+        if _finite_image_contrast(panel["image"])
+        >= (0 if allow_uniform else np.nextafter(0.0, 1.0))
+    ]
+    if not panels:
+        raise ValueError(
+            "No selected SPM map has spatial contrast. Select a replacement ELN preview image."
+        )
     columns = min(2, len(panels))
     rows = int(np.ceil(len(panels) / columns))
     figure = Figure(
@@ -3941,7 +4062,7 @@ def _render_spm_preview(workchain, path):
     for axis, panel in zip(axes, panels):
         image = np.asarray(panel["image"], dtype=float)
         finite = image[np.isfinite(image)]
-        if not finite.size or np.ptp(finite) <= 0.0:
+        if not finite.size or (np.ptp(finite) <= 0.0 and not allow_uniform):
             axis.axis("off")
             axis.text(0.5, 0.5, "No finite image contrast", ha="center", va="center")
             continue
@@ -4201,6 +4322,15 @@ def _create_simulation_object(
             source_uuid=source_uuid,
             result_role=result_role,
         )
+
+    if object_type == OPENBIS_SIMULATION_TYPES["SPM Simulation"]:
+        assignments = (
+            utils.get_openbis_object_type(openbis_session, object_type)
+            .get_property_assignments()
+            .df
+        )
+        if "DEFAULT_OBJECT_VIEW" in assignments["code"].values:
+            properties["default_object_view"] = "IMAGING_GALLERY_VIEW"
 
     openbis_object = utils.create_openbis_object(
         openbis_session,
@@ -5710,6 +5840,7 @@ def render_workchain_preview_suggestions(
                 suggestion = {
                     "key": f"{target.uuid}:{role}",
                     "source_uuid": str(target.uuid),
+                    "process_label": target.process_label,
                     "result_role": role,
                     "title": title,
                     "object_type": definition["object_type"],

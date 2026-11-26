@@ -2,6 +2,7 @@ import hashlib
 import html
 import json
 import logging
+import math
 import re
 import shutil
 import subprocess
@@ -105,6 +106,74 @@ def _preview_image_widget(content, filename):
     if size is not None:
         kwargs.update(width=str(size[0]), height=str(size[1]))
     return ipw.Image(**kwargs)
+
+
+def _selected_preview(entry):
+    """Use the same precedence for the visible thumbnail and the exported bytes."""
+    uploaded = _first_uploaded_file(entry["uploader"])
+    suggestion = entry["suggestion"]
+    selected = uploaded or entry.get("selected_preview")
+    if selected is None and suggestion["content"] is not None:
+        selected = {"name": suggestion["name"], "content": suggestion["content"]}
+    return (
+        {"name": selected["name"], "content": selected["content"]}
+        if selected is not None
+        else None
+    )
+
+
+def _preview_choice_controls(suggestion):
+    """Shared preview controls for a new result or an incomplete saved export."""
+    preview_box = ipw.VBox()
+    uploader = ipw.FileUpload(
+        accept=".jpg,.jpeg,.png", multiple=False, description="Replace preview"
+    )
+    status = ipw.HTML()
+    entry = {"suggestion": suggestion, "uploader": uploader}
+
+    def refresh(_change=None):
+        selected = _selected_preview(entry)
+        previous = preview_box.children
+        preview_box.children = [
+            _preview_image_widget(selected["content"], selected["name"])
+            if selected is not None
+            else ipw.HTML(
+                "<p style='color:#b00020'>No suggestion could be generated: "
+                f"{html.escape(str(suggestion['error']))}</p>"
+            )
+        ]
+        close_owned_widgets(*previous)
+        if _first_uploaded_file(uploader):
+            label = f"Replacement file: {selected['name']}"
+        elif entry.get("selected_preview"):
+            label = entry["selected_preview"]["label"]
+        elif selected is not None:
+            label = "Suggested image will be used unless you choose another."
+        else:
+            label = "Choose a calculated map or upload a replacement before exporting."
+        status.value = f"<p><b>Image in use:</b> {html.escape(label)}</p>"
+
+    def use_map(preview):
+        entry["selected_preview"] = preview
+        # An explicit map choice replaces an earlier uploaded image, too.
+        uploader.value = ()
+        refresh()
+
+    controls = []
+    if (
+        suggestion.get("process_label") == "Cp2kStmWorkChain"
+        and suggestion.get("result_role") == "spm"
+    ):
+        from .stm_previews import StmPreviewPicker
+
+        picker = StmPreviewPicker(suggestion["source_uuid"], use_map)
+        entry["map_picker"] = picker
+        controls.append(picker)
+    controls.extend([uploader, status])
+    uploader.observe(refresh, names="value")
+    entry["upload_callback"] = refresh
+    refresh()
+    return [preview_box, *controls], entry
 
 
 def _declared_archive_root_uuid(aiida_node_object):
@@ -1342,9 +1411,93 @@ class ImportSimulationsWidget(ipw.VBox):
 
 
 class ExportSimulationsWidget(ipw.VBox):
-    def __init__(self, openbis_session, *, source_uuid=None):
+    def __init__(self, openbis_session, *, source_uuid=None, microscopy_review=None):
         super().__init__()
         self.openbis_session = openbis_session
+        self._microscopy_review = None
+        self._microscopy_results = []
+        self._microscopy_append_review = None
+        self._initial_microscopy_attempt = None
+        self.microscopy_summary = ipw.HTML()
+        self.microscopy_append_status = ipw.HTML()
+        self.microscopy_summary.add_class("stm-microscopy-summary")
+        if microscopy_review is not None:
+            from aiida_openbis.stm_imaging import review
+
+            selections = [
+                {key: item[key] for key in ("series_index", "energy_index")}
+                for item in microscopy_review["entries"]
+            ]
+            checked = review(
+                source_uuid,
+                selections,
+                sampling=microscopy_review["sampling"],
+                image_area=microscopy_review["image_area"],
+            )
+            if checked != microscopy_review:
+                raise ValueError(
+                    "The STM review changed. Prepare it again in the viewer."
+                )
+            self._microscopy_review = checked
+            rows = "".join(
+                "<li>"
+                + html.escape(
+                    f"{item['quantity']['mode']}, bias={item['energy_ev']:.6g} V; "
+                    + (
+                        f"3D-field isovalue={item['series']['isovalue']:.6g}; "
+                        if "isovalue" in item["series"]
+                        else f"height={item['series']['height']:.6g} Å; "
+                    )
+                    + f"{item['quantity']['quantity']} [{item['quantity']['native_unit']}]; "
+                    f"{item['interpolation']['method']}"
+                )
+                + "</li>"
+                for item in checked["entries"]
+            )
+            map_count = len(checked["entries"])
+            curve_count = len(checked["curve_groups"])
+            extracted_count = sum(
+                group["curve_count"] for group in checked["curve_groups"]
+            )
+            curve_rows = "".join(
+                "<li>"
+                + html.escape(
+                    f"{group['request']['kind']}: {', '.join(group['labels'])}; "
+                    f"{group['x_quantity']} [{group['x_unit']}] versus {group['quantity']['quantity']} [{group['quantity']['native_unit']}]; "
+                    + str(group["request"])
+                )
+                + "</li>"
+                for group in checked["curve_groups"]
+            )
+            self.microscopy_summary.value = (
+                "<h3>Simulation microscopy data</h3>"
+                f"<p><strong>{map_count} SXM map dataset(s), {curve_count} DAT dataset(s) ({extracted_count} curves)</strong>. "
+                "The first export attaches one SXM per selected series/bias pair. "
+                "For an existing SPM simulation, only new DAT files are added.</p><p>"
+                "Original arrays/grid and conversion metadata are retained. "
+                "No experimental current calibration is inferred.</p>"
+                + "<p>SXM image area: "
+                + html.escape(
+                    f"{checked['image_area']['width_angstrom']:.6g} × {checked['image_area']['height_angstrom']:.6g} Å; centre {checked['image_area']['center_angstrom']}; periodic lattice axes {checked['simulation']['periodic_axes']} (native CP2K {checked['simulation']['periodic_setting']})."
+                )
+                + "</p>"
+                + (
+                    "<p>DAT datasets contain the selected point spectra or distance profiles; colours and exact coordinates are recorded.</p>"
+                    if curve_rows
+                    else ""
+                )
+                + '<details class="stm-microscopy-details" style="border:1px solid #ddd;padding:8px">'
+                + '<summary style="cursor:pointer">Selected map and curve details</summary>'
+                + ("<h4>Maps</h4><ul>" + rows + "</ul>" if rows else "")
+                + (
+                    "<h4>Point spectra and line profiles</h4><ul>"
+                    + curve_rows
+                    + "</ul>"
+                    if curve_rows
+                    else ""
+                )
+                + "</details>"
+            )
         self._provenance_overrides = {
             "Code": {},
             "Computer": {},
@@ -1367,11 +1520,17 @@ class ExportSimulationsWidget(ipw.VBox):
             self.openbis_session
         )
         self.select_project_widget = widgets.SelectProjectWidget(self.openbis_session)
-        self.select_project_widget.project_dropdown.observe(
-            self._selected_project_changed, names="value"
+        project = self.select_project_widget.project_dropdown
+        project.observe(self._selected_project_changed, names="value")
+        selector = self.select_experiment_widget
+        selector.create_experiment_button.description = "New experiment"
+        selector.create_experiment_button.layout.width = "auto"
+        selector.create_experiment_button.disabled = project.value == "-1"
+        selector.create_experiment_button.on_click(
+            lambda _button: selector.show_create_panel()
         )
-        # Destination creation is managed by the laboratory's experiment UI.
-        self.select_experiment_widget.create_experiment_button.layout.display = "none"
+        selector.cancel_btn.on_click(lambda _button: selector.hide_create_panel())
+        selector.save_btn.on_click(self._create_destination_experiment)
 
         self.simulation_source_selector = ipw.RadioButtons(
             options=[
@@ -1388,6 +1547,9 @@ class ExportSimulationsWidget(ipw.VBox):
 
         self.simulation_details_vbox = SimulationDetailsWidget(
             self.openbis_session, True
+        )
+        self.simulation_details_vbox.allow_duplicate_existing = (
+            microscopy_review is None
         )
         self.simulation_details_vbox.set_target_experiment(
             self.select_experiment_widget.experiment_dropdown.value
@@ -1450,26 +1612,254 @@ class ExportSimulationsWidget(ipw.VBox):
             self.simulation_source_selector,
             self.simulation_details_vbox,
             increase_search_button,
+            self.manual_archive_review_box,
+            self.microscopy_summary,
+            self.microscopy_append_status,
+            self.save_simulations_button,
+            self.export_status_html,
             self.provenance_resolution_box,
             self.executable_resolution_box,
             self.executable_confirmation_message,
-            self.manual_archive_review_box,
-            self.save_simulations_button,
-            self.export_status_html,
             self.retry_export_button,
             self.export_message_html,
         ]
         if source_uuid is not None:
             self.set_source_uuid(source_uuid)
 
+    def _export_reviewed_workchain(self, experiment, source, **kwargs):
+        reviewed = getattr(self, "_microscopy_review", None)
+        if reviewed is None:
+            return aiida_utils.export_workchain(
+                self.openbis_session, experiment, source, **kwargs
+            )
+        from aiida_openbis import stm_imaging
+
+        if str(orm.load_node(source).uuid) != reviewed["source_uuid"]:
+            raise ValueError(
+                "The selected simulation differs from the microscopy review."
+            )
+        self._microscopy_results = []
+        with tempfile.TemporaryDirectory(prefix="stm-microscopy-") as directory:
+            previous_status = self.export_status_html.value
+            self.export_status_html.value = (
+                "<p role='status'>Preparing the selected microscopy files…</p>"
+            )
+            with utils.upload_diagnostics.phase("microscopy_file_preparation"):
+                packages = stm_imaging.prepare_files(reviewed, directory)
+            # All files validated before the existing exporter can write anything.
+            self.export_status_html.value = previous_status
+            exported = aiida_utils.export_workchain(
+                self.openbis_session, experiment, source, **kwargs
+            )
+            matches = [
+                obj
+                for obj in aiida_utils.normalize_exported_objects(exported)
+                if getattr(obj, "_aiidalab_source_uuid", None)
+                == reviewed["source_uuid"]
+                and getattr(obj, "_aiidalab_result_role", None) == "spm"
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "Cannot identify the exported SPM simulation for these maps."
+                )
+            self.export_status_html.value = (
+                f"<p role='status'>Attaching {len(packages)} microscopy dataset(s) "
+                "to the SPM simulation…</p>"
+            )
+            with utils.upload_diagnostics.phase("microscopy_dataset_publication"):
+                self._microscopy_results = stm_imaging.publish(
+                    self.openbis_session, experiment, str(matches[0].permId), packages
+                )
+        return exported
+
+    def _microscopy_append_plan(self, experiment):
+        from aiida_openbis import stm_imaging
+
+        reviewed = self._microscopy_review
+        matches = aiida_utils.find_accessible_simulation_results(
+            self.openbis_session, "SPM_SIMULATION", reviewed["source_uuid"]
+        )
+        if not matches:
+            return None
+        space = aiida_utils._collection_space_code(self.openbis_session, experiment)
+        candidates = [
+            (str(obj.permId), aiida_utils._openbis_collection_id(obj))
+            for obj in matches
+        ]
+        candidates = [
+            (sample, collection)
+            for sample, collection in candidates
+            if collection.startswith(f"/{space}/")
+        ]
+        if not candidates:
+            raise ValueError(
+                "This SPM simulation already exists in another openBIS space. "
+                "Select an experiment in the space containing that simulation."
+            )
+        if len(candidates) != 1:
+            selected = (
+                experiment
+                if str(experiment).startswith("/")
+                else self.openbis_session.get_collection(experiment).identifier
+            )
+            candidates = [item for item in candidates if item[1] == selected]
+            if len(candidates) != 1:
+                raise ValueError(
+                    "Multiple SPM simulations match this source. Select the experiment "
+                    "containing the intended simulation."
+                )
+        sample, collection = candidates[0]
+        additions, pending_previews = stm_imaging.review_dat_additions(
+            self.openbis_session, sample, reviewed
+        )
+        return {
+            "sample": sample,
+            "collection": collection,
+            "additions": additions,
+            "pending_previews": pending_previews,
+        }
+
+    def _show_microscopy_append_plan(self, plan):
+        self._microscopy_append_review = plan
+        self.save_simulations_button.description = (
+            "Add DAT to openBIS" if plan else "Export to openBIS"
+        )
+        if plan is None:
+            self.microscopy_append_status.value = ""
+            return
+        url = utils.generate_openbis_object_url(self.openbis_session, plan["sample"])
+        collection = html.escape(plan["collection"])
+        counts = self.microscopy_publication_plan()["dataset_counts"]
+        curves = counts["extracted_curves"]
+        message = (
+            f"Add {curves} new DAT file(s) in {len(plan['additions'])} dataset(s)."
+            if curves
+            else "No new DAT files in this selection."
+        )
+        if plan["pending_previews"]:
+            message += " Complete previews for selected DAT datasets already present."
+        self.microscopy_append_status.value = (
+            "<p><b>SPM simulation already exported.</b> "
+            f'<a href="{html.escape(url, quote=True)}" target="_blank" '
+            f'rel="noopener noreferrer">Open in openBIS</a> ({collection}). '
+            f"{message}</p>"
+        )
+
+    def microscopy_publication_plan(self):
+        """Describe the reviewed append action for callers such as the chat."""
+        plan = self._microscopy_append_review
+        if plan is None:
+            return None
+        return {
+            "mode": "append_dat",
+            "spm_permid": plan["sample"],
+            "collection": plan["collection"],
+            "dataset_counts": {
+                "maps": 0,
+                "curve_datasets": len(plan["additions"]),
+                "extracted_curves": sum(
+                    len(request.get("points", request.get("lines", [])))
+                    for request in plan["additions"]
+                ),
+                "pending_previews": len(plan["pending_previews"]),
+            },
+        }
+
+    def _refresh_microscopy_append(self, experiment):
+        if self._microscopy_review is None or experiment in (None, "", "-1"):
+            return
+        try:
+            self._show_microscopy_append_plan(self._microscopy_append_plan(experiment))
+        except Exception as error:  # noqa: BLE001 - an unreadable inventory blocks export
+            self._show_microscopy_append_plan(None)
+            self.microscopy_append_status.value = (
+                "<p role='status'>Could not check existing microscopy data. "
+                f"{html.escape(utils.upload_diagnostics.error_summary(error))}</p>"
+            )
+
+    def _append_microscopy_data(self, plan):
+        from aiida_openbis import stm_imaging
+
+        self._microscopy_results = []
+        requests = [*plan["additions"], *plan["pending_previews"]]
+        if not requests:
+            self.export_status_html.value = "<p role='status'>SPM simulation already exported. No new DAT files.</p>"
+            return
+        self.export_status_html.value = "<p role='status'>Attaching DAT datasets to the existing SPM simulation…</p>"
+        reviewed = stm_imaging.review(
+            self._microscopy_review["source_uuid"], [], sampling=requests
+        )
+        with tempfile.TemporaryDirectory(prefix="stm-dat-") as directory:
+            packages = stm_imaging.prepare_files(reviewed, directory)
+            with utils.upload_diagnostics.phase("microscopy_dat_append"):
+                self._microscopy_results = stm_imaging.publish(
+                    self.openbis_session, plan["collection"], plan["sample"], packages
+                )
+        added = sum(item["created"] for item in self._microscopy_results)
+        self._show_microscopy_append_plan(
+            {**plan, "additions": [], "pending_previews": []}
+        )
+        self.export_status_html.value = (
+            f"<p role='status'>SPM simulation already exported. Added {added} DAT dataset(s). "
+            "Selected DAT previews are ready.</p>"
+        )
+
     def _selected_project_changed(self, change):
         """Load only the selected project's collections and clear old review state."""
         selector = self.select_experiment_widget
+        selector.hide_create_panel()
+        selector.create_experiment_button.disabled = change["new"] == "-1"
         selector.raw_experiments_df = None
         selector.experiment_dropdown.options = [("Select experiment...", "-1")]
         selector.experiment_dropdown.value = "-1"
         if change["new"] != "-1":
             selector.load_experiments(change["new"])
+
+    def _create_destination_experiment(self, button):
+        selector = self.select_experiment_widget
+        project = self.select_project_widget.project_dropdown.value
+        if button.disabled or not selector.create_new_experiment_widgets.children:
+            return
+        if project in (None, "", "-1"):
+            _popup("Select a project first.")
+            return
+        name = selector.new_exp_name_textbox.value.strip()
+        if not name:
+            _popup("Experiment name cannot be empty.")
+            return
+
+        properties = {
+            "name": name,
+            "description": selector.new_exp_description_textbox.value.strip(),
+        }
+        if self._microscopy_review is not None or any(
+            entry["suggestion"]["object_type"] == SIMULATION_TYPES["SPM Simulation"]
+            for entry in self.simulation_details_vbox._preview_entries.values()
+        ):
+            properties["default_collection_view"] = "IMAGING_GALLERY_VIEW"
+
+        button.disabled = True
+        try:
+            experiment = utils.create_openbis_collection(
+                self.openbis_session,
+                type="EXPERIMENT",
+                project=project,
+                props=properties,
+            )
+        except Exception as error:
+            logger.warning("Experiment creation failed (%s)", type(error).__name__)
+            _popup(
+                "Could not confirm experiment creation. Check the project before retrying."
+            )
+            return
+        finally:
+            button.disabled = False
+
+        selector.hide_create_panel()
+        if not experiment.permId:
+            _popup("Reselect the project to find the saved experiment.")
+            return
+        selector.select_created_experiment(str(experiment.permId), name)
 
     def set_source_uuid(self, source_uuid):
         """Open the common review for the app entry, with no second source picker."""
@@ -1492,6 +1882,9 @@ class ExportSimulationsWidget(ipw.VBox):
         )
         details.check_aiida_simulation()
         self._clear_previous_export_feedback()
+        self._refresh_microscopy_append(
+            self.select_experiment_widget.experiment_dropdown.value
+        )
 
     def _clear_previous_export_feedback(self, _change=None):
         """Discard links and resolution prompts belonging to an earlier PK."""
@@ -1502,12 +1895,17 @@ class ExportSimulationsWidget(ipw.VBox):
         if hasattr(self, "export_status_html"):
             self.export_status_html.value = ""
             self.retry_export_button.layout.display = "none"
+        if getattr(self, "_microscopy_review", None) is not None:
+            self._initial_microscopy_attempt = None
+            self._show_microscopy_append_plan(None)
         self._clear_resolution_controls()
 
     def _selected_experiment_changed(self, change):
         """Refresh result status when the target openBIS space changes."""
         self._clear_previous_export_feedback()
         self.simulation_details_vbox.set_target_experiment(change["new"])
+        if getattr(self, "_microscopy_review", None) is not None:
+            self._refresh_microscopy_append(change["new"])
 
     def load_simulations_details_widgets(self, change):
         self._clear_previous_export_feedback()
@@ -1654,7 +2052,7 @@ class ExportSimulationsWidget(ipw.VBox):
                 f"<p><b>Available openBIS {html.escape(kind.upper())} objects</b></p>"
                 f"<ul>{available or '<li>none</li>'}</ul>"
                 "<p>Select the intended existing object, or create it below. "
-                "Then click Save again.</p>"
+                "Then click Export to openBIS again.</p>"
             ),
             selector,
             new_fields,
@@ -1789,7 +2187,7 @@ class ExportSimulationsWidget(ipw.VBox):
         self.executable_confirmation_message.value = (
             "<p><b>Resolve missing executable records.</b></p>"
             "<p>Explicitly select an existing executable or choose Create new "
-            "for every row, then click Save again. Nothing has been exported yet.</p>"
+            "for every row, then click Export to openBIS again.</p>"
         )
 
     def _apply_executable_selections(self):
@@ -2021,6 +2419,13 @@ class ExportSimulationsWidget(ipw.VBox):
         try:
             with utils.upload_diagnostics.attempt() as trace:
                 ExportSimulationsWidget._export_simulation_to_openbis(self, b)
+        except KeyboardInterrupt:
+            self.export_status_html.value = (
+                "<p role='status'><b>Export interrupted.</b> Retry to check "
+                "and reuse any records already created.</p>"
+            )
+            if getattr(self, "_initial_microscopy_attempt", None):
+                self.retry_export_button.layout.display = ""
         finally:
             self._exporting = False
             for control in controls:
@@ -2118,6 +2523,35 @@ class ExportSimulationsWidget(ipw.VBox):
                 if selected_simulation_id == "-1":
                     _popup("Select a simulation.")
                 else:
+                    microscopy = getattr(self, "_microscopy_review", None)
+                    if microscopy is not None:
+                        attempt = (selected_experiment_id, microscopy["source_uuid"])
+                        resume = (
+                            b is self.retry_export_button
+                            and attempt == self._initial_microscopy_attempt
+                        )
+                        if not resume:
+                            try:
+                                plan = self._microscopy_append_plan(
+                                    selected_experiment_id
+                                )
+                                if plan != self._microscopy_append_review:
+                                    self._show_microscopy_append_plan(plan)
+                                    self.export_status_html.value = (
+                                        "<p role='status'>The openBIS inventory changed. "
+                                        "Review the updated action before continuing.</p>"
+                                    )
+                                    return
+                                if plan is not None:
+                                    self._append_microscopy_data(plan)
+                                    return
+                            except Exception as error:  # noqa: BLE001 - no fallback writes
+                                self.export_status_html.value = (
+                                    "<p role='status'>Could not add DAT files: "
+                                    f"{html.escape(utils.upload_diagnostics.error_summary(error))}</p>"
+                                )
+                                return
+                        self._initial_microscopy_attempt = attempt
                     atom_model_parents = (
                         selected_slab + selected_molecules_ids + selected_reac_prods_ids
                     )
@@ -2140,11 +2574,15 @@ class ExportSimulationsWidget(ipw.VBox):
                                 "before exporting."
                             )
                             return
-                        duplicate_existing = getattr(
-                            self.simulation_details_vbox,
-                            "duplicate_existing_requested",
-                            lambda: False,
-                        )()
+                        duplicate_existing = (
+                            getattr(
+                                self.simulation_details_vbox,
+                                "duplicate_existing_requested",
+                                lambda: False,
+                            )()
+                            if microscopy is None
+                            else False
+                        )
                         preview_overrides = (
                             self.simulation_details_vbox.preview_overrides()
                         )
@@ -2160,8 +2598,8 @@ class ExportSimulationsWidget(ipw.VBox):
                         self.export_status_html.value = (
                             f"<p role='status'>Export in progress — {action}.</p>"
                         )
-                        exported = aiida_utils.export_workchain(
-                            self.openbis_session,
+                        exported = ExportSimulationsWidget._export_reviewed_workchain(
+                            self,
                             selected_experiment_id,
                             selected_simulation_id,
                             create_missing_executables=create_missing,
@@ -2174,12 +2612,25 @@ class ExportSimulationsWidget(ipw.VBox):
                             ),
                         )
                     except aiida_utils.MissingExecutablesError as error:
+                        self.export_status_html.value = (
+                            "<p role='status'><b>Export paused.</b> Resolve the "
+                            "missing openBIS executable records below.</p>"
+                        )
                         self._show_missing_executables(error)
                         return
                     except aiida_utils.OpenbisNameMatchError as error:
+                        self.export_status_html.value = (
+                            "<p role='status'><b>Export paused.</b> Resolve the "
+                            f"openBIS {html.escape(error.object_kind)} for "
+                            f"<b>{html.escape(error.aiida_label)}</b> below.</p>"
+                        )
                         self._show_reference_resolution(error)
                         return
                     except aiida_utils.ExecutableResolutionError as error:
+                        self.export_status_html.value = (
+                            "<p role='status'><b>Export stopped.</b> "
+                            f"{html.escape(str(error))}</p>"
+                        )
                         _popup(f"Cannot map AiiDA provenance to openBIS: {error}")
                         return
                     except export_recovery.ExportVerificationError as error:
@@ -2236,6 +2687,17 @@ class ExportSimulationsWidget(ipw.VBox):
                     if not report.complete:
                         return
 
+                    if microscopy is not None:
+                        self._initial_microscopy_attempt = None
+                    imaging_results = getattr(self, "_microscopy_results", ())
+                    if imaging_results:
+                        self.export_status_html.value += (
+                            "<p>Microscopy datasets (preview ready): "
+                            + ", ".join(
+                                html.escape(item["perm_id"]) for item in imaging_results
+                            )
+                            + "</p>"
+                        )
                     links = []
                     for exported_object in exported_objects:
                         name = aiida_utils._openbis_property(exported_object, "name")
@@ -2954,19 +3416,10 @@ class SimulationDetailsWidget(ipw.VBox):
                         )
                     )
                 if suggestion.get("needs_preview"):
-                    uploader = ipw.FileUpload(
-                        accept=".jpg,.jpeg,.png",
-                        multiple=False,
-                        description="Replace preview",
-                    )
-                    self._preview_entries[suggestion["key"]]["uploader"] = uploader
-                    if suggestion["content"] is not None:
-                        cards.append(
-                            _preview_image_widget(
-                                suggestion["content"], suggestion["name"]
-                            )
-                        )
-                    cards.append(uploader)
+                    controls, entry = _preview_choice_controls(suggestion)
+                    entry["existing"] = True
+                    self._preview_entries[suggestion["key"]] = entry
+                    cards.extend(controls)
                     cards.append(
                         ipw.HTML(
                             "<p>The saved properties will be kept. Save again to complete missing components.</p>"
@@ -2978,48 +3431,9 @@ class SimulationDetailsWidget(ipw.VBox):
             property_widget = SimulationPropertiesWidget(self.openbis_session)
             property_widget.load_widgets(suggestion["object_type"])
             property_widget.set_values(suggestion["properties"])
-            content = suggestion["content"]
-            preview = (
-                _preview_image_widget(content, suggestion["name"])
-                if content is not None
-                else ipw.HTML(
-                    "<p style='color:#b00020'>No suggestion could be generated: "
-                    f"{html.escape(str(suggestion['error']))}</p>"
-                )
-            )
-            preview_box = ipw.VBox([preview])
-            uploader = ipw.FileUpload(
-                accept=".jpg,.jpeg,.png", multiple=False, description="Replace preview"
-            )
-            status = ipw.HTML(
-                "<p>Suggested image will be used unless you replace it.</p>"
-                if content is not None
-                else "<p>Drop a replacement image here before exporting.</p>"
-            )
-
-            def show_replacement(
-                _change, uploader=uploader, preview_box=preview_box, status=status
-            ):
-                uploaded = _first_uploaded_file(uploader)
-                if uploaded is None:
-                    return
-                previous = preview_box.children
-                preview_box.children = [
-                    _preview_image_widget(uploaded["content"], uploaded["name"])
-                ]
-                close_owned_widgets(*previous)
-                status.value = (
-                    "<p style='color:#237804'>Replacement image selected.</p>"
-                )
-
-            uploader.observe(show_replacement, names="value")
-            self._preview_entries[suggestion["key"]] = {
-                "suggestion": suggestion,
-                "uploader": uploader,
-                "upload_callback": show_replacement,
-                "property_widget": property_widget,
-                "existing": False,
-            }
+            controls, entry = _preview_choice_controls(suggestion)
+            entry.update(property_widget=property_widget, existing=False)
+            self._preview_entries[suggestion["key"]] = entry
             cards.append(
                 ipw.VBox(
                     [
@@ -3030,9 +3444,7 @@ class SimulationDetailsWidget(ipw.VBox):
                         ),
                         property_widget,
                         ipw.HTML("<b>ELN preview</b>"),
-                        preview_box,
-                        uploader,
-                        status,
+                        *controls,
                     ],
                     layout=ipw.Layout(
                         border="1px solid #cccccc", padding="10px", margin="4px 0"
@@ -3051,14 +3463,24 @@ class SimulationDetailsWidget(ipw.VBox):
                     f'<a href="{url}" target="_blank">{label}</a>' if url else label
                 )
                 links.append(f"<li>{linked} — {collection}</li>")
+            allow_duplicate = getattr(self, "allow_duplicate_existing", True)
+            message = (
+                "Continue only if you intentionally want another SIMULATION object. "
+                "The new simulation will reference the same AIIDA_NODE archive; "
+                "the archive itself is not duplicated."
+                if allow_duplicate
+                else "The microscopy export reuses existing simulation records."
+            )
             self.existing_exports_warning.value = (
                 "<p style='color:#8a6d3b'><b>This workflow already has simulation "
-                "results in openBIS.</b> Continue only if you intentionally want "
-                "another SIMULATION object. The new simulation will reference the "
-                "same AIIDA_NODE archive; the archive itself is not duplicated."
-                "</p><ul>" + "".join(links) + "</ul>"
+                "results in openBIS.</b> "
+                + message
+                + "</p><ul>"
+                + "".join(links)
+                + "</ul>"
             )
-            self.existing_exports_confirmation.layout.display = ""
+            if allow_duplicate:
+                self.existing_exports_confirmation.layout.display = ""
         if suggestions:
             messages = []
             if existing_count:
@@ -3100,13 +3522,8 @@ class SimulationDetailsWidget(ipw.VBox):
         for key, entry in self._preview_entries.items():
             if entry.get("existing") and not entry["suggestion"].get("needs_preview"):
                 continue
-            uploaded = _first_uploaded_file(entry["uploader"])
             suggestion = entry["suggestion"]
-            selected = uploaded or (
-                {"name": suggestion["name"], "content": suggestion["content"]}
-                if suggestion["content"] is not None
-                else None
-            )
+            selected = _selected_preview(entry)
             if selected is None:
                 raise ValueError(
                     f"A replacement preview is required for {suggestion['title']}."
@@ -3390,6 +3807,7 @@ class SimulationPropertiesWidget(ipw.VBox):
             "EXECUTABLES",
             "AIIDA_NODE",
             "AIIDA_SOURCE_UUID",
+            "DEFAULT_OBJECT_VIEW",
         }
     )
 
@@ -3434,7 +3852,7 @@ class SimulationPropertiesWidget(ipw.VBox):
                 layout=layout,
             )
         placeholder = ""
-        if data_type == "REAL" and property_definition.get("multiValue"):
+        if data_type == "ARRAY_REAL":
             placeholder = "Comma-separated numeric values"
         elif data_type in {"REAL", "INTEGER"}:
             placeholder = "Numeric value"
@@ -3491,11 +3909,14 @@ class SimulationPropertiesWidget(ipw.VBox):
             if key not in properties or properties[key] is None:
                 continue
             value = properties[key]
-            if definition.get("multiValue"):
-                if definition["dataType"] == "REAL":
-                    widget.value = ", ".join(str(item) for item in value)
-                else:
-                    widget.value = tuple(value)
+            if definition["dataType"] == "ARRAY_REAL":
+                widget.value = (
+                    ", ".join(str(item) for item in value)
+                    if isinstance(value, (list, tuple))
+                    else str(value)
+                )
+            elif definition.get("multiValue"):
+                widget.value = tuple(value)
             elif definition["dataType"] == "BOOLEAN":
                 widget.value = bool(value)
             else:
@@ -3516,19 +3937,25 @@ class SimulationPropertiesWidget(ipw.VBox):
                 if assignment["mandatory"] or value or include_empty:
                     properties[code.lower()] = bool(value)
                 continue
-            if definition.get("multiValue"):
-                if data_type == "REAL":
-                    raw_values = [
-                        item.strip() for item in str(value).split(",") if item.strip()
-                    ]
-                    try:
-                        value = [float(item) for item in raw_values]
-                    except ValueError as error:
-                        raise ValueError(
-                            f"{definition['label']} must contain numbers."
-                        ) from error
-                else:
-                    value = list(value)
+            if data_type == "ARRAY_REAL":
+                text = value.strip()
+                try:
+                    raw_values = (
+                        json.loads(text)
+                        if text.startswith("[")
+                        else [item.strip() for item in text.split(",") if item.strip()]
+                    )
+                    if any(isinstance(item, bool) for item in raw_values):
+                        raise ValueError("Boolean array element")
+                    value = [float(item) for item in raw_values]
+                    if not all(math.isfinite(item) for item in value):
+                        raise ValueError("Non-finite array element")
+                except (TypeError, ValueError) as error:
+                    raise ValueError(
+                        f"{definition['label']} must contain finite numbers."
+                    ) from error
+            elif definition.get("multiValue"):
+                value = list(value)
             else:
                 value = str(value).strip()
                 if value and data_type == "REAL":

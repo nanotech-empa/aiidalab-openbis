@@ -5,6 +5,78 @@ import pandas as pd
 from src import utils
 
 
+def test_create_experiment_skips_codes_still_in_openbis_trash():
+    saved = []
+
+    def get_experiments(*, type):
+        assert type == "EXPERIMENT"
+        return [SimpleNamespace(code="NAMED_COLLECTION")]
+
+    def search_deletions(resource, request):
+        assert resource == "/api"
+        assert request["method"] == "searchDeletions"
+        return {
+            "objects": [
+                {
+                    "deletedObjects": [
+                        {
+                            "entityKind": "EXPERIMENT",
+                            "identifier": "/DEFAULT/DEFAULT/EXPERIMENT_1",
+                        },
+                        {
+                            "entityKind": "SAMPLE",
+                            "identifier": "/DEFAULT/DEFAULT/EXPERIMENT_99",
+                        },
+                        {
+                            "entityKind": "EXPERIMENT",
+                            "identifier": "/DEFAULT/DEFAULT/EXPERIMENT_2",
+                        },
+                    ]
+                }
+            ]
+        }
+
+    def new_collection(**kwargs):
+        return SimpleNamespace(save=lambda: saved.append(kwargs))
+
+    session = SimpleNamespace(
+        token="fake-token",
+        as_v3="/api",
+        get_experiments=get_experiments,
+        _post_request=search_deletions,
+        new_collection=new_collection,
+    )
+    utils.create_openbis_collection(
+        session,
+        type="EXPERIMENT",
+        project="/DEFAULT/DEFAULT",
+        props={"name": "Benzene STM"},
+    )
+
+    assert saved == [
+        {
+            "code": "EXPERIMENT_3",
+            "type": "EXPERIMENT",
+            "project": "/DEFAULT/DEFAULT",
+            "props": {"name": "Benzene STM"},
+        }
+    ]
+
+
+def test_create_collection_keeps_explicit_code_without_allocating():
+    saved = []
+
+    def new_collection(**kwargs):
+        return SimpleNamespace(save=lambda: saved.append(kwargs["code"]))
+
+    session = SimpleNamespace(new_collection=new_collection)
+    utils.create_openbis_collection(
+        session, type="COLLECTION", project="/DEFAULT/DEFAULT", code="ACTIONS"
+    )
+
+    assert saved == ["ACTIONS"]
+
+
 def test_connection_refusal_returns_unavailable_session(monkeypatch):
     class RefusedOpenbis:
         def __init__(self, *_args, **_kwargs):

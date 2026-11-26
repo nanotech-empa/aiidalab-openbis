@@ -29,6 +29,7 @@ def simulations_widgets(monkeypatch):
     sys.modules.pop("src.aiida_utils", None)
     sys.modules.pop("src.widgets", None)
     sys.modules.pop("src.simulations_widgets", None)
+    sys.modules.pop("src.stm_previews", None)
     module = importlib.import_module("src.simulations_widgets")
     return module
 
@@ -73,33 +74,36 @@ def _stub_project_selector(monkeypatch, module):
         def __init__(self, session):
             super().__init__()
             self.project_dropdown = module.ipw.Dropdown(
-                options=[("Select", "-1"), ("Project", "project")]
+                options=[
+                    ("Select", "-1"),
+                    ("Project", "project"),
+                    ("Empty project", "empty-project"),
+                ]
             )
 
     monkeypatch.setattr(module.widgets, "SelectProjectWidget", Project)
 
 
+@pytest.mark.parametrize("result_type", ["GEOMETRY_OPTIMISATION", "SPM_SIMULATION"])
 def test_export_workflow_starts_with_experiment_then_simulation(
-    monkeypatch, simulations_widgets
+    monkeypatch, simulations_widgets, result_type
 ):
     _stub_project_selector(monkeypatch, simulations_widgets)
     ipw = simulations_widgets.ipw
 
-    class FakeSelectExperimentWidget(ipw.VBox):
-        def __init__(self, _session):
-            super().__init__()
-            self.experiment_dropdown = ipw.Dropdown(
-                options=[("Select experiment...", "-1")], value="-1"
-            )
-            self.create_experiment_button = ipw.Button()
+    class FakeSelectExperimentWidget(simulations_widgets.widgets.SelectExperimentWidget):
+        def __init__(self, session):
+            super().__init__(session)
             self.loaded_projects = []
 
         def load_experiments(self, project):
             self.loaded_projects.append(project)
-            self.experiment_dropdown.options = [
-                ("Select", "-1"),
-                ("Collection", "collection"),
-            ]
+            self.raw_experiments_df = pd.DataFrame(
+                [{"display_name": "Collection", "permId": "collection", "is_mine": True}]
+                if project == "project"
+                else []
+            )
+            self.update_experiment_dropdown(None)
 
     class FakeSimulationDetailsWidget(ipw.VBox):
         def __init__(self, _session, _used_aiida):
@@ -108,6 +112,9 @@ def test_export_workflow_starts_with_experiment_then_simulation(
             self.check_simulation_button = ipw.Button()
             self.target_experiments = []
             self.loaded_sources = []
+            self._preview_entries = {
+                "result": {"suggestion": {"object_type": result_type}}
+            }
 
         def set_target_experiment(self, experiment):
             self.target_experiments.append(experiment)
@@ -126,7 +133,8 @@ def test_export_workflow_starts_with_experiment_then_simulation(
         FakeSimulationDetailsWidget,
     )
 
-    widget = simulations_widgets.ExportSimulationsWidget(object())
+    session = SimpleNamespace(_get_username=lambda: "tester")
+    widget = simulations_widgets.ExportSimulationsWidget(session)
 
     assert list(widget.simulation_source_selector.options) == [
         ("Simulation in this AiiDAlab instance", True),
@@ -152,6 +160,68 @@ def test_export_workflow_starts_with_experiment_then_simulation(
     widget.select_project_widget.project_dropdown.value = "-1"
     assert widget.select_experiment_widget.experiment_dropdown.value == "-1"
     assert widget.simulation_details_vbox.target_experiments[-1] == "-1"
+
+    created, messages, exports = [], [], []
+
+    def create_experiment(openbis, **kwargs):
+        assert openbis is session
+        created.append(kwargs)
+        return SimpleNamespace(permId="new-id")
+
+    monkeypatch.setattr(
+        simulations_widgets.utils, "create_openbis_collection", create_experiment
+    )
+    monkeypatch.setattr(simulations_widgets, "_popup", messages.append)
+    monkeypatch.setattr(
+        simulations_widgets.ExportSimulationsWidget,
+        "_export_simulation_to_openbis",
+        lambda _widget, button: exports.append(button),
+    )
+
+    selector = widget.select_experiment_widget
+    assert selector.create_experiment_button.disabled
+    project = widget.select_project_widget.project_dropdown
+    project.value = "empty-project"
+    assert not selector.create_experiment_button.disabled
+    assert selector.create_experiment_button.layout.display != "none"
+    assert selector.experiment_dropdown.value == "-1"
+    selector.create_experiment_button.click()
+    assert selector.create_new_experiment_widgets.children
+    selector.new_exp_name_textbox.value = "  "
+    selector.save_btn.click()
+    assert messages == ["Experiment name cannot be empty."]
+    assert not created
+
+    selector.new_exp_name_textbox.value = "Unsaved name"
+    project.value = "project"
+    assert not selector.create_new_experiment_widgets.children
+    assert not selector.new_exp_name_textbox.value
+    project.value = "empty-project"
+    selector.create_experiment_button.click()
+    selector.cancel_btn.click()
+    assert not selector.create_new_experiment_widgets.children
+    assert not created
+    selector.create_experiment_button.click()
+    selector.new_exp_name_textbox.value = "  Benzene STM  "
+    selector.new_exp_description_textbox.value = "  Microscopy export  "
+    selector.filter_my_exp_cb.value = True
+    selector.save_btn.click()
+    selector.save_btn.click()
+    expected_props = {"name": "Benzene STM", "description": "Microscopy export"}
+    if result_type == "SPM_SIMULATION":
+        expected_props["default_collection_view"] = "IMAGING_GALLERY_VIEW"
+    assert created == [
+        {
+            "type": "EXPERIMENT",
+            "project": "empty-project",
+            "props": expected_props,
+        }
+    ]
+    assert ("Benzene STM", "new-id") in selector.experiment_dropdown.options
+    assert selector.experiment_dropdown.value == "new-id"
+    assert widget.simulation_details_vbox.target_experiments[-1] == "new-id"
+    assert not exports
+    widget.close()
 
 
 def test_local_export_orders_related_objects_after_pk_and_hides_unavailable_products(
@@ -466,18 +536,20 @@ def test_generated_cdxml_can_create_only_after_identity_search(
     )
 
     existing = SimpleNamespace(
-        match_type="exact",
+        match_type="equivalent",
         record=SimpleNamespace(name="Existing GNR", permid="existing"),
     )
     selector.new_molecule_name.value = "Duplicate GNR"
     monkeypatch.setattr(
         selector.structure_search.index, "refresh", lambda **_kwargs: None
     )
-    monkeypatch.setattr(
-        selector.structure_search.index,
-        "search",
-        lambda *_args, **_kwargs: [existing],
-    )
+
+    def search_identity(_query, *, min_similarity, limit):
+        assert min_similarity == 0.0
+        assert limit >= 1
+        return [existing]
+
+    monkeypatch.setattr(selector.structure_search.index, "search", search_identity)
     monkeypatch.setattr(
         simulations_widgets.widgets.molecule_creation,
         "create_molecule_from_cdxml",
@@ -1601,14 +1673,32 @@ def test_absolute_magnetization_schema_is_optional_and_additive(
         property_codes = [item["code"] for item in object_definition["assignments"]]
         if "TOTAL_MAGNETIZATION_BOHR_MAGNETON" not in property_codes:
             continue
-        assert property_codes[-1] == "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON"
-        assert schema.ADDITIVE_OBJECT_TYPE_ASSIGNMENTS[object_code] == [
-            {
-                "code": "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON",
-                "mandatory": False,
-                "section": "Electronic properties",
-            }
-        ]
+        additions = schema.ADDITIVE_OBJECT_TYPE_ASSIGNMENTS[object_code]
+        assert property_codes[-len(additions) :] == [item["code"] for item in additions]
+        assert additions[0] == {
+            "code": "ABSOLUTE_MAGNETIZATION_BOHR_MAGNETON",
+            "mandatory": False,
+            "section": "Electronic properties",
+        }
+
+
+def test_spm_gallery_field_is_an_optional_additive_assignment(simulations_widgets):
+    schema = simulations_widgets.simulation_schema
+    definition = schema.PROPERTY_TYPES["DEFAULT_OBJECT_VIEW"]
+    assert definition["vocabulary"] == "DEFAULT_OBJECT_VIEWS"
+    assert definition["dataType"] == "CONTROLLEDVOCABULARY"
+    assert not definition["multiValue"]
+    assert schema.ADDITIVE_OBJECT_TYPE_ASSIGNMENTS["SPM_SIMULATION"][-1] == {
+        "code": "DEFAULT_OBJECT_VIEW",
+        "mandatory": False,
+        "section": "General information",
+    }
+    assert all(
+        item["code"] != "DEFAULT_OBJECT_VIEW"
+        for item in schema.base_assignments(
+            "SPM_SIMULATION", schema.OBJECT_TYPES["SPM_SIMULATION"]["assignments"]
+        )
+    )
 
 
 def test_multiple_archive_roots_are_listed_in_import_message(
@@ -2511,6 +2601,8 @@ def test_spm_editor_uses_multi_mode_checkboxes_and_numeric_lists(
             "image_modes": ["CONSTANT_HEIGHT", "CONSTANT_ISOVALUE"],
             "bias_voltages_v": [-1.0, 0.0, 1.0],
             "heights_angstrom": [4.0, 6.0],
+            "isovalues_au": [1e-7],
+            "p_tip_ratios": "0.0",
         }
     )
 
@@ -2525,6 +2617,16 @@ def test_spm_editor_uses_multi_mode_checkboxes_and_numeric_lists(
     values = widget.values()
     assert values["bias_voltages_v"] == [-1.0, 0.0, 1.0]
     assert values["heights_angstrom"] == [4.0, 6.0]
+    assert values["isovalues_au"] == [1e-7]
+    assert values["p_tip_ratios"] == [0.0]
+
+    widget.fields["HEIGHTS_ANGSTROM"].value = "[6.0, 4.0]"
+    assert widget.values()["heights_angstrom"] == [6.0, 4.0]
+    widget.fields["ISOVALUES_AU"].value = "[]"
+    assert widget.values(include_empty=True)["isovalues_au"] is None
+    widget.fields["ISOVALUES_AU"].value = "[NaN]"
+    with pytest.raises(ValueError, match="finite numbers"):
+        widget.values()
 
 
 def test_simulation_add_product_offers_checked_aiida_structure(
@@ -2570,13 +2672,12 @@ def test_prefilled_shared_form_reviews_whole_entry_without_source_picker(
     _stub_project_selector(monkeypatch, simulations_widgets)
     ipw = simulations_widgets.ipw
 
-    class Experiment(ipw.VBox):
+    class Experiment(simulations_widgets.widgets.SelectExperimentWidget):
         def __init__(self, session):
-            super().__init__()
-            self.create_experiment_button = ipw.Button()
-            self.experiment_dropdown = ipw.Dropdown(
-                options=[("Select", "-1"), ("Chosen experiment", "experiment")]
-            )
+            super().__init__(session)
+            self.experiment_dropdown.options = [
+                ("Select", "-1"), ("Chosen experiment", "experiment")
+            ]
 
     class Details(ipw.VBox):
         def __init__(self, session, used_aiida):
@@ -2605,7 +2706,7 @@ def test_prefilled_shared_form_reviews_whole_entry_without_source_picker(
     )
     monkeypatch.setattr(simulations_widgets, "SimulationDetailsWidget", Details)
     widget = simulations_widgets.ExportSimulationsWidget(
-        object(), source_uuid="geometry-uuid"
+        SimpleNamespace(_get_username=lambda: "tester"), source_uuid="geometry-uuid"
     )
     details = widget.simulation_details_vbox
     assert not hasattr(widget, "source_selection")
@@ -2627,3 +2728,248 @@ def test_prefilled_shared_form_reviews_whole_entry_without_source_picker(
     assert details.source_history == ["geometry-uuid", "geometry-uuid"]
     widget._exporting = False
     widget.close()
+
+
+def test_molecule_name_filter_matches_names_numbers_ids_and_keeps_selected_link(
+    monkeypatch, simulations_widgets
+):
+    w = simulations_widgets.widgets
+    objects = [
+        SimpleNamespace(
+            permId="benzene-id", props={"name": "Benzene", "empa_number": 123}
+        ),
+        SimpleNamespace(
+            permId="phenal-id", props={"name": "Phenalenyl radical", "empa_number": 456}
+        ),
+        SimpleNamespace(
+            permId="benzene-other",
+            props={"name": "Benzene derivative", "empa_number": 789},
+        ),
+    ]
+    reads = []
+    changes = []
+    monkeypatch.setitem(w.OPENBIS_OBJECT_TYPES, "Molecule", "MOLECULE")
+    monkeypatch.setitem(
+        w.OPENBIS_COLLECTIONS_PATHS, "Precursor Molecule", "/TEST/MOLECULES"
+    )
+    monkeypatch.setattr(
+        w.utils,
+        "get_openbis_objects",
+        lambda *args, **kwargs: reads.append(kwargs) or objects,
+    )
+    monkeypatch.setattr(
+        w.MoleculeWidget,
+        "load_details",
+        lambda self, change: changes.append(change["new"]),
+    )
+    selector = w.MoleculeWidget(object(), simulations_widgets.ipw.Accordion(), 0)
+    original = list(selector.dropdown.options)
+    selector.name_search.value = "BENZ"
+    assert [v for _, v in selector.dropdown.options] == [
+        "-1",
+        "benzene-other",
+        "benzene-id",
+    ]
+    selector.dropdown.value = "benzene-id"
+    assert changes == ["benzene-id"]
+    external = []
+    selector.dropdown.observe(
+        lambda change: external.append(change["new"]), names="value"
+    )
+    selector.name_search.value = "phenal"
+    assert (
+        selector.dropdown.value == "benzene-id"
+        and selector.dropdown.options[0][1] == "benzene-id"
+    )
+    assert external == [] and changes == ["benzene-id"]
+    assert "1 matching" in selector.name_search_status.value
+    selector.name_search.value = "456"
+    assert any(v == "phenal-id" for _, v in selector.dropdown.options)
+    selector.name_search.value = "benzene-other"
+    assert any(v == "benzene-other" for _, v in selector.dropdown.options)
+    selector.name_search.value = "does-not-exist"
+    assert selector.dropdown.value == "benzene-id"
+    selector.name_search.value = ""
+    assert {v for _, v in selector.dropdown.options} == {v for _, v in original}
+    assert len(reads) == 1 and external == []
+
+
+def test_molecule_filter_retains_a_new_structural_search_selection(
+    monkeypatch, simulations_widgets
+):
+    w = simulations_widgets.widgets
+    monkeypatch.setitem(w.OPENBIS_OBJECT_TYPES, "Molecule", "MOLECULE")
+    monkeypatch.setitem(
+        w.OPENBIS_COLLECTIONS_PATHS, "Product Molecule", "/TEST/PRODUCTS"
+    )
+    monkeypatch.setattr(w.utils, "get_openbis_objects", lambda *args, **kwargs: [])
+    monkeypatch.setattr(w.MoleculeWidget, "load_details", lambda *_: None)
+    selector = w.MoleculeWidget(
+        object(),
+        simulations_widgets.ipw.Accordion(),
+        0,
+        collection_key="Product Molecule",
+    )
+    selector.structure_search._hits_by_permid = {
+        "new-benzene": SimpleNamespace(
+            record=SimpleNamespace(name="Benzene from structural search")
+        )
+    }
+    selector._select_search_result("new-benzene")
+    selector.name_search.value = "other"
+    assert selector.dropdown.value == "new-benzene"
+    selector.name_search.value = "BENZENE"
+    assert any(v == "new-benzene" for _, v in selector.dropdown.options)
+
+
+def _stm_preview_fixture(monkeypatch, module):
+    """Stored arrays with deliberately distinct STS, STM and uniform frames."""
+    import numpy as np
+
+    picker_module = importlib.import_module(module.__package__ + ".stm_previews")
+    archive = (
+        {"energies": np.array([-1.0, 0.0, 1.0])},
+        [
+            {"type": "const-height sts", "height": 6.0},
+            {"type": "const-isovalue stm", "isovalue": 1e-7},
+        ],
+        np.array(
+            [
+                [
+                    [[0.0, 1.0], [2.0, 3.0]],
+                    [[0.0, 0.0], [0.0, 0.0]],
+                    [[4.0, 3.0], [2.0, 1.0]],
+                ],
+                [
+                    [[1.0, 2.0], [3.0, 4.0]],
+                    [[2.0, 2.0], [2.0, 2.0]],
+                    [[5.0, 4.0], [3.0, 2.0]],
+                ],
+            ]
+        ),
+    )
+    reads = []
+
+    def load(uuid):
+        reads.append(uuid)
+        return archive
+
+    monkeypatch.setattr(picker_module, "_load_archive", load)
+    return picker_module, archive, reads
+
+
+def test_stm_preview_picker_loads_lazily_and_uses_exact_stored_choice(
+    monkeypatch, simulations_widgets
+):
+    module, archive, reads = _stm_preview_fixture(monkeypatch, simulations_widgets)
+    calls, selected = [], []
+    original = module.aiida_utils._render_stm_selected_preview
+
+    def render(data, series, index, path):
+        calls.append((data, series, index))
+        return original(data, series, index, path)
+
+    monkeypatch.setattr(module.aiida_utils, "_render_stm_selected_preview", render)
+    picker = module.StmPreviewPicker("source-uuid", selected.append)
+    assert reads == []
+    picker.selected_index = 0
+    assert reads == ["source-uuid"]
+    picker.series.value = 0
+    picker.bias.value = 0.82
+    assert "+1.00 V" in picker.status.value
+    assert selected == []  # Draft edits do not silently change the thumbnail.
+    picker.use_button.click()
+    assert calls[0][0] is archive
+    assert calls[0][1:] == (0, 2)
+    assert selected[0]["name"] == "stm-s0-e2.png"
+    assert "STS dI/dV" in selected[0]["label"]
+    assert "bias +1.00 V" in selected[0]["label"]
+    assert selected[0]["content"].startswith(b"\x89PNG")
+    picker.selected_index = None
+    picker.selected_index = 0
+    assert len(reads) == 1
+    picker.close()
+    assert picker._archive is None and picker._on_use is None
+    assert not picker.bias._trait_notifiers.get("value", {}).get("change", [])
+    assert not picker.use_button._click_handlers.callbacks
+
+
+def test_stm_preview_picker_uniform_choice_and_invalid_bias(
+    monkeypatch, simulations_widgets
+):
+    module, archive, _ = _stm_preview_fixture(monkeypatch, simulations_widgets)
+    selected = []
+    picker = module.StmPreviewPicker("source-uuid", selected.append)
+    picker.selected_index = 0
+    picker.series.value = 1
+    picker.bias.value = 0
+    assert "uniform" in picker.status.value
+    picker.use_button.click()
+    assert selected[0]["name"] == "stm-s1-e1.png"
+    assert "isovalue" in selected[0]["label"]
+    picker.bias.value = 100
+    assert picker.use_button.disabled and "between -1 and 1" in picker.status.value
+    picker.bias.value = float("nan")
+    assert picker.use_button.disabled and "finite bias" in picker.status.value
+    archive[2][1, 2] = float("nan")
+    picker.bias.value = 1
+    assert picker.use_button.disabled and "no finite" in picker.status.value
+    assert len(selected) == 1
+    picker.close()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_selected_stm_map_and_upload_use_same_visible_and_exported_image(
+    monkeypatch, simulations_widgets, preview_details, existing
+):
+    from datetime import datetime, timezone
+    from PIL import Image
+
+    module, _, _ = _stm_preview_fixture(monkeypatch, simulations_widgets)
+    suggestion = _preview_suggestion(simulations_widgets, existing=existing)
+    suggestion.update(
+        process_label="Cp2kStmWorkChain", source_uuid="source-uuid", result_role="spm"
+    )
+    monkeypatch.setattr(
+        simulations_widgets.aiida_utils,
+        "render_workchain_preview_suggestions",
+        lambda *a, **k: [suggestion],
+    )
+    preview_details.load_aiida_preview_suggestions()
+    entry = preview_details._preview_entries["test:bands"]
+    picker = entry["map_picker"]
+    picker.selected_index = 0
+    picker.series.value = 0
+    picker.bias.value = -1
+    picker.use_button.click()
+    first = preview_details.preview_overrides()["test:bands"]
+    assert first["name"] == "stm-s0-e0.png"
+    card = preview_details.preview_suggestions_box.children
+    image_box = card[0].children[4] if not existing else card[1]
+    assert bytes(image_box.children[0].value) == first["content"]
+    if existing:
+        assert preview_details.property_overrides() == {}  # Keep saved fields.
+    data = io.BytesIO()
+    Image.new("RGB", (32, 16), color="red").save(data, format="PNG")
+    entry["uploader"].value = (
+        {
+            "name": "my-image.png",
+            "type": "image/png",
+            "size": len(data.getvalue()),
+            "content": memoryview(data.getvalue()),
+            "last_modified": datetime.now(timezone.utc),
+        },
+    )
+    assert (
+        preview_details.preview_overrides()["test:bands"]["content"] == data.getvalue()
+    )
+    picker.series.value = 1
+    picker.bias.value = 1
+    picker.use_button.click()
+    assert entry["uploader"].value == ()
+    final = preview_details.preview_overrides()["test:bands"]
+    assert final["name"] == "stm-s1-e2.png"
+    assert bytes(image_box.children[0].value) == final["content"]
+    preview_details._clear_preview_suggestions()
+    assert picker._archive is None and picker._on_use is None
+    assert not entry["uploader"]._trait_notifiers.get("value", {}).get("change", [])

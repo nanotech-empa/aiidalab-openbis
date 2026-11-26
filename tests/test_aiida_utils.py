@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 
@@ -175,6 +176,47 @@ def test_preceding_main_workchains_ignore_noncausal_return_links(
         geometry.uuid,
         current.uuid,
     ]
+
+
+def test_stm_export_scope_includes_only_provenance_linked_geoopt(
+    aiida_profile_clean, aiida_utils
+):
+    orm = aiida_utils.orm
+    links = aiida_utils.LinkType
+    initial = orm.StructureData(pbc=False)
+    initial.append_atom(position=(0, 0, 0), symbols="C")
+    initial.store()
+
+    geo = orm.WorkChainNode()
+    geo.set_process_label("Cp2kGeoOptWorkChain")
+    geo.base.links.add_incoming(initial, links.INPUT_WORK, "structure")
+    geo.store()
+    calculation = orm.CalcJobNode()
+    calculation.base.links.add_incoming(geo, links.CALL_CALC, "cp2k")
+    calculation.store()
+    output = initial.clone()
+    output.base.links.add_incoming(calculation, links.CREATE, "output_structure")
+    output.store()
+    output.base.links.add_incoming(geo, links.RETURN, "output_structure")
+    for process in (calculation, geo):
+        process.set_process_state("finished")
+        process.set_exit_status(0)
+        process.seal()
+
+    independent = output.clone().store()
+    for structure, preceding in [(output, [geo.uuid]), (independent, [])]:
+        stm = orm.WorkChainNode()
+        stm.set_process_label("Cp2kStmWorkChain")
+        stm.base.links.add_incoming(structure, links.INPUT_WORK, "structure")
+        stm.store()
+        stm.set_process_state("finished")
+        stm.set_exit_status(0)
+        stm.seal()
+        expected = [*preceding, stm.uuid]
+        assert aiida_utils.get_export_main_workchains(stm.uuid) == expected
+        assert [
+            node.uuid for node in aiida_utils._exportable_workchains(stm)
+        ] == expected
 
 
 def test_log_paths_are_anchored_to_app_root(aiida_utils):
@@ -350,7 +392,7 @@ def test_cp2k_method_uses_workflow_parameters(aiida_utils):
     assert aiida_utils._method_modifiers({"vdw_corr": "none"}) == []
 
 
-def test_fermi_energy_matches_multivalue_schema(aiida_utils):
+def test_fermi_energy_keeps_singleton_array(aiida_utils):
     quantities = aiida_utils._fermi_energy({"fermi_energy": -3.2})
     assert len(quantities) == 1
     assert quantities == [-3.2]
@@ -1039,6 +1081,48 @@ def test_nanoribbon_export_uses_simplified_schema(
         assert [stem for _, stem in previews] == ["band_structure", "pdos"]
 
 
+@pytest.mark.parametrize("gallery_supported", [True, False])
+def test_new_spm_result_uses_the_existing_gallery_field(
+    monkeypatch, aiida_utils, gallery_supported
+):
+    def get_type(_session, code):
+        assert code == "SPM_SIMULATION"
+        fields = ["NAME", "ISOVALUES_AU"]
+        if gallery_supported:
+            fields.append("DEFAULT_OBJECT_VIEW")
+        return SimpleNamespace(
+            get_property_assignments=lambda: SimpleNamespace(
+                df=pd.DataFrame({"code": fields})
+            )
+        )
+
+    monkeypatch.setattr(aiida_utils.utils, "get_openbis_object_type", get_type)
+    monkeypatch.setattr(aiida_utils, "find_existing_simulation_result", lambda *_: None)
+    monkeypatch.setattr(aiida_utils, "_upload_preview_content", lambda *_, **__: None)
+    monkeypatch.setattr(
+        aiida_utils.utils,
+        "create_openbis_object",
+        lambda _session, type, props, collection, parents: FakeOpenbisObject(
+            type, props
+        ),
+    )
+
+    result = aiida_utils._create_simulation_object(
+        object(),
+        "collection",
+        "SPM_SIMULATION",
+        {"name": "STM benzene", "isovalues_au": [1e-7]},
+        [],
+        object(),
+        "spm",
+    )
+
+    assert result.props["isovalues_au"] == [1e-7]
+    assert result.props.get("default_object_view") == (
+        "IMAGING_GALLERY_VIEW" if gallery_supported else None
+    )
+
+
 def test_simulation_identity_is_scoped_to_target_space(monkeypatch, aiida_utils):
     existing = FakeOpenbisObject(
         "DOS",
@@ -1296,7 +1380,7 @@ def test_render_workchain_preview_suggestions_reports_each_result(
     tmp_path, monkeypatch, aiida_utils
 ):
     root = SimpleNamespace(uuid="root-uuid")
-    target = SimpleNamespace(uuid="target-uuid")
+    target = SimpleNamespace(uuid="target-uuid", process_label="Cp2kPdosWorkChain")
 
     def render(path):
         Path(path).write_bytes(b"suggested-png")
@@ -1325,6 +1409,7 @@ def test_render_workchain_preview_suggestions_reports_each_result(
         {
             "key": "target-uuid:pdos",
             "source_uuid": "target-uuid",
+            "process_label": "Cp2kPdosWorkChain",
             "result_role": "pdos",
             "title": "Projected DOS",
             "object_type": "DOS",
@@ -1341,7 +1426,7 @@ def test_preview_suggestions_skip_rendering_existing_results(
     aiida_utils,
 ):
     root = SimpleNamespace(uuid="root-uuid")
-    target = SimpleNamespace(uuid="target-uuid")
+    target = SimpleNamespace(uuid="target-uuid", process_label="Cp2kPdosWorkChain")
     existing = FakeOpenbisObject(
         "DOS",
         {"name": "Existing PDOS", "aiida_source_uuid": target.uuid},
@@ -3013,3 +3098,74 @@ def test_export_rejects_changed_result_set_before_any_server_write(
             "entry",
             reviewed_result_keys=["entry:result"],
         )
+
+
+def test_stm_preview_avoids_flat_nominal_biases_and_labels_real_fallback(
+    monkeypatch, aiida_utils
+):
+    energies = np.array([-5.0, -3.0, -0.5, 0.5, 1.0])
+    values = np.zeros((2, 5, 2, 2))
+    values[0, 0] = [[0, 2], [1, 4]]
+    values[0, 1] = [[0, 1], [1, 2]]
+    values[1, 0] = [
+        [0, 100],
+        [200, 300],
+    ]  # A different unit family is not a contrast competitor.
+    before = values.copy()
+    monkeypatch.setattr(
+        aiida_utils,
+        "_stm_archive_metadata",
+        lambda _: (
+            {"energies": energies},
+            [
+                {"type": "const-height stm", "height": 4.0},
+                {"type": "const-isovalue stm", "isovalue": 1e-6},
+            ],
+            values,
+        ),
+    )
+    panels = aiida_utils._spm_preview_panels(
+        SimpleNamespace(process_label="Cp2kStmWorkChain")
+    )
+    assert len(panels) == 1
+    assert "-5.00 V" in panels[0]["title"] and "height 4.00" in panels[0]["title"]
+    np.testing.assert_array_equal(panels[0]["image"], values[0, 0])
+    np.testing.assert_array_equal(values, before)
+
+
+def test_sts_only_preview_can_use_a_nonuniform_stored_map(monkeypatch, aiida_utils):
+    values = np.zeros((1, 3, 2, 2))
+    values[0, 1] = [[0, 1], [2, 3]]
+    monkeypatch.setattr(
+        aiida_utils,
+        "_stm_archive_metadata",
+        lambda _: (
+            {"energies": [-1.0, 0.0, 1.0]},
+            [{"type": "const-height sts", "height": 6.0}],
+            values,
+        ),
+    )
+    panels = aiida_utils._spm_preview_panels(
+        SimpleNamespace(process_label="Cp2kStmWorkChain")
+    )
+    assert len(panels) == 1 and "STS dI/dV at +0.00 V" in panels[0]["title"]
+
+
+def test_uniform_stm_archive_does_not_create_a_blank_suggested_png(
+    monkeypatch, aiida_utils, tmp_path
+):
+    monkeypatch.setattr(
+        aiida_utils,
+        "_stm_archive_metadata",
+        lambda _: (
+            {"energies": [-1.0, -0.5, 0.5, 1.0]},
+            [{"type": "const-height stm", "height": 4.0}],
+            np.zeros((1, 4, 2, 2)),
+        ),
+    )
+    output = tmp_path / "preview.png"
+    with pytest.raises(ValueError, match="replacement ELN preview"):
+        aiida_utils._render_spm_preview(
+            SimpleNamespace(process_label="Cp2kStmWorkChain"), str(output)
+        )
+    assert not output.exists()

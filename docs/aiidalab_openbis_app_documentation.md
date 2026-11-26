@@ -266,9 +266,13 @@ AiiDA result, then use the same action. In ORCA, use **Export to openBIS** in th
 Results navigation; native DMRG results also expose that action beside their
 stored result table. No scientific computation is launched by these actions.
 
-The shared form lets you select the collection and any applicable
-molecule/material concepts, review all result cards, previews and executable
-mapping, and explicitly publish. Preparing a local result saves an immutable
+Choose a project and an experiment in the shared export form. To create a
+destination, click **New experiment**, enter its name, and save. The form
+selects the new experiment. Review the results and click **Export to openBIS**
+when ready to publish.
+
+The review includes applicable molecule/material concepts, result cards,
+previews and executable mapping. Preparing a local result saves an immutable
 AiiDA snapshot but does not upload to openBIS. It retains its UUID even if the
 connection fails, so it can be reviewed later. Editing the model requires a new
 solution and preparation; old saved snapshots remain valid historical results.

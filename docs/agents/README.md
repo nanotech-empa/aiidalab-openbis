@@ -103,3 +103,49 @@ another task. A source calculation remains separate from the chosen page.
 
 Only the `chat` destination has the shared conversation. The other pages use
 the existing laboratory GUI; return to Home/chat for assistant help.
+
+### STM microscopy export
+
+Use the Surfaces `view_stm.ipynb` host's `app_prepare_export` and existing shared
+review for the standard SPM simulation and AiiDA archive. Use **Keep to export**
+to add the displayed series/bias and any current point or line curves. Repeat
+for each desired map. Review only the kept entries. Confirm the project/experiment/material
+references and the exact `export_stm_microscopy` action before publication.
+The shared exporter preserves the AiiDA simulation/archive identity and creates
+linked microscopy datasets; do not implement a second direct-write path in chat.
+Inspect final dataset IDs and preview status. On interruption retry the existing
+export, keeping partial server records. See
+[STM microscopy format and recovery](../stm_microscopy_export.md).
+
+For SXM area changes, use the visible width/height/centre controls in Å and
+`stm.reset_image_area` for the native-cell rectangle. Inspect
+`microscopy_image_area` and `microscopy_source_geometry` (native CP2K PBC).
+Periodic filling follows lattice vectors, never artificial independent image
+edge repetition. State area/PBC and map/curve counts in the export review;
+changed controls invalidate it. Local point/line sampling uses physical original-grid coordinates,
+independent of the SXM crop. Do not infer an experimental current calibration.
+
+For local curves, choose `stm.analysis_series`, then the draft action
+`stm.open_sampling_map`. STS supports points and all stored energies; STM
+supports two-endpoint lines and the chosen `stm.analysis_bias`. Set
+`stm.coordinate_x_angstrom`/`stm.coordinate_y_angstrom`, then invoke
+`stm.add_coordinate` once per point or twice per line. Inspect
+`microscopy_sampling` for labels, colours, coordinates, pending line endpoints
+and validation. `stm.remove_marker`, `stm.clear_markers`, and
+`stm.download_dat` operate on that same visible panel. Do not invent a global
+average or treat STM distance profiles as STS spectra. Prepare/review the common
+export only after the sampling state is valid; marker changes invalidate it.
+
+### STM/STS ELN preview and molecule-name filter
+
+The common export review includes **Choose a calculated STM/STS image**.
+Select **Map series**, enter **Bias [V]**, inspect the reported stored bias and
+click **Use this map as ELN preview**. Verify the updated thumbnail and **Image
+in use**. Draft selector changes alone do not apply a new image. This action is
+local and does not publish or change the SXM/DAT selections. File replacement
+remains available. Use the existing confirmed export action for server writes.
+
+**Find molecule** filters names, EMPA numbers and permIDs in the selected
+collection without changing the linked molecule. Select a result explicitly.
+A number-only record has no inferred chemical name; use the existing SMILES or
+CDXML search when the requested name is absent.
