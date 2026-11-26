@@ -157,19 +157,30 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
                     pid = entry.get("pid")
 
                     if pid is not None:
-                        # Check if the process is actually running
+                        # Check if the process is actually running (reaping any exited child zombies first)
                         is_running = False
-                        try:
-                            # Sending signal 0 checks for existence without killing it
-                            os.kill(pid, 0)
-                            is_running = True
-                        except ProcessLookupError:
-                            # The process is dead
-                            is_running = False
-                            file_needs_update = True
-                        except PermissionError:
-                            # The process exists, but is owned by another user (rare here, but means it's alive)
-                            is_running = True
+                        reaped = False
+                        if hasattr(os, "waitpid") and hasattr(os, "WNOHANG"):
+                            try:
+                                waited_pid, _ = os.waitpid(pid, os.WNOHANG)
+                                if waited_pid == pid:
+                                    reaped = True
+                                    file_needs_update = True
+                            except ChildProcessError:
+                                pass
+
+                        if not reaped:
+                            try:
+                                # Sending signal 0 checks for existence without killing it
+                                os.kill(pid, 0)
+                                is_running = True
+                            except ProcessLookupError:
+                                # The process is dead
+                                is_running = False
+                                file_needs_update = True
+                            except PermissionError:
+                                # The process exists, but is owned by another user (rare here, but means it's alive)
+                                is_running = True
 
                         if is_running:
                             # It's alive! Add it to the widget and our valid list
@@ -360,12 +371,18 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.select_project_widget.project_dropdown.observe(
             self.load_experiment_data, names="value"
         )
+        self.select_project_widget.project_dropdown.observe(
+            self._on_form_input_changed, names="value"
+        )
 
         self.select_experiment_title = ipw.HTML(
             value=f"<div style='{header_style}'>Select experiment</div>"
         )
         self.select_experiment_widget = widgets.SelectExperimentWidget(
             self.openbis_session
+        )
+        self.select_experiment_widget.experiment_dropdown.observe(
+            self._on_form_input_changed, names="value"
         )
 
         self.select_experiment_widget.create_experiment_button.on_click(
@@ -379,12 +396,18 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         self.select_sample_widget.sample_dropdown.observe(
             self._on_sample_changed, names="value"
         )
+        self.select_sample_widget.sample_dropdown.observe(
+            self._on_form_input_changed, names="value"
+        )
 
         self.select_instrument_title = ipw.HTML(
             value=f"<div style='{header_style}'>Select instrument</div>"
         )
         self.select_instrument_widget = widgets.SelectInstrumentWidget(
             self.openbis_session
+        )
+        self.select_instrument_widget.instrument_dropdown.observe(
+            self._on_form_input_changed, names="value"
         )
 
         # Folder Chooser
@@ -642,8 +665,22 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             or "Unknown"
         )
 
+    def _reap_watchdog_processes(self):
+        alive_processes = []
+        for process in getattr(self, "watchdog_processes", []):
+            poll = getattr(process, "poll", None)
+            if callable(poll):
+                try:
+                    if poll() is not None:
+                        continue
+                except OSError:
+                    continue
+            alive_processes.append(process)
+        self.watchdog_processes = alive_processes
+
     def _find_existing_folder_tracking(self, data_folder):
         """Inspects active watchdogs and measurement logs for an existing link to data_folder."""
+        self._reap_watchdog_processes()
         logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
         norm_data_folder = os.path.normpath(data_folder)
 
@@ -842,6 +879,9 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
     def _on_folder_changed(self, _chooser):
         self._clear_folder_conflict_prompt()
 
+    def _on_form_input_changed(self, _change):
+        self._clear_folder_conflict_prompt()
+
     def _clear_folder_conflict_prompt(self):
         self._pending_folder_conflict = None
         if hasattr(self, "folder_conflict_box"):
@@ -922,11 +962,23 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             layout=ipw.Layout(width="100px"),
         )
 
+        def _consume_pending():
+            if self._pending_folder_conflict is None:
+                return False
+            self._pending_folder_conflict = None
+            continue_btn.disabled = True
+            switch_btn.disabled = True
+            cancel_btn.disabled = True
+            return True
+
         def _on_continue(_):
+            if not _consume_pending():
+                return
+            live_tracking = self._find_existing_folder_tracking(norm_data_folder)
             self._clear_folder_conflict_prompt()
-            if tracking_info["is_running"]:
+            if live_tracking is not None and live_tracking["is_running"]:
                 logger.info(
-                    f"Continuing active watchdog for {norm_data_folder} (session {tracking_info.get('session_id')})."
+                    f"Continuing active watchdog for {norm_data_folder} (session {live_tracking.get('session_id')})."
                 )
                 display(
                     Javascript(
@@ -935,16 +987,48 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 )
                 return
 
-            measurement_session = self._resume_existing_measurement_session(
-                tracking_info, norm_data_folder
+            if (
+                live_tracking is not None
+                and live_tracking.get("measurement_session") is not None
+            ):
+                measurement_session = self._resume_existing_measurement_session(
+                    live_tracking, norm_data_folder
+                )
+                self._start_watchdog_process(
+                    measurement_session.permId, norm_data_folder
+                )
+                return
+
+            logger.warning(
+                f"Previous Measurement Session for {norm_data_folder} is no longer available in openBIS."
             )
-            self._start_watchdog_process(measurement_session.permId, norm_data_folder)
+            display(
+                Javascript(
+                    data="alert('The previous measurement session is no longer available in openBIS.');"
+                )
+            )
 
         def _on_switch(_):
+            if not _consume_pending():
+                return
+            if not self._validate_inputs():
+                self._clear_folder_conflict_prompt()
+                return
+
+            current_sample_id = self.select_sample_widget.sample_dropdown.value
+            current_experiment_id = (
+                self.select_experiment_widget.experiment_dropdown.value
+            )
+            current_instrument_id = (
+                self.select_instrument_widget.instrument_dropdown.value
+            )
             logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
             try:
                 new_session = self._create_openbis_measurement_session(
-                    sample_id, instrument_id, experiment_id, norm_data_folder
+                    current_sample_id,
+                    current_instrument_id,
+                    current_experiment_id,
+                    norm_data_folder,
                 )
             except Exception as exc:
                 logger.exception(
@@ -958,17 +1042,38 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
                 )
                 return
 
-            active_pids = tracking_info.get("active_pids") or []
+            live_active = self.running_watchdogs_widget.get_active_watchdogs_for_folder(
+                norm_data_folder
+            )
+            active_pids = list(
+                dict.fromkeys(
+                    [
+                        *(tracking_info.get("active_pids") or []),
+                        *(
+                            entry["pid"]
+                            for entry in live_active
+                            if entry.get("pid") is not None
+                        ),
+                    ]
+                )
+            )
             if active_pids:
                 self.running_watchdogs_widget.stop_watchdog_pids(
                     active_pids, notify=False
                 )
                 stopped_set = set(active_pids)
-                self.watchdog_processes = [
-                    process
-                    for process in self.watchdog_processes
-                    if getattr(process, "pid", None) not in stopped_set
-                ]
+                remaining_processes = []
+                for process in self.watchdog_processes:
+                    if getattr(process, "pid", None) in stopped_set:
+                        wait = getattr(process, "wait", None)
+                        if callable(wait):
+                            try:
+                                wait(timeout=1)
+                            except (subprocess.TimeoutExpired, OSError):
+                                pass
+                    else:
+                        remaining_processes.append(process)
+                self.watchdog_processes = remaining_processes
 
             detach_measurement_logs_for_folder(
                 norm_data_folder,
@@ -980,6 +1085,8 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
             self._start_watchdog_process(new_session.permId, norm_data_folder)
 
         def _on_cancel(_):
+            if not _consume_pending():
+                return
             self._clear_folder_conflict_prompt()
 
         continue_btn.on_click(_on_continue)
