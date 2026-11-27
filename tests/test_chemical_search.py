@@ -1,9 +1,11 @@
 """Tests for collection-scoped SMILES/CDXML search."""
 
+import json
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 from xml.etree import ElementTree as ET
 
 from src.chemical_search import (
@@ -111,6 +113,8 @@ def test_distinct_queries_do_not_grow_collection_caches(tmp_path):
     ).refresh()
     query = search_representation_from_smiles("CCO")
     expected = index.search(query)
+    # Load the collection's target entry through a non-exact comparison.
+    index.search(search_representation_from_smiles("CC"), min_similarity=0.0)
     molecules = dict(index._mol_cache)
     fingerprints = dict(index._fp_cache)
     for length in range(1, 51):
@@ -365,6 +369,51 @@ def test_successful_search_reports_query_and_hits_to_parent(tmp_path):
     assert hits == ()
     assert widget.last_query == query
     assert widget.last_hits == ()
+
+
+def test_equivalent_structures_keep_their_actual_tanimoto_score(tmp_path):
+    index = OpenbisChemicalIndex(
+        FakeSession([molecule("acetate", smiles="CC(=O)[O-]")]),
+        "/COLLECTION/A",
+        cache_path=tmp_path / "index.json",
+    ).refresh()
+    query = search_representation_from_smiles("CC(=O)O")
+
+    (hit,) = index.search(query, min_similarity=0.0)
+
+    assert hit.match_type == "equivalent"
+    assert 0.0 < hit.similarity < 1.0
+    assert index.search(query, min_similarity=1.0) == []
+
+
+def test_selected_result_shows_formula_and_direct_openbis_link(tmp_path):
+    selected = []
+    record = molecule(
+        "benzene-id", name="Benzene", sum_formula="C6H6", smiles="c1ccccc1"
+    )
+    widget = MoleculeStructureSearchWidget(
+        FakeSession([record]),
+        "/COLLECTION/A",
+        on_select=selected.append,
+        cache_path=tmp_path / "index.json",
+    )
+    widget.smiles.value = "c1ccccc1"
+    widget.quality.value = 100
+    widget._search()
+    widget.results.value = record.permId
+
+    details = ET.fromstring(f"<div>{widget.details.value}</div>")
+    link = details.find("a")
+    assert "".join(details.itertext()) == "Benzene · C6H6 · Open in openBIS"
+    target = urlsplit(link.attrib["href"])
+    assert (target.netloc, target.path) == (
+        "openbis-dev.example",
+        "/openbis/webapp/eln-lims/",
+    )
+    params = parse_qs(target.query)
+    assert params["viewName"] == ["showViewSamplePageFromPermId"]
+    assert json.loads(params["viewData"][0]) == {"permIdOrIdentifier": record.permId}
+    assert selected == [record.permId]
 
 
 def test_cdxml_query_preview_uses_shared_renderer_and_clears_for_smiles(tmp_path):

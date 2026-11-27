@@ -1,7 +1,9 @@
+import asyncio
 import html
 import io
 import os
 import shutil
+import weakref
 
 import ipywidgets as ipw
 import pandas as pd
@@ -560,45 +562,46 @@ class MoleculeWidget(ipw.VBox):
         self.generated_png = b""
         self.generated_representation = None
 
-        molecules_objects = utils.get_openbis_objects(
-            self.openbis_session,
-            collection=OPENBIS_COLLECTIONS_PATHS[collection_key],
-            type=OPENBIS_OBJECT_TYPES["Molecule"],
-        )
-        dropdown_list = []
-        self._labels_by_permid = {}
-        for obj in molecules_objects:
-            name = obj.props.get("name") or str(obj.permId)
-            empa_number = obj.props.get("empa_number")
-            label = (
-                f"{empa_number} ({name})"
-                if collection_key == "Precursor Molecule" and empa_number
-                else str(name)
-            )
-            self._labels_by_permid[str(obj.permId)] = label
-            dropdown_list.append((label, obj.permId))
+        from .local_search_index import account_index
 
-        if collection_key == "Precursor Molecule":
-            # Keep the established newest/highest EMPA-number-first ordering.
-            def precursor_sort_key(item):
-                first_word = str(item[0]).split(maxsplit=1)[0]
-                try:
-                    return int(first_word)
-                except ValueError:
-                    return -1
-
-            dropdown_list.sort(key=precursor_sort_key, reverse=True)
-        else:
-            dropdown_list.sort(key=lambda item: item[0].casefold())
-        placeholder = (
-            "Select a product molecule..."
-            if collection_key == "Product Molecule"
-            else "Select a molecule..."
-        )
-        dropdown_list.insert(0, (placeholder, "-1"))
-        self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
-        self.details_vbox = ipw.VBox()
         self.collection = OPENBIS_COLLECTIONS_PATHS[collection_key]
+        self._shared_index = account_index(openbis_session)
+        self._metadata_state = None
+        self._molecule_search_terms = {}
+        self._labels_by_permid = {}
+        indexed_rows = self._indexed_molecule_rows()
+        if indexed_rows is None:
+            molecules = utils.get_openbis_objects(
+                self.openbis_session,
+                collection=self.collection,
+                type=OPENBIS_OBJECT_TYPES["Molecule"],
+            )
+            indexed_rows = [
+                (
+                    obj.permId,
+                    obj.props.get("name"),
+                    obj.props.get("empa_number"),
+                    obj.props.get("chemdraw_name"),
+                )
+                for obj in molecules
+            ]
+        dropdown_list = self._molecule_choices(indexed_rows)
+        self.dropdown = ipw.Dropdown(value="-1", options=dropdown_list)
+        self._molecule_options = list(dropdown_list)
+        self.name_search = ipw.Text(
+            description="Find molecule",
+            placeholder="EMPA number, ChemDraw name or permID",
+            style={"description_width": "initial"},
+            layout=ipw.Layout(width="95%"),
+        )
+        self.name_search_status = ipw.Label()
+        self.name_update_button = ipw.Button(
+            description="Update from openBIS",
+            layout=ipw.Layout(display="none", width="auto"),
+        )
+        self.name_update_button.on_click(self._update_name_index)
+        self.name_search.observe(self._filter_molecule_names, names="value")
+        self.details_vbox = ipw.VBox()
         self.structure_search = chemical_search.MoleculeStructureSearchWidget(
             self.openbis_session,
             self.collection,
@@ -644,11 +647,18 @@ class MoleculeWidget(ipw.VBox):
             layout=ipw.Layout(width="150px", height="25px"),
         )
 
-        self.molecule_sketch = ipw.Image(format="png")
+        self.molecule_sketch = ipw.Image(
+            format="png", layout=ipw.Layout(display="none")
+        )
 
         self.dropdown.observe(self.load_details, names="value")
         self.remove_molecule_button.on_click(self.remove_molecule)
-        children = [self.dropdown]
+        children = [
+            self.name_search,
+            self.name_search_status,
+            self.name_update_button,
+            self.dropdown,
+        ]
         if self.cdxml_generator_accordion is not None:
             children.append(self.cdxml_generator_accordion)
         children.extend(
@@ -661,6 +671,130 @@ class MoleculeWidget(ipw.VBox):
             ]
         )
         self.children = children
+
+    def _indexed_molecule_rows(self):
+        if self._shared_index is None:
+            return None
+        scope = f"molecule:{self.collection}"
+        state = self._shared_index.state(scope)
+        if state is None or not state[2] or state == self._metadata_state:
+            return None
+        self._metadata_state, rows = self._shared_index.read(scope)
+        return [
+            (
+                row["permid"],
+                row["name"],
+                row["empa_number"],
+                row.get("chemdraw_name", ""),
+            )
+            for _, row in rows.values()
+        ]
+
+    def _molecule_choices(self, rows):
+        choices = []
+        precursor = self.collection_key == "Precursor Molecule"
+        for permid, name, empa_number, chemdraw_name in rows:
+            name = name or str(permid)
+            label = (
+                f"{empa_number} ({name})" if precursor and empa_number else str(name)
+            )
+            if chemdraw_name and chemdraw_name.casefold() != str(name).casefold():
+                label = f"{label} — {chemdraw_name}"
+            self._labels_by_permid[str(permid)] = label
+            self._molecule_search_terms[str(permid)] = " ".join(
+                str(value)
+                for value in (name, empa_number, permid, chemdraw_name)
+                if value is not None
+            ).casefold()
+            choices.append((label, permid))
+        if precursor:
+
+            def sort_key(item):
+                try:
+                    return int(item[0].split(maxsplit=1)[0])
+                except (IndexError, ValueError):
+                    return -1
+
+            choices.sort(key=sort_key, reverse=True)
+        else:
+            choices.sort(key=lambda item: item[0].casefold())
+        placeholder = (
+            "Select a molecule..." if precursor else "Select a product molecule..."
+        )
+        return [(placeholder, "-1"), *choices]
+
+    def _filter_molecule_names(self, _change=None):
+        updated = self._indexed_molecule_rows()
+        if updated is not None:
+            selected = self.dropdown.value
+            previous = next(
+                (pair for pair in self._molecule_options if pair[1] == selected), None
+            )
+            self._molecule_options = self._molecule_choices(updated)
+            if previous and not any(
+                pair[1] == selected for pair in self._molecule_options
+            ):
+                self._molecule_options.append(previous)
+        # Structural search / creation can add a result not in the initial list.
+        # Cache plain labels/IDs, never re-query the server on every keystroke.
+        known = {str(value) for _label, value in self._molecule_options}
+        for label, value in self.dropdown.options if updated is None else ():
+            if str(value) not in known:
+                self._molecule_options.append((label, value))
+                self._molecule_search_terms[str(value)] = f"{label} {value}".casefold()
+                known.add(str(value))
+        query = self.name_search.value.strip().casefold()
+        placeholder = self._molecule_options[0]
+        matches = [
+            (label, value)
+            for label, value in self._molecule_options[1:]
+            if query
+            in self._molecule_search_terms.get(
+                str(value), f"{label} {value}".casefold()
+            )
+        ]
+        selected = self.dropdown.value
+        current = next(
+            (item for item in self._molecule_options[1:] if item[1] == selected), None
+        )
+        # Dropdown option changes reset its index to zero. Keeping the current
+        # selection first avoids transient value changes, server detail reloads
+        # and silently replacing/clearing the export's material relationship.
+        options = [current, placeholder] if current else [placeholder]
+        options += [item for item in matches if item != current]
+        self.dropdown.options = options
+        self.name_search_status.value = f"{len(matches)} matching molecule(s)." + (
+            " Current selection kept at the top." if current else ""
+        )
+        self.name_update_button.layout.display = (
+            "" if self._shared_index is not None and query and not matches else "none"
+        )
+
+    def _update_name_index(self, _button=None):
+        from .chemical_index_worker import prepare_index_in_background
+
+        if self._shared_index is None:
+            return
+        previous = self._shared_index.state(f"molecule:{self.collection}")
+        prepare_index_in_background(self.openbis_session, [self.collection], force=True)
+        self.name_search_status.value = "Updating the local list from openBIS …"
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self.name_update_button.disabled = True
+        loop.create_task(
+            chemical_search._wait_for_update(
+                weakref.ref(self), self._shared_index, self.collection, previous
+            )
+        )
+
+    def _index_updated(self, successful):
+        self.name_update_button.disabled = False
+        if successful:
+            self._filter_molecule_names()
+        else:
+            self.name_search_status.value = "No fresh local list was saved. Try again."
 
     def _open_cdxml_generator(self, _button=None):
         self.open_cdxml_generator_button.disabled = True
@@ -765,7 +899,7 @@ class MoleculeWidget(ipw.VBox):
         self.create_generated_button.on_click(self._create_generated_molecule)
         self.create_generated_box.children = [
             ipw.HTML(
-                "<hr><b>No identical molecular concept was found.</b> Create the "
+                "<hr><b>No identical molecular concept is shown in these results.</b> Create the "
                 f"reviewed structure in the {html.escape(destination)}.<br>"
                 f"Formula: <code>{html.escape(representation.formula)}</code><br>"
                 f"{representation_name}: "
@@ -809,14 +943,22 @@ class MoleculeWidget(ipw.VBox):
             query = self.structure_search._query()
             current_hits = self.structure_search.index.search(
                 query,
-                min_similarity=0.75,
+                min_similarity=0.0,
                 limit=max(1, len(self.structure_search.index.records)),
             )
             identity_hits = [
                 hit for hit in current_hits if hit.match_type in {"exact", "equivalent"}
             ]
             if identity_hits:
-                self._search_completed(query, tuple(current_hits))
+                matches = ", ".join(
+                    hit.record.name or hit.record.permid for hit in identity_hits
+                )
+                self.create_generated_box.children = [
+                    ipw.HTML(
+                        "<b>An identical or equivalent MOLECULE already exists.</b> "
+                        f"{html.escape(matches)}. Find it by name or code."
+                    )
+                ]
                 return
 
             filename, _content = self.structure_search._generated_cdxml
@@ -923,10 +1065,13 @@ class MoleculeWidget(ipw.VBox):
         from aiidalab_widgets_empa.cdxml_rendering import set_png_widget
 
         set_png_widget(self.molecule_sketch, bytes(content))
+        self.molecule_sketch.layout.display = "" if content else "none"
 
     def load_details(self, change):
         obj_permid = self.dropdown.value
         if obj_permid == "-1":
+            self._set_molecule_sketch(b"")
+            self.details_vbox.children = ()
             return
         else:
             obj = utils.get_openbis_object(
@@ -1285,6 +1430,17 @@ class SelectExperimentWidget(ipw.VBox):
                 )
         self.raw_experiments_df = pd.DataFrame(data)
         self.update_experiment_dropdown(None)
+
+    def select_created_experiment(self, permid, name):
+        """Show the experiment just saved by the current user."""
+        created = pd.DataFrame(
+            [{"display_name": name, "permId": permid, "is_mine": True}]
+        )
+        self.raw_experiments_df = pd.concat(
+            [self.raw_experiments_df, created], ignore_index=True
+        )
+        self.update_experiment_dropdown(None)
+        self.experiment_dropdown.value = permid
 
     # ==========================================
     # 3. DROPDOWN UPDATE ENGINES

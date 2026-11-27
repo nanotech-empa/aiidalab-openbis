@@ -7,7 +7,7 @@ import os
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import ipywidgets as ipw
 import yaml
@@ -293,6 +293,24 @@ def connect_openbis_aiida(eln_url=None):
     except FileNotFoundError:
         eln_token = ""
         openbis_session, session_data = None, None
+    if openbis_session is not None:
+        try:
+            from .chemical_index_worker import prepare_index_in_background
+
+            paths = read_json(APP_ROOT / "config/openbis_config.json")["Collections"][
+                "Paths"
+            ]
+            collections = [
+                paths[key]
+                for key in ("Precursor Molecule", "Product Molecule")
+                if paths.get(key)
+            ]
+            prepare_index_in_background(openbis_session, collections, uuid_lists=True)
+        except (OSError, ValueError) as error:
+            # Index availability never prevents using the connected ELN.
+            logging.getLogger(__name__).info(
+                "Local search index unavailable (%s)", type(error).__name__
+            )
     return openbis_session, session_data
 
 
@@ -312,13 +330,43 @@ def connect_openbis(eln_url, eln_token):
 
 
 def get_next_collection_code(openbis_session, collection_type):
-    collections = openbis_session.get_experiments(type=collection_type)
-    collection_number = 1
-    if collections:
-        collection_number = (
-            max(int(collection.code.rsplit("_")[-1]) for collection in collections) + 1
+    prefix = f"{collection_type}_"
+    codes = [
+        collection.code
+        for collection in openbis_session.get_experiments(type=collection_type)
+    ]
+
+    # Soft-deleted collections still occupy their identifiers. The pyBIS
+    # get_deletions() DataFrame drops the identifier needed to recover the code.
+    deletions = openbis_session._post_request(
+        openbis_session.as_v3,
+        {
+            "method": "searchDeletions",
+            "params": [
+                openbis_session.token,
+                {"@type": "as.dto.deletion.search.DeletionSearchCriteria"},
+                {
+                    "@type": "as.dto.deletion.fetchoptions.DeletionFetchOptions",
+                    "deletedObjects": {
+                        "@type": "as.dto.deletion.fetchoptions.DeletedObjectFetchOptions"
+                    },
+                },
+            ],
+        },
+    )
+    for deletion in deletions["objects"]:
+        codes.extend(
+            item["identifier"].rsplit("/", 1)[-1]
+            for item in deletion["deletedObjects"]
+            if item["entityKind"] == "EXPERIMENT"
         )
-    return f"{collection_type}_{collection_number}"
+
+    numbers = (
+        int(code[len(prefix) :])
+        for code in codes
+        if code.startswith(prefix) and code[len(prefix) :].isdecimal()
+    )
+    return f"{prefix}{max(numbers, default=0) + 1}"
 
 
 def create_openbis_dataset(openbis_session, **kwargs):
@@ -411,10 +459,15 @@ def generate_openbis_object_history_url(openbis_session, openbis_object):
 
 
 def generate_openbis_object_url(openbis_session, openbis_object):
+    """Build an ELN link from an openBIS object or a stored permId."""
     base_url = normalize_openbis_eln_url(openbis_session.url)
-    obj_id = openbis_object.permId
-    url = f"{base_url}?viewName=showViewSamplePageFromPermId&viewData=%7B%22permIdOrIdentifier%22:%22{obj_id}%22%7D"
-    return url
+    permid = (
+        openbis_object if isinstance(openbis_object, str) else openbis_object.permId
+    )
+    view_data = quote(
+        json.dumps({"permIdOrIdentifier": permid}, separators=(",", ":")), safe=":"
+    )
+    return f"{base_url}?viewName=showViewSamplePageFromPermId&viewData={view_data}"
 
 
 def generate_openbis_dataset_url(openbis_session, openbis_dataset):

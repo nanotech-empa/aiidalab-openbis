@@ -4,6 +4,11 @@
 
 Each simulation object type has its own openBIS object type.
 
+The `float[]` fields below use openBIS `ARRAY_REAL` with `multiValue` disabled.
+An array with one element is still an array. For example, a single isovalue is
+stored as `[1e-7]`. OpenBIS does not index individual array elements for numeric
+property searches.
+
 Each simulation object must have:
 
 ```text
@@ -1584,8 +1589,16 @@ other
 - The scan area is the norm of the cross product of the two in-plane grid/cell
   vectors. CP2K STM/orbital vectors are converted from Bohr before calculating
   the area.
-- Large map and grid arrays remain in the linked AiiDA archive; openBIS stores
-  only searchable summary metadata and an `ELN_PREVIEW`.
+- The first STM export uses the standard simulation exporter. A finished
+  geometry optimization in the STM input's stored provenance is included first.
+  The AiiDA archive and `ELN_PREVIEW` accompany the simulation record.
+- The microscopy option attaches selected SXM maps and DAT curves as
+  `IMAGING_DATA` datasets to that `SPM_SIMULATION`. On a later review of the
+  same exported simulation, **Add DAT to openBIS** attaches new point spectra
+  or line profiles to its existing object. Changing a marker label or colour
+  does not create a new curve. The review shows the destination and file count.
+- If provenance needs a Computer, Code or Executable mapping, the export
+  pauses and shows the required selection next to the export button.
 
 ## Required linked content
 

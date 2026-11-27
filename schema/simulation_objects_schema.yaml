@@ -143,6 +143,12 @@ enums:
                 description: NPT
             OTHER:
                 description: other
+    DEFAULT_OBJECT_VIEWS:
+        permissible_values:
+            IMAGING_DATASET_VIEWER:
+                description: Imaging dataset viewer
+            IMAGING_GALLERY_VIEW:
+                description: Imaging Gallery view
 slots:
     absolute_magnetization_bohr_magneton:
         title: Absolute magnetization (Bohr magneton)
@@ -248,7 +254,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: BIAS_VOLTAGES_V
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     cell_constraints:
         title: Cell constraints
         description: Cell constraints
@@ -329,6 +336,14 @@ slots:
         annotations:
             openbis_code: CONVERGED
             openbis_type: BOOLEAN
+    default_object_view:
+        title: Default Object View
+        description: Default Object View
+        range: DEFAULT_OBJECT_VIEWS
+        multivalued: false
+        annotations:
+            openbis_code: DEFAULT_OBJECT_VIEW
+            openbis_type: CONTROLLEDVOCABULARY
     electronic_gap_ev:
         title: Electronic gap (eV)
         description: Electronic gap (eV)
@@ -336,7 +351,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: ELECTRONIC_GAP_EV
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     electronic_gap_type:
         title: Electronic gap type
         description: Electronic gap type
@@ -393,7 +409,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: FERMI_ENERGY_EV
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     final_energy_hartree:
         title: Final energy (Hartree)
         description: Final energy (Hartree)
@@ -425,7 +442,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: HEIGHTS_ANGSTROM
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     image_modes:
         title: Image modes
         description: Image modes
@@ -441,7 +459,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: ISOVALUES_AU
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     k_path:
         title: k-path
         description: k-path
@@ -553,7 +572,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: ORBITAL_ENERGIES_EV
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     other_method_description:
         title: Other MEP method description
         description: Other MEP method description
@@ -593,7 +613,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: P_TIP_RATIOS
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     reaction_coordinate_description:
         title: Reaction coordinate description
         description: Reaction coordinate description
@@ -609,7 +630,8 @@ slots:
         multivalued: true
         annotations:
             openbis_code: RELATIVE_ENERGIES_EV
-            openbis_type: REAL
+            openbis_type: ARRAY_REAL
+            openbis_multi_value: false
     scan_area_angstrom2:
         title: Scan area (angstrom^2)
         description: Scan area (angstrom^2)
@@ -1788,6 +1810,7 @@ classes:
             - aiida_node
             - aiida_source_uuid
             - absolute_magnetization_bohr_magneton
+            - default_object_view
         slot_usage:
             name:
                 required: true
@@ -1929,6 +1952,11 @@ classes:
                 annotations:
                     openbis_section: Electronic properties
                     openbis_ordinal: 28
+            default_object_view:
+                required: false
+                annotations:
+                    openbis_section: General information
+                    openbis_ordinal: 29
     VIBRATIONAL_SPECTROSCOPY:
         description: Vibrational, phonon, IR, or Raman calculation.
         annotations:

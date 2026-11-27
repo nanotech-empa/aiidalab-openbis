@@ -7,7 +7,12 @@ from pathlib import Path
 
 import yaml
 
-from src.simulation_schema import OBJECT_TYPES, PROPERTY_TYPES, VOCABULARIES
+from src.simulation_schema import (
+    OBJECT_TYPES,
+    PLATFORM_VOCABULARIES,
+    PROPERTY_TYPES,
+    VOCABULARIES,
+)
 
 
 def document():
@@ -24,7 +29,7 @@ def document():
                     term: {"description": label} for term, label in terms
                 }
             }
-            for code, terms in VOCABULARIES.items()
+            for code, terms in (VOCABULARIES | PLATFORM_VOCABULARIES).items()
         },
         "slots": {},
         "classes": {},
@@ -34,17 +39,28 @@ def document():
     }
     for code in sorted(used):
         prop = PROPERTY_TYPES[code]
+        data_type = prop["dataType"]
+        is_numeric_array = data_type in {"ARRAY_REAL", "ARRAY_INTEGER"}
         result["slots"][code.lower()] = {
             "title": prop["label"],
             "description": prop["description"],
             "range": prop.get("vocabulary")
-            or {"REAL": "float", "INTEGER": "integer", "BOOLEAN": "boolean"}.get(
-                prop["dataType"], "string"
-            ),
-            "multivalued": bool(prop.get("multiValue", False)),
+            or {
+                "REAL": "float",
+                "INTEGER": "integer",
+                "BOOLEAN": "boolean",
+                "ARRAY_REAL": "float",
+                "ARRAY_INTEGER": "integer",
+            }.get(data_type, "string"),
+            "multivalued": is_numeric_array or prop["multiValue"],
             "annotations": {
                 "openbis_code": code,
-                "openbis_type": prop["dataType"],
+                "openbis_type": data_type,
+                **(
+                    {"openbis_multi_value": prop["multiValue"]}
+                    if is_numeric_array
+                    else {}
+                ),
                 **(
                     {"openbis_sample_type": prop["sampleType"]}
                     if prop.get("sampleType")
