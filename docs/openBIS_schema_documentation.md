@@ -1400,6 +1400,7 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | Object Type | Minimum | Maximum |
 | :--- | :--- | :--- |
 | RESULT | 0 | - |
+| GRANT | 0 | - |
 
 #### Section: *(Default / Unnamed)*
 
@@ -1409,6 +1410,13 @@ At least one `ATOMISTIC_MODEL` or `CRYSTAL_CONCEPT` parent is required.
 | `description` | Description | Description | VARCHAR | False | False | False |  |  |
 | `comments` | Comments | Comments | VARCHAR | False | False | False |  |  |
 | `draft_type` | Draft type | Draft type | CONTROLLEDVOCABULARY (DRAFTTYPEENUM) | False | False | False |  |  |
+| `authors` | Authors | Ordered publication draft authors | OBJECT (AUTHOR) | False | True | False |  |  |
+
+The AUTHOR references are stored in publication order in `AUTHORS`. Each
+AUTHOR references a PERSON and the affiliations credited on this draft. The
+parent RESULT carries the evidence for the draft. Where the deployed schema
+allows GRANT parents, each selected grant is visible in the hierarchy graph.
+A new DRAFT may leave `DRAFT_TYPE` empty.
 
 [↑ Back to top](#openbis-data-model-documentation)
 
@@ -2532,6 +2540,12 @@ attaches its Nanonis SXM and DAT uploads as [`IMAGING_DATA`](#imaging-data).
 | :--- | :--- | :--- |
 | ANALYSIS | 0 | - |
 | MEASUREMENT_SESSION | 0 | - |
+| SPM_SIMULATION | 0 | - |
+
+For an STM comparison, the measurement session and the selected STM simulations
+are parents of the same RESULT. The RESULT belongs to the measurement's
+experiment. See the historical Result simulation slot in
+[`schema/openBIS_objects_schema.yaml`](../schema/openBIS_objects_schema.yaml).
 
 #### Section: *(Default / Unnamed)*
 
