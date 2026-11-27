@@ -1,6 +1,5 @@
 import datetime
 import html
-import json
 import logging
 import os
 import pathlib
@@ -430,9 +429,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
 
         logs_dir = self._measurement_logs_dir()
         log_json_path = get_measurement_log_filepath(session_id, logs_dir=logs_dir)
-        prev_state = (
-            measurement_monitor.read_json_safe(log_json_path, default={}) or {}
-        )
+        prev_state = measurement_monitor.read_json_safe(log_json_path, default={}) or {}
         prev_token_expired = prev_state.get("token_expired", False)
         prev_last_error = prev_state.get("last_error")
 
@@ -628,7 +625,9 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         )
 
         default_url = (
-            self.session_data.get("url") if isinstance(self.session_data, dict) else None
+            self.session_data.get("url")
+            if isinstance(self.session_data, dict)
+            else None
         )
         active_token = (
             self.session_data.get("token")
@@ -718,9 +717,8 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         safe_name = html.escape(str(snap.get("session_name") or "Unknown Session"))
         safe_sid = html.escape(str(snap.get("session_id") or "N/A"))
         session_url = snap.get("session_url")
-        if (
-            isinstance(session_url, str)
-            and session_url.lower().startswith(("http://", "https://"))
+        if isinstance(session_url, str) and session_url.lower().startswith(
+            ("http://", "https://")
         ):
             safe_url = html.escape(session_url, quote=True)
             session_title = (
@@ -742,9 +740,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
 
         meta_parts = []
         if snap.get("sample_name"):
-            meta_parts.append(
-                f"<b>Sample:</b> {html.escape(str(snap['sample_name']))}"
-            )
+            meta_parts.append(f"<b>Sample:</b> {html.escape(str(snap['sample_name']))}")
         if snap.get("experiment_name"):
             meta_parts.append(
                 f"<b>Experiment:</b> {html.escape(str(snap['experiment_name']))}"
@@ -788,10 +784,7 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
             err_stage = html.escape(str(err.get("stage") or "error"))
             err_file = f" ({html.escape(str(err['file']))})" if err.get("file") else ""
             err_msg = html.escape(
-                str(
-                    err.get("message")
-                    or "openBIS session token expired or invalid."
-                )
+                str(err.get("message") or "openBIS session token expired or invalid.")
             )
             token_hint = (
                 " Click <b>Resume</b> to reconnect with your current openBIS token."
@@ -956,7 +949,14 @@ class RunningMeasurementWatchdogsWidget(ipw.VBox):
         )
 
         return ipw.VBox(
-            [header_html, details_html, btn_box, card_status, files_drawer, logs_drawer],
+            [
+                header_html,
+                details_html,
+                btn_box,
+                card_status,
+                files_drawer,
+                logs_drawer,
+            ],
             layout=ipw.Layout(
                 padding="4px 2px",
             ),
@@ -1525,9 +1525,9 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
         logs_dir = getattr(self, "measurement_logs_folder", MEASUREMENT_LOGS_FOLDER)
         norm_data_folder = os.path.normpath(data_folder)
         measurement_session = tracking_info["measurement_session"]
-        log_filepath = tracking_info.get("log_filepath") or get_measurement_log_filepath(
-            measurement_session.permId, logs_dir=logs_dir
-        )
+        log_filepath = tracking_info.get(
+            "log_filepath"
+        ) or get_measurement_log_filepath(measurement_session.permId, logs_dir=logs_dir)
         logging_data = dict(tracking_info.get("logging_data") or {})
         logging_data["eln_url"] = self.session_data["url"]
         logging_data["eln_token"] = self.session_data["token"]
@@ -1652,9 +1652,7 @@ class GenerateMeasurementsWatchdogWidget(ipw.VBox):
 
         safe_folder = html.escape(norm_data_folder)
         safe_name = html.escape(str(tracking_info.get("session_name") or "Unknown"))
-        safe_session_id = html.escape(
-            str(tracking_info.get("session_id") or "Unknown")
-        )
+        safe_session_id = html.escape(str(tracking_info.get("session_id") or "Unknown"))
         if tracking_info["is_running"]:
             pids_str = ", ".join(
                 str(pid) for pid in tracking_info.get("active_pids", [])

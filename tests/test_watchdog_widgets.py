@@ -415,7 +415,9 @@ def test_resume_existing_measurement_session_refreshes_token_and_preserves_proce
         "logging_data": json.loads(log_path.read_text()),
     }
 
-    resumed = widget._resume_existing_measurement_session(tracking_info, f"{data_folder}/")
+    resumed = widget._resume_existing_measurement_session(
+        tracking_info, f"{data_folder}/"
+    )
 
     assert resumed is old_session
     updated = json.loads(log_path.read_text())
@@ -500,7 +502,9 @@ def test_generate_watchdog_untracked_folder_starts_immediately_without_prompt(
     fake_proc = MagicMock(pid=7001)
 
     with (
-        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch(
+            "src.utils.create_openbis_object", return_value=new_session
+        ) as mock_create,
         patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
         patch.object(watchdog_module, "display"),
     ):
@@ -642,7 +646,9 @@ def test_generate_watchdog_running_folder_switch_stops_old_detaches_logs_and_sta
     with (
         patch("os.kill", side_effect=fake_kill),
         patch("src.utils.get_openbis_object", return_value=old_session),
-        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch(
+            "src.utils.create_openbis_object", return_value=new_session
+        ) as mock_create,
         patch("subprocess.Popen", return_value=fake_new_proc) as mock_popen,
         patch.object(watchdog_module, "display"),
     ):
@@ -735,7 +741,9 @@ def test_generate_watchdog_stopped_folder_switch_detaches_old_log_and_uploads_al
 
     with (
         patch("src.utils.get_openbis_object", return_value=old_session),
-        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch(
+            "src.utils.create_openbis_object", return_value=new_session
+        ) as mock_create,
         patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
         patch.object(watchdog_module, "display"),
     ):
@@ -917,9 +925,7 @@ def test_changing_folder_clears_open_confirmation_prompt_and_html_escapes_names(
     assert widget.generate_watchdog_button.disabled is False
 
 
-def test_double_click_switch_and_continue_only_executes_once(
-    watchdog_module, tmp_path
-):
+def test_double_click_switch_and_continue_only_executes_once(watchdog_module, tmp_path):
     logs_dir = tmp_path / "logs"
     data_folder = tmp_path / "reentrancy_switch_run"
     data_folder.mkdir()
@@ -950,7 +956,9 @@ def test_double_click_switch_and_continue_only_executes_once(
     with (
         patch("os.kill"),
         patch("src.utils.get_openbis_object", return_value=old_session),
-        patch("src.utils.create_openbis_object", side_effect=slow_create) as mock_create,
+        patch(
+            "src.utils.create_openbis_object", side_effect=slow_create
+        ) as mock_create,
         patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
         patch.object(watchdog_module, "display"),
     ):
@@ -1530,7 +1538,9 @@ def test_card_resume_blocks_when_folder_missing_already_running_or_session_delet
         for c in w.watchdogs_accordion.children:
             if sid in "\n".join(_collect_html(c)):
                 return c
-        raise AssertionError(f"Card for {sid} not found in live watchdogs_accordion.children")
+        raise AssertionError(
+            f"Card for {sid} not found in live watchdogs_accordion.children"
+        )
 
     with (
         patch("src.utils.get_openbis_object", side_effect=fake_get_openbis),
@@ -1550,7 +1560,9 @@ def test_card_resume_blocks_when_folder_missing_already_running_or_session_delet
         _collect_buttons(_find_live_card(widget, "SESS-CONFLICT"))["Resume"].click()
         assert (
             "already"
-            in "\n".join(_collect_html(_find_live_card(widget, "SESS-CONFLICT"))).lower()
+            in "\n".join(
+                _collect_html(_find_live_card(widget, "SESS-CONFLICT"))
+            ).lower()
         )
 
         _collect_buttons(_find_live_card(widget, "SESS-MISSING"))["Resume"].click()
@@ -1700,7 +1712,10 @@ def test_stop_watchdog_pids_escalates_to_sigkill_and_dismiss_shows_error_if_stil
         card = widget2.watchdogs_accordion.children[0]
         _collect_buttons(card)["Dismiss"].click()
         live_html = "\n".join(_collect_html(widget2.watchdogs_accordion.children[0]))
-        assert "still running" in live_html.lower() or "cannot dismiss" in live_html.lower()
+        assert (
+            "still running" in live_html.lower()
+            or "cannot dismiss" in live_html.lower()
+        )
 
 
 def test_card_resume_handles_missing_credentials_or_popen_error_without_wiping_error_state(
@@ -1757,7 +1772,10 @@ def test_card_resume_handles_missing_credentials_or_popen_error_without_wiping_e
         )
         _collect_buttons(widget.watchdogs_box.children[0])["Resume"].click()
         live_html = "\n".join(_collect_html(widget.watchdogs_box.children[0]))
-        assert "spawn failed" in live_html.lower() or "failed to start" in live_html.lower()
+        assert (
+            "spawn failed" in live_html.lower()
+            or "failed to start" in live_html.lower()
+        )
 
     after_err = json.loads(log_json.read_text(encoding="utf-8"))
     assert after_err["token_expired"] is True
@@ -1780,7 +1798,9 @@ def test_notebook_tab_switch_triggers_refresh():
 
     nb_path = Path(__file__).resolve().parents[1] / "2_sample_measurement.ipynb"
     cells = json.loads(nb_path.read_text(encoding="utf-8"))["cells"]
-    code = "\n".join("".join(c.get("source", [])) for c in cells if c["cell_type"] == "code")
+    code = "\n".join(
+        "".join(c.get("source", [])) for c in cells if c["cell_type"] == "code"
+    )
     assert "selected_index" in code
     assert "running_watchdogs_vbox.refresh_watchdog_list" in code
 
@@ -1797,7 +1817,9 @@ def test_generate_watchdog_resets_dropdowns_and_session_name_after_submit(
     fake_proc = MagicMock(pid=8101)
 
     with (
-        patch("src.utils.create_openbis_object", return_value=new_session) as mock_create,
+        patch(
+            "src.utils.create_openbis_object", return_value=new_session
+        ) as mock_create,
         patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
         patch.object(watchdog_module, "display"),
     ):
@@ -2073,4 +2095,6 @@ def test_resume_all_skips_invalid_or_duplicate_folder_entries_and_reports_summar
     assert "SESS-OK-NEW" in mock_popen.call_args.args[0]
     assert widget.bulk_action_button.description == "Stop All"
     assert "1" in widget.bulk_status.value
-    assert "3" in widget.bulk_status.value or "skipped" in widget.bulk_status.value.lower()
+    assert (
+        "3" in widget.bulk_status.value or "skipped" in widget.bulk_status.value.lower()
+    )

@@ -102,7 +102,11 @@ def test_start_watchdog_subprocess_redirects_output_without_leaking_token_or_fd(
     assert log_path == logs_dir / "SESS-42.log"
     assert opened_handles[0].closed is True
     cmd = mock_popen.call_args.args[0]
-    assert cmd[:3] == ["python", "-u", f"{tmp_path / 'app'}/src/measurements_uploader.py"]
+    assert cmd[:3] == [
+        "python",
+        "-u",
+        f"{tmp_path / 'app'}/src/measurements_uploader.py",
+    ]
     assert "SESS-42" in cmd
     log_text = log_path.read_text(encoding="utf-8")
     assert "SESS-42" in log_text
@@ -292,9 +296,24 @@ def test_build_watchdog_card_snapshot_handles_legacy_logs_disk_counts_health_and
                 "current_action": "Watching for new files",
                 "processed_files": [str(sxm1), str(dat1), str(txt1)],
                 "upload_history": [
-                    {"file": str(sxm1), "filename": "scan1.sxm", "type": "SXM", "uploaded_at": "2026-11-26T11:55:00+00:00"},
-                    {"file": str(dat1), "filename": "spec1.dat", "type": "DAT", "uploaded_at": "2026-11-26T11:56:00+00:00"},
-                    {"file": str(txt1), "filename": "notes.txt", "type": "ATTACHMENT", "uploaded_at": "2026-11-26T11:58:00+00:00"},
+                    {
+                        "file": str(sxm1),
+                        "filename": "scan1.sxm",
+                        "type": "SXM",
+                        "uploaded_at": "2026-11-26T11:55:00+00:00",
+                    },
+                    {
+                        "file": str(dat1),
+                        "filename": "spec1.dat",
+                        "type": "DAT",
+                        "uploaded_at": "2026-11-26T11:56:00+00:00",
+                    },
+                    {
+                        "file": str(txt1),
+                        "filename": "notes.txt",
+                        "type": "ATTACHMENT",
+                        "uploaded_at": "2026-11-26T11:58:00+00:00",
+                    },
                 ],
                 "recent_errors": [],
                 "last_error": None,
@@ -876,9 +895,9 @@ def test_update_measurement_log_and_nanonis_importer_preserve_concurrent_heartbe
         t.start()
     for t in threads:
         t.join()
-    assert sorted(json.loads(concurrent_log.read_text(encoding="utf-8"))["items"]) == list(
-        range(25)
-    )
+    assert sorted(
+        json.loads(concurrent_log.read_text(encoding="utf-8"))["items"]
+    ) == list(range(25))
 
     # 2. nanonis_importer must not clobber heartbeat written during upload
     data_folder = tmp_path / "concurrent_importer"
@@ -1039,9 +1058,7 @@ def test_uploader_main_sigterm_sets_stopped_cleanly_without_monitor_overwrite(
     with (
         patch.object(measurements_uploader, "Openbis", return_value=mock_openbis),
         patch.object(measurements_uploader.signal, "signal", side_effect=fake_signal),
-        patch.object(
-            measurements_uploader, "run_upload_cycle", side_effect=fake_cycle
-        ),
+        patch.object(measurements_uploader, "run_upload_cycle", side_effect=fake_cycle),
         patch.object(
             measurement_monitor, "update_measurement_log", side_effect=tracked_update
         ),
@@ -1170,9 +1187,10 @@ def test_build_watchdog_card_snapshot_redacts_eln_token_and_rejects_non_http_url
     )
 
     assert snap["session_url"] is None
-    assert measurement_monitor.build_openbis_session_url(
-        "javascript:alert(1)", "SESS-SEC"
-    ) is None
+    assert (
+        measurement_monitor.build_openbis_session_url("javascript:alert(1)", "SESS-SEC")
+        is None
+    )
     combined = "\n".join(
         snap["log_tail"]
         + [
@@ -1187,7 +1205,11 @@ def test_build_watchdog_card_snapshot_redacts_eln_token_and_rejects_non_http_url
 
     # Exception message containing openbis_token is redacted in run_upload_cycle too
     log_fp, _ = measurements_uploader.init_or_load_measurement_log(
-        "https://openbis.local", secret_a, "SESS-REDACT", str(data_folder), logs_dir=meas_logs
+        "https://openbis.local",
+        secret_a,
+        "SESS-REDACT",
+        str(data_folder),
+        logs_dir=meas_logs,
     )
     mock_session = MagicMock()
     mock_session.is_session_active.return_value = True
@@ -1253,7 +1275,10 @@ def test_active_uploads_keep_heartbeat_fresh_and_update_current_action(tmp_path)
     # 2. append_upload_event & append_error_event refresh last_heartbeat_at
     log_dict = {}
     measurement_monitor.append_upload_event(
-        log_dict, str(data_folder / "a.sxm"), "SXM", uploaded_at="2026-11-26T14:17:00+00:00"
+        log_dict,
+        str(data_folder / "a.sxm"),
+        "SXM",
+        uploaded_at="2026-11-26T14:17:00+00:00",
     )
     assert log_dict["last_heartbeat_at"] == "2026-11-26T14:17:00+00:00"
     measurement_monitor.append_error_event(
@@ -1330,7 +1355,11 @@ def test_run_upload_cycle_returns_pending_count_and_clears_transient_error_on_re
     dat_file.write_text("dat", encoding="utf-8")
     logs_dir = tmp_path / "logs" / "measurements"
     log_fp, _ = measurements_uploader.init_or_load_measurement_log(
-        "https://openbis.local", "tok-1", "SESS-RETRY", str(data_folder), logs_dir=logs_dir
+        "https://openbis.local",
+        "tok-1",
+        "SESS-RETRY",
+        str(data_folder),
+        logs_dir=logs_dir,
     )
 
     mock_session = MagicMock()
@@ -1380,7 +1409,9 @@ def test_run_upload_cycle_returns_pending_count_and_clears_transient_error_on_re
     assert len(second_data["recent_errors"]) == 2
 
 
-def test_uploader_retry_scheduler_backoff_cap_and_main_integration(tmp_path, monkeypatch):
+def test_uploader_retry_scheduler_backoff_cap_and_main_integration(
+    tmp_path, monkeypatch
+):
     from src import measurements_uploader
 
     # 1. Pure scheduler unit check: exponential backoff, cap at max_attempts, reset on success
@@ -1417,9 +1448,7 @@ def test_uploader_retry_scheduler_backoff_cap_and_main_integration(tmp_path, mon
     data_folder.mkdir()
     logs_dir = tmp_path / "logs" / "measurements"
     monkeypatch.setattr(measurements_uploader, "MEASUREMENT_LOGS_FOLDER", logs_dir)
-    monkeypatch.setattr(
-        measurements_uploader, "DEFAULT_RETRY_BACKOFF_SECONDS", (0.0,)
-    )
+    monkeypatch.setattr(measurements_uploader, "DEFAULT_RETRY_BACKOFF_SECONDS", (0.0,))
 
     cycle_calls = {"n": 0}
 
@@ -1640,8 +1669,12 @@ def test_chronological_barrier_retries_transient_502_in_place_and_preserves_orde
     with (
         patch("src.utils.connect_openbis", return_value=(mock_session, None)),
         patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
-        patch("nanonis_importer.nanonis_importer.demo_sxm_flow", side_effect=fake_sxm_a),
-        patch("nanonis_importer.nanonis_importer.demo_dat_flow", side_effect=fake_dat_a),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow", side_effect=fake_sxm_a
+        ),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_dat_flow", side_effect=fake_dat_a
+        ),
         patch(
             "src.utils.create_openbis_dataset",
             side_effect=lambda *a, **kw: attachments_a.append(kw.get("files")),
@@ -1692,8 +1725,12 @@ def test_chronological_barrier_retries_transient_502_in_place_and_preserves_orde
     with (
         patch("src.utils.connect_openbis", return_value=(mock_session, None)),
         patch("nanonis_importer.nanonis_importer.spm", side_effect=fake_spm),
-        patch("nanonis_importer.nanonis_importer.demo_sxm_flow", side_effect=fake_sxm_b),
-        patch("nanonis_importer.nanonis_importer.demo_dat_flow", side_effect=fake_dat_b),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_sxm_flow", side_effect=fake_sxm_b
+        ),
+        patch(
+            "nanonis_importer.nanonis_importer.demo_dat_flow", side_effect=fake_dat_b
+        ),
         patch(
             "src.utils.create_openbis_dataset",
             side_effect=lambda *a, **kw: attachments_b.append(kw.get("files")),
@@ -1742,7 +1779,11 @@ def test_parse_error_uses_in_place_chronological_attachment_fallback(tmp_path):
 
     logs_dir = tmp_path / "logs" / "measurements"
     log_fp, _ = measurements_uploader.init_or_load_measurement_log(
-        "https://openbis.local", "tok-1", "SESS-PARSE-FB", str(folder), logs_dir=logs_dir
+        "https://openbis.local",
+        "tok-1",
+        "SESS-PARSE-FB",
+        str(folder),
+        logs_dir=logs_dir,
     )
 
     mock_session = MagicMock()
@@ -1803,8 +1844,14 @@ def test_parse_error_uses_in_place_chronological_attachment_fallback(tmp_path):
     assert "ATTACHMENT fallback" in data["last_error"]["message"]
 
 
-def test_dat_group_update_deletes_tracked_group_dataset_permid_not_latest_unrelated_dataset(
+@pytest.mark.parametrize(
+    ("legacy_journal", "expected_deletions"),
+    [(False, ["DS-TYPE-A-1"]), (True, [])],
+)
+def test_dat_group_update_only_deletes_a_tracked_dataset(
     tmp_path,
+    legacy_journal,
+    expected_deletions,
 ):
     import pandas as pd
 
@@ -1881,6 +1928,10 @@ def test_dat_group_update_deletes_tracked_group_dataset_permid_not_latest_unrela
             "SESS-DAT-IDS",
             logging_filepath=str(log_fp),
         )
+        if legacy_journal:
+            journal = json.loads(log_fp.read_text(encoding="utf-8"))
+            journal.pop("dat_group_datasets")
+            log_fp.write_text(json.dumps(journal), encoding="utf-8")
         # Run 2: dIdV_2.dat arrives -> must replace DS-TYPE-A-1, NOT DS-TYPE-B-1!
         (folder / "dIdV_2.dat").write_text("d2", encoding="utf-8")
         nanonis_importer.process_measurement_files(
@@ -1891,15 +1942,18 @@ def test_dat_group_update_deletes_tracked_group_dataset_permid_not_latest_unrela
             logging_filepath=str(log_fp),
         )
 
-    assert deleted_ids == ["DS-TYPE-A-1"]
+    assert deleted_ids == expected_deletions
     data = json.loads(log_fp.read_text(encoding="utf-8"))
-    assert data["dat_group_datasets"][os.path.normpath(str(folder / "dIdV_1.dat"))] == "DS-TYPE-A-2"
-    assert data["dat_group_datasets"][os.path.normpath(str(folder / "dIdV_2.dat"))] == "DS-TYPE-A-2"
-    assert data["dat_group_datasets"][os.path.normpath(str(folder / "iv_1.dat"))] == "DS-TYPE-B-1"
+    assert data["dat_group_datasets"][str(folder / "dIdV_1.dat")] == "DS-TYPE-A-2"
+    assert data["dat_group_datasets"][str(folder / "dIdV_2.dat")] == "DS-TYPE-A-2"
+    assert str(folder / "iv_1.dat") in data["processed_files"]
+    assert data["dat_group_datasets"].get(str(folder / "iv_1.dat")) == (
+        None if legacy_journal else "DS-TYPE-B-1"
+    )
 
 
 def test_demo_sxm_and_dat_flow_retry_preview_and_keep_imaging_dataset_without_attachment_fallback(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, caplog
 ):
     from nanonis_importer import nanonis_importer
     from src import measurements_uploader
@@ -1918,6 +1972,7 @@ def test_demo_sxm_and_dat_flow_retry_preview_and_keep_imaging_dataset_without_at
     )
 
     mock_session = MagicMock()
+    mock_session.token = "fake-preview-token"
     mock_session.is_session_active.return_value = True
     mock_sample = MagicMock()
     mock_sample.experiment = "/SPACE/PROJ/EXP"
@@ -1971,7 +2026,8 @@ def test_demo_sxm_and_dat_flow_retry_preview_and_keep_imaging_dataset_without_at
         if perm_id in ("DS-SXM-2", "DS-DAT-1"):
             raise RuntimeError(
                 "Couldn't convert map to string\n"
-                "Cause: java.lang.IllegalStateException: zip file closed"
+                "Cause: java.lang.IllegalStateException: zip file closed "
+                f"(token: {_sess.token})"
             )
         return MagicMock()
 
@@ -2008,13 +2064,28 @@ def test_demo_sxm_and_dat_flow_retry_preview_and_keep_imaging_dataset_without_at
             measurement_session_id="SESS-PREV",
             logging_filepath=log_fp,
         )
+        assert (
+            measurements_uploader.run_upload_cycle(
+                data_folder=str(folder),
+                openbis_session=mock_session,
+                openbis_url="https://openbis.local",
+                openbis_token="tok-1",
+                measurement_session_id="SESS-PREV",
+                logging_filepath=log_fp,
+            )
+            == 0
+        )
 
     assert pending == 0
+    assert mock_session.token not in caplog.text
+    assert "[REDACTED]" in caplog.text
     assert attachments == []  # NEVER duplicated as raw ATTACHMENT!
     assert mock_create_sxm.call_count == 2
     assert mock_create_dat.call_count == 1
     assert preview_calls["DS-SXM-1"] == 2  # Retried once and succeeded
-    assert preview_calls["DS-SXM-2"] == 3  # 1 initial + 2 retries, still kept IMAGING_DATA
+    assert (
+        preview_calls["DS-SXM-2"] == 3
+    )  # 1 initial + 2 retries, still kept IMAGING_DATA
     assert preview_calls["DS-DAT-1"] == 3
     assert mock_upd_preview.call_count == 1  # Only DS-SXM-1 attached preview
 
@@ -2026,9 +2097,13 @@ def test_demo_sxm_and_dat_flow_retry_preview_and_keep_imaging_dataset_without_at
         ("img0002.sxm", "SXM"),
         ("spec0001.dat", "DAT"),
     }
-    assert data["dat_group_datasets"][os.path.normpath(str(folder / "spec0001.dat"))] == "DS-DAT-1"
+    assert (
+        data["dat_group_datasets"][os.path.normpath(str(folder / "spec0001.dat"))]
+        == "DS-DAT-1"
+    )
     preview_errs = [e for e in data["recent_errors"] if e["stage"] == "preview"]
     assert {e["file"] for e in preview_errs} == {"img0002.sxm", "spec0001.dat"}
+    assert all(mock_session.token not in e["message"] for e in preview_errs)
 
 
 def test_openbis_server_error_during_dataset_creation_never_falls_back_to_attachment(

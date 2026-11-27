@@ -726,7 +726,9 @@ def build_watchdog_card_snapshot(
     def _redact_error(err: dict) -> dict:
         copied = dict(err)
         if copied.get("message") is not None:
-            copied["message"] = redact_secrets(str(copied["message"]), secrets_to_redact)
+            copied["message"] = redact_secrets(
+                str(copied["message"]), secrets_to_redact
+            )
         return copied
 
     recent_errors = [

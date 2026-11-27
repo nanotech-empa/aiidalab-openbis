@@ -204,7 +204,7 @@ def _attach_preview_with_retry(session, perm_id, config_preview, tags):
     measurement_monitor = _app_module("measurement_monitor")
     _PREVIEW_STATE.last_warning = None
     retry_delays = tuple(DEFAULT_PREVIEW_RETRY_DELAYS)
-    last_exc = None
+    last_error = None
     for attempt in range(len(retry_delays) + 1):
         try:
             preview = create_preview(session, perm_id, config_preview, tags=tags)
@@ -213,23 +213,38 @@ def _attach_preview_with_retry(session, perm_id, config_preview, tags):
             _PREVIEW_STATE.last_warning = None
             return True
         except Exception as exc:
-            last_exc = exc
+            last_error = measurement_monitor.redact_secrets(
+                str(exc), [getattr(session, "token", None)]
+            )
             if measurement_monitor.is_session_token_expired(session):
                 break
             if attempt < len(retry_delays):
                 delay = retry_delays[attempt]
                 logger.warning(
                     f"Preview rendering failed for dataset {perm_id} "
-                    f"(attempt {attempt + 1}/{len(retry_delays) + 1}); retrying in {delay}s: {exc}"
+                    f"(attempt {attempt + 1}/{len(retry_delays) + 1}); retrying in {delay}s: {last_error}"
                 )
                 if delay > 0:
                     time.sleep(delay)
                 continue
     logger.warning(
-        f"Keeping IMAGING_DATA dataset {perm_id} without preview after preview rendering failed: {last_exc}"
+        f"Keeping IMAGING_DATA dataset {perm_id} without preview after preview rendering failed: {last_error}"
     )
-    _PREVIEW_STATE.last_warning = str(last_exc)
+    _PREVIEW_STATE.last_warning = last_error
     return False
+
+
+def _record_preview_config_error(session, perm_id, error):
+    measurement_monitor = _app_module("measurement_monitor")
+    safe_error = measurement_monitor.redact_secrets(
+        str(error), [getattr(session, "token", None)]
+    )
+    logger.warning(
+        "Keeping IMAGING_DATA dataset %s without preview (preview config error): %s",
+        perm_id,
+        safe_error,
+    )
+    _PREVIEW_STATE.last_warning = safe_error
 
 
 def demo_sxm_flow(session, file_path, experiment=None, sample=None):
@@ -251,7 +266,9 @@ def demo_sxm_flow(session, file_path, experiment=None, sample=None):
         height = str(img.get_param("height")[0])
 
         config_sxm_preview = {
-            "Channel": channels[0],  # usually one of these: ['z', 'I', 'dIdV', 'dIdV_Y']
+            "Channel": channels[
+                0
+            ],  # usually one of these: ['z', 'I', 'dIdV', 'dIdV_Y']
             "X-axis": ["0", width],  # file dependent
             "Y-axis": ["0", height],  # file dependent
             "Color-scale": color_scale,  # file dependent
@@ -260,10 +277,7 @@ def demo_sxm_flow(session, file_path, experiment=None, sample=None):
         }
         config_preview = config_sxm_preview.copy()
     except Exception as exc:
-        logger.warning(
-            f"Keeping IMAGING_DATA dataset {perm_id} without preview (preview config error): {exc}"
-        )
-        _PREVIEW_STATE.last_warning = str(exc)
+        _record_preview_config_error(session, perm_id, exc)
         return perm_id
 
     _attach_preview_with_retry(session, perm_id, config_preview, tags=["SXM"])
@@ -312,10 +326,7 @@ def demo_dat_flow(session, folder_path, experiment, sample):
         }
         config_preview = config_dat_preview.copy()
     except Exception as exc:
-        logger.warning(
-            f"Keeping IMAGING_DATA dataset {perm_id} without preview (preview config error): {exc}"
-        )
-        _PREVIEW_STATE.last_warning = str(exc)
+        _record_preview_config_error(session, perm_id, exc)
         return perm_id
 
     _attach_preview_with_retry(session, perm_id, config_preview, tags=["DAT"])
@@ -1024,11 +1035,9 @@ def process_measurement_files(
                         break
                     dat_files_directory = tempfile.mkdtemp(prefix="nanonis_dat_files_")
                     try:
-                        delete_original_openBIS_dataset = False
-                        group_in_openbis = False
                         new_dat_paths = []
                         all_group_paths = []
-                        tracked_old_dataset_id = None
+                        previous_dataset_ids = set()
                         for dat_file in dat_files_group:
                             original_dat_path = os.path.join(data_folder, dat_file)
                             all_group_paths.append(original_dat_path)
@@ -1038,23 +1047,21 @@ def process_measurement_files(
                             shutil.copy(original_dat_path, temporary_dat_path)
 
                             if original_dat_path in processed_files:
-                                group_in_openbis = True
-                                if tracked_old_dataset_id is None:
-                                    tracked_old_dataset_id = dat_group_datasets.get(
-                                        os.path.normpath(original_dat_path)
-                                    )
+                                previous_id = dat_group_datasets.get(
+                                    os.path.normpath(original_dat_path)
+                                )
+                                previous_dataset_ids.add(
+                                    previous_id
+                                    if isinstance(previous_id, str)
+                                    else None
+                                )
                             else:
-                                delete_original_openBIS_dataset = True
                                 new_dat_paths.append(original_dat_path)
 
-                        if group_in_openbis and not delete_original_openBIS_dataset:
+                        if not new_dat_paths:
                             continue
 
-                        first_dat = (
-                            new_dat_paths[0]
-                            if new_dat_paths
-                            else os.path.join(data_folder, dat_files_group[0])
-                        )
+                        first_dat = new_dat_paths[0]
                         dat_label = (
                             os.path.basename(new_dat_paths[0])
                             if len(new_dat_paths) == 1
@@ -1062,28 +1069,12 @@ def process_measurement_files(
                         )
                         _set_action(f"Uploading {dat_label}...")
 
-                        dataset_to_remove_holder = {"perm_id": tracked_old_dataset_id}
-
-                        def _upload_dat(
-                            is_update=group_in_openbis,
-                            stage_dir=dat_files_directory,
-                            holder=dataset_to_remove_holder,
-                        ):
+                        def _upload_dat(stage_dir=dat_files_directory):
                             with contextlib.redirect_stdout(io.StringIO()):
                                 measurements_object = session.get_sample(
                                     measurements_id
                                 )
                             experiment = measurements_object.experiment
-
-                            if is_update and holder["perm_id"] is None:
-                                measurements_datasets = measurements_object.get_datasets().df.sort_values(
-                                    "registrationDate", ascending=False
-                                )
-                                holder["perm_id"] = (
-                                    measurements_datasets.iloc[0]["permId"]
-                                    if not measurements_datasets.empty
-                                    else None
-                                )
 
                             return demo_dat_flow(
                                 session,
@@ -1108,10 +1099,20 @@ def process_measurement_files(
                                 group_paths=all_group_paths,
                             )
                             _record_preview_warning_if_any(first_dat)
-                            old_perm_id = dataset_to_remove_holder["perm_id"]
+                            old_perm_id = (
+                                next(iter(previous_dataset_ids))
+                                if len(previous_dataset_ids) == 1
+                                else None
+                            )
+                            if previous_dataset_ids and not old_perm_id:
+                                logger.warning(
+                                    "Keeping prior datasets for %s because the DAT journal does not identify one previous dataset.",
+                                    dat_label,
+                                )
                             if (
-                                group_in_openbis
-                                and old_perm_id
+                                old_perm_id
+                                and isinstance(new_perm_id, str)
+                                and new_perm_id
                                 and old_perm_id != new_perm_id
                             ):
                                 try:

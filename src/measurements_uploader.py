@@ -18,8 +18,9 @@ app_folder = pathlib.Path(__file__).resolve().parent.parent
 if str(app_folder) not in sys.path:
     sys.path.insert(0, str(app_folder))
 
-from nanonis_importer.nanonis_importer import process_measurement_files
-from src import measurement_monitor, utils
+# The watchdog also runs as a standalone script from the src directory.
+from nanonis_importer.nanonis_importer import process_measurement_files  # noqa: E402
+from src import measurement_monitor, utils  # noqa: E402
 
 logger = logging.getLogger(__name__)
 MEASUREMENT_LOGS_FOLDER = app_folder / "logs" / "measurements"
@@ -128,7 +129,9 @@ def write_heartbeat(
         stopping = stop_event is not None and stop_event.is_set()
         if not busy and not stopping and not d.get("token_expired"):
             idle_label = (
-                idle_action_fn() if callable(idle_action_fn) else "Watching for new files"
+                idle_action_fn()
+                if callable(idle_action_fn)
+                else "Watching for new files"
             )
             d["current_action"] = idle_label if folder_ok else "Folder inaccessible"
         return d
@@ -340,7 +343,9 @@ def _upload_attachment_file(
             print(err_msg, flush=True)
             measurement_monitor.update_measurement_log(
                 logging_filepath,
-                lambda d, m=safe_exc, fp=file_path: measurement_monitor.append_error_event(
+                lambda d,
+                m=safe_exc,
+                fp=file_path: measurement_monitor.append_error_event(
                     d, m, stage="attachment", file_path=fp
                 ),
             )
@@ -762,9 +767,7 @@ def main(argv=None) -> int:
                 stop_event.set()
                 return
             except Exception as exc:
-                safe_exc = measurement_monitor.redact_secrets(
-                    str(exc), [openbis_token]
-                )
+                safe_exc = measurement_monitor.redact_secrets(str(exc), [openbis_token])
                 logger.exception(f"Unexpected error during retry cycle: {safe_exc}")
                 measurement_monitor.update_measurement_log(
                     logging_filepath,
