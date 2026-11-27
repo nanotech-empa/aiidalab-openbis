@@ -33,7 +33,10 @@ from nanonis_importer.spmpy import Spm as spm
 from datetime import datetime
 import shutil
 import tempfile
+import threading
+import time
 from collections import defaultdict
+from aiida_openbis.export import _app_module
 import logging
 
 SXM_ADAPTOR = (
@@ -44,6 +47,9 @@ DAT_ADAPTOR = (
 )
 VERBOSE = False
 DEFAULT_URL = "local.openbis.ch"
+DEFAULT_INLINE_RETRY_DELAYS = (5.0, 15.0, 30.0)
+DEFAULT_PREVIEW_RETRY_DELAYS = (2.0, 5.0)
+_PREVIEW_STATE = threading.local()
 
 logger = logging.getLogger(__name__)
 app_folder = pathlib.Path().resolve()
@@ -193,6 +199,54 @@ def multi_export_images(
     )
 
 
+def _attach_preview_with_retry(session, perm_id, config_preview, tags):
+    """Attempt to render and attach an openBIS preview without failing the dataset upload."""
+    measurement_monitor = _app_module("measurement_monitor")
+    _PREVIEW_STATE.last_warning = None
+    retry_delays = tuple(DEFAULT_PREVIEW_RETRY_DELAYS)
+    last_error = None
+    for attempt in range(len(retry_delays) + 1):
+        try:
+            preview = create_preview(session, perm_id, config_preview, tags=tags)
+            preview.index = 0
+            update_image_with_preview(session, perm_id, 0, preview)
+            _PREVIEW_STATE.last_warning = None
+            return True
+        except Exception as exc:
+            last_error = measurement_monitor.redact_secrets(
+                str(exc), [getattr(session, "token", None)]
+            )
+            if measurement_monitor.is_session_token_expired(session):
+                break
+            if attempt < len(retry_delays):
+                delay = retry_delays[attempt]
+                logger.warning(
+                    f"Preview rendering failed for dataset {perm_id} "
+                    f"(attempt {attempt + 1}/{len(retry_delays) + 1}); retrying in {delay}s: {last_error}"
+                )
+                if delay > 0:
+                    time.sleep(delay)
+                continue
+    logger.warning(
+        f"Keeping IMAGING_DATA dataset {perm_id} without preview after preview rendering failed: {last_error}"
+    )
+    _PREVIEW_STATE.last_warning = last_error
+    return False
+
+
+def _record_preview_config_error(session, perm_id, error):
+    measurement_monitor = _app_module("measurement_monitor")
+    safe_error = measurement_monitor.redact_secrets(
+        str(error), [getattr(session, "token", None)]
+    )
+    logger.warning(
+        "Keeping IMAGING_DATA dataset %s without preview (preview config error): %s",
+        perm_id,
+        safe_error,
+    )
+    _PREVIEW_STATE.last_warning = safe_error
+
+
 def demo_sxm_flow(session, file_path, experiment=None, sample=None):
     dataset_sxm = create_sxm_dataset(
         session=session,
@@ -204,33 +258,30 @@ def demo_sxm_flow(session, file_path, experiment=None, sample=None):
 
     perm_id = dataset_sxm.permId
     logger.info(f"Created imaging .SXM dataset: {perm_id}")
-    img = spm(file_path)
-    channels = img.default_channels
-    color_scale = get_color_scale_range(img, channels[0])[:2]
-    width = str(img.get_param("width")[0])
-    height = str(img.get_param("height")[0])
+    try:
+        img = spm(file_path)
+        channels = img.default_channels
+        color_scale = get_color_scale_range(img, channels[0])[:2]
+        width = str(img.get_param("width")[0])
+        height = str(img.get_param("height")[0])
 
-    config_sxm_preview = {
-        "Channel": channels[0],  # usually one of these: ['z', 'I', 'dIdV', 'dIdV_Y']
-        "X-axis": ["0", width],  # file dependent
-        "Y-axis": ["0", height],  # file dependent
-        "Color-scale": color_scale,  # file dependent
-        "Colormap": "gray",  # [gray, YlOrBr, viridis, cividis, inferno, rainbow, Spectral, RdBu, RdGy]
-        "Scaling": "linear",  # ['linear', 'logarithmic']
-    }
+        config_sxm_preview = {
+            "Channel": channels[
+                0
+            ],  # usually one of these: ['z', 'I', 'dIdV', 'dIdV_Y']
+            "X-axis": ["0", width],  # file dependent
+            "Y-axis": ["0", height],  # file dependent
+            "Color-scale": color_scale,  # file dependent
+            "Colormap": "gray",  # [gray, YlOrBr, viridis, cividis, inferno, rainbow, Spectral, RdBu, RdGy]
+            "Scaling": "linear",  # ['linear', 'logarithmic']
+        }
+        config_preview = config_sxm_preview.copy()
+    except Exception as exc:
+        _record_preview_config_error(session, perm_id, exc)
+        return perm_id
 
-    config_preview = config_sxm_preview.copy()
-    preview = create_preview(session, perm_id, config_preview, tags=["SXM"])
-    preview.index = 0
-    update_image_with_preview(session, perm_id, 0, preview)
-
-    config_preview = config_sxm_preview.copy()
-    config_preview["Scaling"] = "logarithmic"
-    config_preview["Colormap"] = "inferno"
-
-    # preview = create_preview(openbis, perm_id, config_preview, filterConfig=filter_config, tags=['SXM'])
-    # preview.index = 1
-    # update_image_with_preview(openbis, perm_id, 0, preview)
+    _attach_preview_with_retry(session, perm_id, config_preview, tags=["SXM"])
+    return perm_id
 
 
 def demo_dat_flow(session, folder_path, experiment, sample):
@@ -244,39 +295,42 @@ def demo_dat_flow(session, folder_path, experiment, sample):
 
     perm_id = dataset_dat.permId
     logger.info(f"Created imaging .DAT dataset: {perm_id}")
-    data = spm.importall(folder_path, "spec")
+    try:
+        data = spm.importall(folder_path, "spec")
 
-    # Sort dat files by datetime
-    data.sort(key=lambda da: da.record_datetime)
+        # Sort dat files by datetime
+        data.sort(key=lambda da: da.record_datetime)
 
-    # Select default channels for the selected measurement type
-    default_channels = data[0].default_channels
-    if default_channels:
-        channel_x = default_channels[0]
-        channel_y = default_channels[1]
-    else:
-        data_channels = list(data[0].signals.keys())
-        channel_x = data_channels[0]
-        channel_y = data_channels[1]
+        # Select default channels for the selected measurement type
+        default_channels = data[0].default_channels
+        if default_channels:
+            channel_x = default_channels[0]
+            channel_y = default_channels[1]
+        else:
+            data_channels = list(data[0].signals.keys())
+            channel_x = data_channels[0]
+            channel_y = data_channels[1]
 
-    (minimum_x, maximum_x, step_x) = _min_max_step(channel_x, data)
-    (minimum_y, maximum_y, step_y) = _min_max_step(channel_y, data)
+        (minimum_x, maximum_x, step_x) = _min_max_step(channel_x, data)
+        (minimum_y, maximum_y, step_y) = _min_max_step(channel_y, data)
 
-    config_dat_preview = {
-        "Channel X": channel_x,
-        "Channel Y": channel_y,
-        "X-axis": [str(minimum_x), str(maximum_x)],
-        "Y-axis": [str(minimum_y), str(maximum_y)],
-        "Grouping": sorted([os.path.basename(str(f)) for f in data]),
-        "Colormap": "rainbow",
-        "Scaling": "lin-lin",  # ['lin-lin', 'lin-log', 'log-lin', 'log-log']
-        "Print legend": "True",  # disable legend in image
-    }
+        config_dat_preview = {
+            "Channel X": channel_x,
+            "Channel Y": channel_y,
+            "X-axis": [str(minimum_x), str(maximum_x)],
+            "Y-axis": [str(minimum_y), str(maximum_y)],
+            "Grouping": sorted([os.path.basename(str(f)) for f in data]),
+            "Colormap": "rainbow",
+            "Scaling": "lin-lin",  # ['lin-lin', 'lin-log', 'log-lin', 'log-log']
+            "Print legend": "True",  # disable legend in image
+        }
+        config_preview = config_dat_preview.copy()
+    except Exception as exc:
+        _record_preview_config_error(session, perm_id, exc)
+        return perm_id
 
-    config_preview = config_dat_preview.copy()
-    preview = create_preview(session, perm_id, config_preview, tags=["DAT"])
-    preview.index = 0
-    update_image_with_preview(session, perm_id, 0, preview)
+    _attach_preview_with_retry(session, perm_id, config_preview, tags=["DAT"])
+    return perm_id
 
 
 def create_sxm_dataset(
@@ -650,37 +704,199 @@ def create_dat_dataset(
 
 
 def process_measurement_files(
-    openbis_url, token, data_folder, measurements_id, logging_filepath=None
+    openbis_url,
+    token,
+    data_folder,
+    measurements_id,
+    logging_filepath=None,
+    stop_event=None,
+    fallback_uploader=None,
+    inline_retry_delays=None,
 ):
-    from aiida_openbis.export import _app_module
+    import contextlib
+    import io
 
+    retry_delays = (
+        DEFAULT_INLINE_RETRY_DELAYS
+        if inline_retry_delays is None
+        else tuple(inline_retry_delays)
+    )
+
+    measurement_monitor = _app_module("measurement_monitor")
     utils = _app_module("utils")
     session, _ = utils.connect_openbis(openbis_url, token)
-    measurement_files = [f for f in os.listdir(data_folder)]
     if logging_filepath is None:
         logs_dir = (
             pathlib.Path(__file__).resolve().parent.parent / "logs" / "measurements"
         )
         logs_dir.mkdir(parents=True, exist_ok=True)
         logging_filepath = str(logs_dir / f"{measurements_id}.json")
+
+    norm_data_folder = os.path.normpath(data_folder)
+
+    def _init_log(d):
+        d.setdefault("eln_url", openbis_url)
+        d.setdefault("eln_token", token)
+        d.setdefault("measurement_session_id", measurements_id)
+        d.setdefault("data_folder", norm_data_folder)
+        d.setdefault("processed_files", [])
+        return d
+
     if os.path.exists(logging_filepath):
-        logging_file = utils.read_json(logging_filepath)
+        existing_log = measurement_monitor.read_json_safe(logging_filepath, default={})
+        if not isinstance(existing_log, dict):
+            existing_log = {}
+        processed_files = list(existing_log.get("processed_files") or [])
+        dat_group_datasets = (
+            dict(existing_log.get("dat_group_datasets"))
+            if isinstance(existing_log.get("dat_group_datasets"), dict)
+            else {}
+        )
     else:
-        pathlib.Path(logging_filepath).parent.mkdir(parents=True, exist_ok=True)
-        logging_file = {
-            "eln_url": openbis_url,
-            "eln_token": token,
-            "measurement_session_id": measurements_id,
-            "data_folder": os.path.normpath(data_folder),
-            "processed_files": [],
-        }
-        utils.write_json(logging_file, logging_filepath)
+        init_log = measurement_monitor.update_measurement_log(
+            logging_filepath, _init_log
+        )
+        processed_files = list(init_log.get("processed_files") or [])
+        dat_group_datasets = {}
+
+    def _sleep_or_stop(seconds: float) -> bool:
+        if stop_event is not None and stop_event.is_set():
+            return True
+        if seconds <= 0:
+            return False
+        if stop_event is not None:
+            return bool(stop_event.wait(seconds))
+        time.sleep(seconds)
+        return False
+
+    def _set_action(action_text: str):
+        def _upd(d):
+            _init_log(d)
+            d["current_action"] = action_text
+            measurement_monitor._touch_heartbeat(d, measurement_monitor.utc_now_iso())
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _upd)
+
+    def _record_uploads(paths, upload_type, dat_dataset_id=None, group_paths=None):
+        uploaded_names = {os.path.basename(p) for p in paths}
+
+        def _upd(d):
+            _init_log(d)
+            for p in paths:
+                if p not in d["processed_files"]:
+                    d["processed_files"].append(p)
+                measurement_monitor.append_upload_event(d, p, upload_type)
+            if isinstance(dat_dataset_id, str) and dat_dataset_id:
+                mapping = d.get("dat_group_datasets")
+                if not isinstance(mapping, dict):
+                    mapping = {}
+                for gp in group_paths or paths:
+                    mapping[os.path.normpath(gp)] = dat_dataset_id
+                d["dat_group_datasets"] = mapping
+            last_err = d.get("last_error")
+            if (
+                isinstance(last_err, dict)
+                and last_err.get("file") in uploaded_names
+                and "ATTACHMENT fallback" not in str(last_err.get("message", ""))
+            ):
+                d["last_error"] = None
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _upd)
+        for p in paths:
+            if p not in processed_files:
+                processed_files.append(p)
+        if isinstance(dat_dataset_id, str) and dat_dataset_id:
+            for gp in group_paths or paths:
+                dat_group_datasets[os.path.normpath(gp)] = dat_dataset_id
+
+    def _record_error_and_check_auth(exc, stage, file_path=None) -> bool:
+        safe_msg = measurement_monitor.redact_secrets(str(exc), [token])
+        expired = measurement_monitor.is_session_token_expired(session)
+
+        def _upd(d):
+            _init_log(d)
+            if expired:
+                d["token_expired"] = True
+                measurement_monitor.append_error_event(
+                    d,
+                    f"openBIS token expired: {safe_msg}",
+                    stage="auth",
+                    file_path=file_path,
+                )
+            else:
+                measurement_monitor.append_error_event(
+                    d, safe_msg, stage=stage, file_path=file_path
+                )
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _upd)
+        return expired
+
+    def _record_preview_warning_if_any(file_path):
+        warn = getattr(_PREVIEW_STATE, "last_warning", None)
+        _PREVIEW_STATE.last_warning = None
+        if not warn:
+            return
+        safe_warn = measurement_monitor.redact_secrets(str(warn), [token])
+        msg = f"Uploaded as IMAGING_DATA (preview rendering failed: {safe_warn})"
+        measurement_monitor.update_measurement_log(
+            logging_filepath,
+            lambda d: measurement_monitor.append_error_event(
+                d, msg, stage="preview", file_path=file_path
+            ),
+        )
+
+    def _run_with_inline_retry(label: str, stage: str, file_path: str, action_fn):
+        for attempt in range(len(retry_delays) + 1):
+            if stop_event is not None and stop_event.is_set():
+                return "stopped", None
+            try:
+                return "ok", action_fn()
+            except Exception as exc:
+                safe_err = measurement_monitor.redact_secrets(str(exc), [token])
+                logger.info(f"Cannot upload {label}. Reason: {safe_err}")
+                if _record_error_and_check_auth(exc, stage=stage, file_path=file_path):
+                    return "auth", exc
+                if measurement_monitor.is_transient_upload_error(exc):
+                    if attempt < len(retry_delays):
+                        delay = retry_delays[attempt]
+                        retry_msg = (
+                            f"Transient error uploading {label}; retrying in "
+                            f"{int(delay)}s ({attempt + 1}/{len(retry_delays)})..."
+                        )
+                        _set_action(retry_msg)
+                        print(f"{retry_msg} ({safe_err})", flush=True)
+                        if _sleep_or_stop(delay):
+                            return "stopped", exc
+                        continue
+                    return "transient_halt", exc
+                return "parse_error", exc
+        return "transient_halt", None
+
+    if session is None:
+        msg = "Could not connect to openBIS (session invalid or expired)."
+        logger.error(msg)
+
+        def _mark_conn_failed(d):
+            _init_log(d)
+            d["token_expired"] = True
+            measurement_monitor.append_error_event(d, msg, stage="auth")
+            return d
+
+        measurement_monitor.update_measurement_log(logging_filepath, _mark_conn_failed)
+        return {"halted_on_transient_error": False, "token_expired": True}
 
     readable_measurement_files = []
     measurement_datetimes = []
+    token_expired_midrun = False
+    halted_on_transient_error = False
 
     # Check measurement files and measurement datetimes
     try:
+        measurement_files = [f for f in os.listdir(data_folder)]
+
         for f in measurement_files:
             # sxm and dat files
             if f.endswith((".sxm", ".dat")):
@@ -742,27 +958,57 @@ def process_measurement_files(
             grouped_measurement_files.append(group)
 
         for group in grouped_measurement_files:
+            if (
+                token_expired_midrun
+                or halted_on_transient_error
+                or (stop_event is not None and stop_event.is_set())
+            ):
+                break
             # Save sxm files
             if group[0].endswith(".sxm"):
                 file_path = os.path.join(data_folder, group[0])
                 logger.info(f"SXM file: {file_path}")
 
-                if file_path not in logging_file["processed_files"]:
-                    try:
-                        measurements_object = session.get_sample(measurements_id)
+                if file_path not in processed_files:
+                    basename = os.path.basename(file_path)
+                    _set_action(f"Uploading {basename}...")
+
+                    def _upload_sxm(fp=file_path):
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            measurements_object = session.get_sample(measurements_id)
                         experiment = measurements_object.experiment
-                        demo_sxm_flow(
+                        return demo_sxm_flow(
                             session,
-                            file_path,
+                            fp,
                             sample=measurements_id,
                             experiment=experiment,
                         )
-                        logging_file["processed_files"].append(file_path)
-                        utils.write_json(logging_file, logging_filepath)
 
-                    except Exception as e:
-                        logger.info(f"Cannot upload {file_path}. Reason: {e}")
-                        # Report it in a logging file
+                    _PREVIEW_STATE.last_warning = None
+                    outcome, _ = _run_with_inline_retry(
+                        basename, "sxm", file_path, _upload_sxm
+                    )
+                    if outcome == "ok":
+                        _record_uploads([file_path], "SXM")
+                        _record_preview_warning_if_any(file_path)
+                    elif outcome == "auth":
+                        token_expired_midrun = True
+                        break
+                    elif outcome == "stopped":
+                        break
+                    elif outcome == "transient_halt":
+                        halted_on_transient_error = True
+                        break
+                    elif outcome == "parse_error" and callable(fallback_uploader):
+                        fb_outcome = fallback_uploader([file_path])
+                        if fb_outcome == "auth":
+                            token_expired_midrun = True
+                            break
+                        if fb_outcome == "transient_halt":
+                            halted_on_transient_error = True
+                            break
+                        if fb_outcome == "ok" and file_path not in processed_files:
+                            processed_files.append(file_path)
                 else:
                     logger.info(f"{file_path} already in openBIS.")
             else:
@@ -781,89 +1027,148 @@ def process_measurement_files(
 
                 # Save dat files
                 for dat_files_group in dat_files_grouped_by_type:
+                    if (
+                        token_expired_midrun
+                        or halted_on_transient_error
+                        or (stop_event is not None and stop_event.is_set())
+                    ):
+                        break
                     dat_files_directory = tempfile.mkdtemp(prefix="nanonis_dat_files_")
                     try:
-                        delete_original_openBIS_dataset = False
-                        group_in_openbis = False
                         new_dat_paths = []
+                        all_group_paths = []
+                        previous_dataset_ids = set()
                         for dat_file in dat_files_group:
                             original_dat_path = os.path.join(data_folder, dat_file)
+                            all_group_paths.append(original_dat_path)
                             temporary_dat_path = os.path.join(
                                 dat_files_directory, dat_file
                             )
                             shutil.copy(original_dat_path, temporary_dat_path)
 
-                            if original_dat_path in logging_file["processed_files"]:
-                                group_in_openbis = True
+                            if original_dat_path in processed_files:
+                                previous_id = dat_group_datasets.get(
+                                    os.path.normpath(original_dat_path)
+                                )
+                                previous_dataset_ids.add(
+                                    previous_id
+                                    if isinstance(previous_id, str)
+                                    else None
+                                )
                             else:
-                                delete_original_openBIS_dataset = True
                                 new_dat_paths.append(original_dat_path)
 
-                        if group_in_openbis:
-                            if delete_original_openBIS_dataset:
-                                try:
-                                    measurements_object = session.get_sample(
-                                        measurements_id
-                                    )
-                                    experiment = measurements_object.experiment
+                        if not new_dat_paths:
+                            continue
 
-                                    # Identify old dataset in order to update it after upload succeeds
-                                    measurements_datasets = measurements_object.get_datasets().df.sort_values(
-                                        "registrationDate", ascending=False
-                                    )
-                                    dataset_to_remove = (
-                                        measurements_datasets.iloc[0]["permId"]
-                                        if not measurements_datasets.empty
-                                        else None
-                                    )
+                        first_dat = new_dat_paths[0]
+                        dat_label = (
+                            os.path.basename(new_dat_paths[0])
+                            if len(new_dat_paths) == 1
+                            else f"{len(new_dat_paths)} DAT files"
+                        )
+                        _set_action(f"Uploading {dat_label}...")
 
-                                    # Upload dat files
-                                    demo_dat_flow(
-                                        session,
-                                        dat_files_directory,
-                                        sample=measurements_id,
-                                        experiment=experiment,
-                                    )
-                                    logging_file["processed_files"].extend(
-                                        new_dat_paths
-                                    )
-                                    utils.write_json(logging_file, logging_filepath)
-                                    if dataset_to_remove:
-                                        session.get_dataset(dataset_to_remove).delete(
-                                            "update dataset group"
-                                        )
-
-                                except Exception as e:
-                                    logger.info(
-                                        f"Cannot upload {dat_files_directory}. Reason: {e}"
-                                    )
-
-                        else:
-                            try:
+                        def _upload_dat(stage_dir=dat_files_directory):
+                            with contextlib.redirect_stdout(io.StringIO()):
                                 measurements_object = session.get_sample(
                                     measurements_id
                                 )
-                                experiment = measurements_object.experiment
-                                # Upload dat files
-                                demo_dat_flow(
-                                    session,
-                                    dat_files_directory,
-                                    sample=measurements_id,
-                                    experiment=experiment,
+                            experiment = measurements_object.experiment
+
+                            return demo_dat_flow(
+                                session,
+                                stage_dir,
+                                sample=measurements_id,
+                                experiment=experiment,
+                            )
+
+                        _PREVIEW_STATE.last_warning = None
+                        outcome, new_perm_id = _run_with_inline_retry(
+                            dat_label, "dat", first_dat, _upload_dat
+                        )
+                        if outcome == "ok":
+                            _record_uploads(
+                                new_dat_paths,
+                                "DAT",
+                                dat_dataset_id=(
+                                    new_perm_id
+                                    if isinstance(new_perm_id, str)
+                                    else None
+                                ),
+                                group_paths=all_group_paths,
+                            )
+                            _record_preview_warning_if_any(first_dat)
+                            old_perm_id = (
+                                next(iter(previous_dataset_ids))
+                                if len(previous_dataset_ids) == 1
+                                else None
+                            )
+                            if previous_dataset_ids and not old_perm_id:
+                                logger.warning(
+                                    "Keeping prior datasets for %s because the DAT journal does not identify one previous dataset.",
+                                    dat_label,
                                 )
-                                logging_file["processed_files"].extend(new_dat_paths)
-                                utils.write_json(logging_file, logging_filepath)
-                            except Exception as e:
-                                logger.info(
-                                    f"Cannot upload {dat_files_directory}. Reason: {e}"
-                                )
+                            if (
+                                old_perm_id
+                                and isinstance(new_perm_id, str)
+                                and new_perm_id
+                                and old_perm_id != new_perm_id
+                            ):
+                                try:
+                                    with contextlib.redirect_stdout(io.StringIO()):
+                                        session.get_dataset(old_perm_id).delete(
+                                            "update dataset group"
+                                        )
+                                except Exception as del_exc:
+                                    safe_del = measurement_monitor.redact_secrets(
+                                        str(del_exc), [token]
+                                    )
+                                    logger.warning(
+                                        f"Failed to delete superseded DAT dataset {old_perm_id}: {safe_del}"
+                                    )
+                        elif outcome == "auth":
+                            token_expired_midrun = True
+                            break
+                        elif outcome == "stopped":
+                            break
+                        elif outcome == "transient_halt":
+                            halted_on_transient_error = True
+                            break
+                        elif outcome == "parse_error" and callable(fallback_uploader):
+                            fb_outcome = fallback_uploader(new_dat_paths)
+                            if fb_outcome == "auth":
+                                token_expired_midrun = True
+                                break
+                            if fb_outcome == "transient_halt":
+                                halted_on_transient_error = True
+                                break
+                            if fb_outcome == "ok":
+                                for p in new_dat_paths:
+                                    if p not in processed_files:
+                                        processed_files.append(p)
                     finally:
                         shutil.rmtree(dat_files_directory, ignore_errors=True)
 
     except Exception as e:
-        logger.info(f"Error processing measurement files: {e}")
+        safe_err = measurement_monitor.redact_secrets(str(e), [token])
+        logger.info(f"Error processing measurement files: {safe_err}")
+        if _record_error_and_check_auth(e, stage="importer"):
+            token_expired_midrun = True
+        elif measurement_monitor.is_transient_upload_error(e):
+            halted_on_transient_error = True
+    finally:
+        if session is not None:
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    session.logout()
+            except Exception:
+                pass
 
-    session.logout()
+    return {
+        "halted_on_transient_error": halted_on_transient_error,
+        "token_expired": token_expired_midrun,
+    }
 
 
 if __name__ == "__main__":
