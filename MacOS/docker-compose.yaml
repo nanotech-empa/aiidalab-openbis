@@ -1,0 +1,85 @@
+---
+version: "3.7"
+
+services:
+    openbis:
+        container_name: openbis-ingress-pilot-phase-1.3
+        image: nginx:latest
+        depends_on:
+            - app
+        ports:
+            - "443:443"
+            - "80:80"
+        volumes:
+            - ./nginx.conf:/etc/nginx/nginx.conf:ro
+            - ./certs/local.openbis.ch.crt:/etc/ssl/certs/local.openbis.ch.crt:ro
+            - ./certs/local.openbis.ch.key:/etc/ssl/private/local.openbis.ch.key:ro
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        environment:
+            - OPENBIS_HOST=host.docker.internal
+
+    db:
+        container_name: openbis-db-pilot-phase-1.3
+        image: postgres:15
+        environment:
+            - POSTGRES_PASSWORD=mysecretpassword
+            - PGDATA=/var/lib/postgresql/data
+            - POSTGRES_HOST_AUTH_METHOD=trust
+        volumes:
+            - openbis-db-data-pilot-phase-1.3:/var/lib/postgresql/data
+
+    app:
+        container_name: openbis-app-pilot-phase-1.3
+        image: openbis/openbis-app:6.8
+        depends_on:
+            - db
+        environment:
+            - OPENBIS_ADMIN_PASS=123456789
+            - OPENBIS_DATA=/data
+            - OPENBIS_DB_ADMIN_PASS=mysecretpassword
+            - OPENBIS_DB_ADMIN_USER=postgres
+            - OPENBIS_DB_APP_PASS=mysecretpassword
+            - OPENBIS_DB_APP_USER=openbis
+            - OPENBIS_DB_HOST=db
+            - OPENBIS_ETC=/etc/openbis
+            - OPENBIS_LOG=/var/log/openbis
+            - OPENBIS_FQDN=local.openbis.ch
+        volumes:
+            - openbis-app-data-pilot-phase-1.3:/data
+            - openbis-app-etc-pilot-phase-1.3:/etc/openbis
+            - openbis-app-logs-pilot-phase-1.3:/var/log/openbis
+        ports:
+            - "8080:8080"
+            - "8081:8081"
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+
+    aiidalab:
+        image: aiidalab/full-stack:latest
+        container_name: aiidalab-premise-pilot-phase-1.3
+        depends_on:
+            - openbis
+        environment:
+            JUPYTER_TOKEN: fair
+            RMQHOST: messaging
+            TZ: Europe/Zurich
+            DOCKER_STACKS_JUPYTER_CMD: notebook
+            SETUP_DEFAULT_AIIDA_PROFILE: 'true'
+            AIIDALAB_DEFAULT_APPS: ''
+        volumes:
+            - aiidalab-home-folder-c:/home/jovyan
+            - aiidalab-conda-folder-c:/opt/conda
+        ports:
+            - "8888:8888"
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+            - "local.openbis.ch:host-gateway"
+
+volumes:
+    openbis-db-data-pilot-phase-1.3:
+    openbis-app-data-pilot-phase-1.3:
+    openbis-app-etc-pilot-phase-1.3:
+    openbis-app-logs-pilot-phase-1.3:
+    aiidalab-home-folder-c:
+    aiidalab-conda-folder-c:
