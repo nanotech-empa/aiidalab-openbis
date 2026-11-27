@@ -2,6 +2,7 @@ from aiida_openbis.assistant_queries import (
     register_tools,
     relationships,
     search_materials,
+    search_spm_simulations,
 )
 import pytest
 
@@ -17,6 +18,8 @@ class Client:
             if key in kw:
                 values = kw[key] if isinstance(kw[key], list) else [kw[key]]
                 rows = [r for r in rows if r.get(key) in values]
+        if "code" in kw:
+            rows = [r for r in rows if r["identifier"].rsplit("/", 1)[-1] in kw["code"]]
         for k, v in kw.get("where", {}).items():
             rows = [r for r in rows if r.get(k.upper()) == v]
         if "collection" in kw:
@@ -169,3 +172,67 @@ def test_domain_registry_uses_shared_redacted_read_boundary(monkeypatch):
     result = registry.call("openbis_relationships", {"identifier": "test"})
     assert result["error_type"] == "RuntimeError" and "private-token" not in str(result)
     assert all(not t.action for t in registry.tools.values())
+
+
+def test_spm_search_uses_stored_mode_and_materials_from_the_same_model():
+    client = Client(
+        [
+            row(
+                "good",
+                "SPM_SIMULATION",
+                SPM_MODE=["STM", "STS"],
+                NAME="Scan 1",
+                AIIDA_NODE="archive",
+                parents=["/SPACE/model"],
+            ),
+            row(
+                "wrong-mode",
+                "SPM_SIMULATION",
+                SPM_MODE=["AFM"],
+                NAME="STM reference",
+                parents=["/SPACE/model"],
+            ),
+            row(
+                "separate-models",
+                "SPM_SIMULATION",
+                SPM_MODE=["STM"],
+                parents=["/SPACE/organic", "/SPACE/metal"],
+            ),
+            row("model", "ATOMISTIC_MODEL", parents=["/SPACE/mol", "/SPACE/surface"]),
+            row("organic", "ATOMISTIC_MODEL", parents=["/SPACE/mol"]),
+            row(
+                "metal", "ATOMISTIC_MODEL", parents=["/SPACE/surface", "/SPACE/hidden"]
+            ),
+            row("mol", "MOLECULE", NAME="Phena radical"),
+            row("surface", "CRYSTAL_CONCEPT", MATERIAL="Au", FACE="111"),
+            {
+                "permId": "other",
+                "identifier": "/OTHER/surface",
+                "type": "CRYSTAL_CONCEPT",
+                "MATERIAL": "Au",
+                "FACE": "110",
+            },
+        ]
+    )
+    result = search_spm_simulations(
+        client,
+        records,
+        mode="STM",
+        molecule="phenalenyl",
+        molecule_aliases=["phena"],
+        surface="Au(111)",
+    )
+    assert len(client.calls) == 3
+    assert [r["permId"] for r in result["items"]] == ["good"]
+    found = result["items"][0]
+    assert found["archive_permid"] == "archive"
+    assert found["model"]["permId"] == "model"
+    assert found["molecules"][0]["permId"] == "mol"
+    assert found["surfaces"][0]["permId"] == "surface"
+    assert result["unresolved_links"] == ["/SPACE/hidden"]
+    assert (
+        search_spm_simulations(client, records, mode="STM", limit=1)["next_offset"] == 1
+    )
+    assert not search_spm_simulations(client, records, mode="STM", name="Scan 2")[
+        "items"
+    ]

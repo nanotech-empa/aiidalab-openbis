@@ -5,6 +5,7 @@ The caller supplies a read-only client and plain bulk-record conversion.
 """
 
 import json
+import re
 from pathlib import Path
 
 MATERIALS = {
@@ -39,24 +40,34 @@ def _lower(row):
 
 def _fetch(client, records, identifiers):
     """One bulk request per identifier kind, never lazy entity traversal."""
-    rows = []
     identifiers = sorted(set(identifiers))
     if len(identifiers) > 500:
         raise ValueError("Too many linked objects; narrow the search.")
-    for path_kind in (True, False):
-        group = [v for v in identifiers if v.startswith("/") == path_kind]
-        if group:
-            rows.extend(
-                records(
-                    client.get_objects(
-                        **{"identifier" if path_kind else "permId": group},
-                        props=["*"],
-                        attrs=["parents", "children"],
-                        count=len(group),
-                        raw_response=True,
-                    )
-                )
-            )
+
+    def query(count, **criteria):
+        return client.get_objects(
+            **criteria,
+            props=["*"],
+            attrs=["parents", "children"],
+            count=count,
+            raw_response=True,
+        )
+
+    permids = [value for value in identifiers if not value.startswith("/")]
+    paths = {value for value in identifiers if value.startswith("/")}
+    rows = records(query(len(permids), permId=permids)) if permids else []
+    if len(paths) == 1:
+        return rows + records(query(1, identifier=next(iter(paths))))
+    if paths:
+        # pyBIS combines distinct identifier paths with AND. Code lists use OR.
+        # Match the full identifiers client-side to disambiguate repeated codes.
+        codes = sorted({path.rsplit("/", 1)[-1] for path in paths})
+        found = query(500, code=codes)
+        matches = [row for row in records(found) if row.get("identifier") in paths]
+        rows.extend(matches)
+        if found.get("totalCount", 0) > 500:
+            for path in sorted(paths - {row["identifier"] for row in matches}):
+                rows.extend(records(query(1, identifier=path)))
     return rows
 
 
@@ -166,6 +177,137 @@ def search_materials(
         "next_offset": end if total is not None and end < total else None,
         "unresolved_links": sorted(unresolved),
         "matching": "Direct properties use openBIS filtering. Linked molecular properties use exact stored-text equality, not chemical equivalence. Matches cover this candidate page only.",
+    }
+
+
+def _words(value):
+    return " ".join(re.findall(r"[^\W_]+", str(value or "").casefold()))
+
+
+def _matches_name(value, names):
+    text = f" {_words(value)} "
+    return any(f" {name} " in text for term in names if (name := _words(term)))
+
+
+def search_spm_simulations(
+    client,
+    records,
+    *,
+    mode,
+    name="",
+    molecule="",
+    molecule_aliases=(),
+    surface="",
+    limit=20,
+    offset=0,
+):
+    """Find SPM records with a stored mode and explicit material relationships."""
+    if not 1 <= limit <= 100 or offset < 0:
+        raise ValueError("Unsupported simulation page.")
+    found = client.get_objects(
+        type="SPM_SIMULATION",
+        props=["*"],
+        attrs=["parents", "children"],
+        count=limit,
+        start_with=offset,
+        raw_response=True,
+    )
+    candidates = records(found)
+
+    def modes(row):
+        return _references(_lower(row).get("spm_mode"))
+
+    requested_molecules = (
+        [molecule, *molecule_aliases] if molecule else list(molecule_aliases)
+    )
+    selected = [
+        row
+        for row in candidates
+        if mode.upper() in (value.upper() for value in modes(row))
+        and (not name or _matches_name(_lower(row).get("name"), [name]))
+    ]
+    parent_refs = {
+        ref for row in selected for ref in _references(_lower(row).get("parents"))
+    }
+    linked = _index(_fetch(client, records, parent_refs))
+    material_refs = {
+        ref
+        for row in linked.values()
+        if row["type"] == "ATOMISTIC_MODEL"
+        for ref in _references(_lower(row).get("parents"))
+    }
+    linked.update(_index(_fetch(client, records, material_refs)))
+
+    def compact(value):
+        return _words(value).replace(" ", "")
+
+    def matches_surface(row):
+        data = _lower(row)
+        material_face = compact(data.get("material")) + compact(data.get("face"))
+        return compact(surface) in {
+            material_face if data.get("material") and data.get("face") else "",
+            compact(data.get("name")),
+        }
+
+    def identity(row):
+        return {
+            key: _lower(row).get(key.lower())
+            for key in ("type", "permId", "identifier", "name")
+        }
+
+    items = []
+    for row in selected:
+        data = _lower(row)
+        material_groups = []
+        direct = [linked[v] for v in _references(data.get("parents")) if v in linked]
+        for model in (item for item in direct if item["type"] == "ATOMISTIC_MODEL"):
+            materials = [
+                linked[v]
+                for v in _references(_lower(model).get("parents"))
+                if v in linked
+            ]
+            material_groups.append((model, materials))
+        material_groups.append((None, direct))
+        for model, materials in material_groups:
+            molecules = [
+                identity(item)
+                for item in materials
+                if item["type"] == "MOLECULE"
+                and (
+                    not requested_molecules
+                    or _matches_name(_lower(item).get("name"), requested_molecules)
+                )
+            ]
+            surfaces = [
+                identity(item)
+                for item in materials
+                if item["type"] in {"CRYSTAL_CONCEPT", "CRYSTAL", "2D_LAYER_MATERIAL"}
+                and (not surface or matches_surface(item))
+            ]
+            if (requested_molecules and not molecules) or (surface and not surfaces):
+                continue
+            items.append(
+                {
+                    **identity(row),
+                    "spm_modes": modes(row),
+                    "experiment": data.get("experiment"),
+                    "archive_permid": data.get("aiida_node"),
+                    "model": identity(model) if model else None,
+                    "molecules": molecules,
+                    "surfaces": surfaces,
+                }
+            )
+            break
+    total = found.get("totalCount")
+    end = offset + len(candidates)
+    return {
+        "items": items,
+        "candidate_total": total,
+        "candidates_examined": len(candidates),
+        "next_offset": end
+        if candidates and total is not None and end < total
+        else None,
+        "unresolved_links": sorted((parent_refs | material_refs) - linked.keys()),
     }
 
 
@@ -298,6 +440,25 @@ def register_tools(registry):
             ["kind"],
         ),
         wrap(search_materials),
+    )
+    registry.add(
+        "openbis_search_spm_simulations",
+        "Find saved SPM simulations by stored mode, name and linked molecule/surface. "
+        "Supply molecule aliases from the user if given. Follow next_offset before "
+        "concluding no match. Returns simulation and linked archive permIDs.",
+        object_schema(
+            {
+                "mode": string,
+                "name": string,
+                "molecule": string,
+                "molecule_aliases": {"type": "array", "maxItems": 8, "items": string},
+                "surface": string,
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                "offset": {"type": "integer", "minimum": 0},
+            },
+            ["mode"],
+        ),
+        wrap(search_spm_simulations),
     )
     registry.add(
         "openbis_relationships",
