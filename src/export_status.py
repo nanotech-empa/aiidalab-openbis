@@ -137,7 +137,9 @@ def inspect_result(session, workchain, role, obj, definitions, au=None):
             )
 
         if role == "minimum_energy_path":
-            for parent in au._preceding_mep_objects(session, obj.collection, workchain):
+            predecessors = au._preceding_mep_objects(session, obj.collection, workchain)
+            au.validate_existing_mep_parents(session, obj, predecessors)
+            for parent in predecessors:
                 report.add(
                     key + "/preceding/" + str(parent.permId),
                     label + ": preceding path link",

@@ -42,6 +42,11 @@ then submit, record the UUID, inspect completion and scientific diagnostics.
 
 For stored results use openbis_open_gui with export_simulations. The existing
 form selects project/collection, related material, result cards and archive.
+The destination is a collection of type `EXPERIMENT`. Ask which experiment to
+use or let the user select it in the native review. Classify results by their
+scientific content and use the parent and child types in
+[the schema](../openBIS_schema_documentation.md). Keep a physical sample's
+permID separate from the destination and from verified calculation inputs.
 Only **Export** publishes. ORCA's result workspace and PythTB/Model Hamiltonians
 also offer **Prepare openBIS export**; local-model preparation records existing
 results with honest provenance rather than claiming the solver ran in AiiDA.
@@ -149,3 +154,6 @@ remains available. Use the existing confirmed export action for server writes.
 collection without changing the linked molecule. Select a result explicitly.
 A number-only record has no inferred chemical name; use the existing SMILES or
 CDXML search when the requested name is absent.
+# CP2K path continuations
+
+For a minimum-energy path, keep its initial and final atomistic models. A restart refers to its immediate preceding path. If that path has no matching openBIS record, do not substitute an older exported ancestor. Conflicting existing links require review before completing the export.

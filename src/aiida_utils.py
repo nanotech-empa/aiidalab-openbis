@@ -265,7 +265,10 @@ def get_preceding_workchains(node_uuid):
     return preceding_workchains
 
 
-def get_all_preceding_main_workchains(node_uuid):
+MEP_WORKCHAINS = {"Cp2kNebWorkChain", "Cp2kReplicaWorkChain"}
+
+
+def get_all_preceding_main_workchains(node_uuid, *, stop_at_prior_mep=False):
     """By MAIN workchain it is meant a workchain that is not called by a workchain"""
     node = orm.load_node(node_uuid)
     main_workchains = set()
@@ -288,6 +291,8 @@ def get_all_preceding_main_workchains(node_uuid):
         # Check if the current node is a MAIN workchain
         if is_main_workchain(n):
             main_workchains.add(n)
+            if stop_at_prior_mep and n.pk != node.pk and n.process_label in MEP_WORKCHAINS:
+                return
 
         # Regardless of whether it's a MAIN workchain, continue tracing backward
         for input_link in n.base.links.get_incoming().all():
@@ -4306,6 +4311,8 @@ def _create_simulation_object(
             source_uuid,
         )
     if existing is not None:
+        if object_type == OPENBIS_SIMULATION_TYPES["Minimum Energy Path"]:
+            validate_existing_mep_parents(openbis_session, existing, parents)
         for parent in parents:
             _ensure_openbis_parent(existing, parent)
         # Only repair absent references, not previously reviewed properties.
@@ -5100,36 +5107,61 @@ def Cp2kScfWorkChain_export(
     return tuple(exported_objects)
 
 
-def _preceding_mep_objects(openbis_session, experiment_id, workchain):
-    """Return already exported MEP blocks represented in this provenance chain."""
-    target_space = _collection_space_code(openbis_session, experiment_id)
-    objects = []
-    seen = set()
-    for preceding_uuid in get_all_preceding_main_workchains(workchain.uuid):
-        if str(preceding_uuid) == str(workchain.uuid):
-            continue
-        preceding = orm.load_node(preceding_uuid)
-        if preceding.process_label not in {
-            "Cp2kReplicaWorkChain",
-            "Cp2kNebWorkChain",
-        }:
-            continue
-        matches = list(
-            openbis_session.get_objects(
-                type=OPENBIS_SIMULATION_TYPES["Minimum Energy Path"],
-                space=target_space,
-                where={
-                    "AIIDA_SOURCE_UUID": str(preceding.uuid),
-                },
-            )
-            or []
+def validate_existing_mep_parents(session, result, intended):
+    """Keep historical links intact and flag any obsolete path parents for review."""
+    mep_type = OPENBIS_SIMULATION_TYPES["Minimum Energy Path"]
+    expected = {
+        _openbis_reference(p) for p in intended if _openbis_type_code(p) == mep_type
+    }
+    for reference in result.get_parents():
+        parent = (
+            reference if hasattr(reference, "permId") else session.get_object(reference)
         )
-        for match in matches:
-            permid = str(match.permId)
-            if permid not in seen:
-                objects.append(match)
-                seen.add(permid)
-    return objects
+        if (
+            _openbis_type_code(parent) == mep_type
+            and _openbis_reference(parent) not in expected
+        ):
+            raise ValueError(
+                "The stored path has a different MEP predecessor. Review its existing links."
+            )
+
+
+def _preceding_mep_objects(openbis_session, experiment_id, workchain):
+    """Resolve one immediate scientific predecessor, before looking up ELN records."""
+    restart = _input_value(workchain, "restart_from")
+    if restart:
+        previous = orm.load_node(str(restart))
+        if previous.process_label not in MEP_WORKCHAINS:
+            raise ValueError(
+                "The restart source is not a minimum-energy path workflow."
+            )
+        predecessors = [previous.uuid]
+    else:
+        # Follow ordinary AiiDA input provenance for e.g. replica-chain → NEB.
+        # Do not cross a preceding path into its own parents.
+        predecessors = [
+            uid
+            for uid in get_all_preceding_main_workchains(
+                workchain.uuid, stop_at_prior_mep=True
+            )
+            if str(uid) != str(workchain.uuid)
+            and orm.load_node(uid).process_label in MEP_WORKCHAINS
+        ]
+    if not predecessors:
+        return []
+    if len(predecessors) > 1:
+        raise ValueError("The path inputs identify multiple possible MEP predecessors.")
+    matches = list(
+        openbis_session.get_objects(
+            type=OPENBIS_SIMULATION_TYPES["Minimum Energy Path"],
+            space=_collection_space_code(openbis_session, experiment_id),
+            where={"AIIDA_SOURCE_UUID": str(predecessors[0])},
+        )
+        or []
+    )
+    if len(matches) > 1:
+        raise ValueError("Multiple openBIS paths match the immediate MEP predecessor.")
+    return matches
 
 
 def Cp2kMepWorkChain_export(

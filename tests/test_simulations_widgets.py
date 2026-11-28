@@ -69,6 +69,45 @@ def test_import_handoff_selects_exact_stm_without_import(monkeypatch, simulation
     widget.close()
 
 
+def test_export_link_reviews_source_and_selects_only_a_visible_experiment(simulations_widgets):
+    ipw = simulations_widgets.ipw
+    cls = simulations_widgets.ExportSimulationsWidget
+    source = "84597a7e-f47d-4e09-832b-fd1d6406efb5"
+    permid = "20261128-100"
+    instance = "https://fixture/openbis"
+    selected_sources = []
+    project = ipw.Dropdown(options=["-1", "project-id"])
+    experiments = ipw.Dropdown(options=["-1"])
+    project.observe(lambda change: setattr(experiments, "options", ["-1", permid]), names="value")
+
+    def get_experiment(uid, *, use_cache):
+        assert uid == permid and not use_cache
+        return SimpleNamespace(identifier="/S/P/E")
+
+    def get_project(identifier):
+        assert identifier == "/S/P"
+        return SimpleNamespace(permId="project-id")
+
+    widget = SimpleNamespace(
+        openbis_session=SimpleNamespace(url=instance, get_experiment=get_experiment, get_project=get_project),
+        set_source_uuid=selected_sources.append, export_status_html=ipw.HTML(),
+        select_project_widget=SimpleNamespace(project_dropdown=project),
+        select_experiment_widget=SimpleNamespace(experiment_dropdown=experiments),
+    )
+    widget.select_destination_experiment = MethodType(cls.select_destination_experiment, widget)
+    def link(**extra):
+        return "review.ipynb?" + urlencode(dict(export_uuid=source, **extra))
+
+    assert not cls.prepare_from_url(widget, "review.ipynb?simulation_permid=" + permid)
+    assert cls.prepare_from_url(widget, link())
+    assert selected_sources == [source] and experiments.value == "-1"
+    assert cls.prepare_from_url(widget, link(experiment_permid=permid, openbis_instance="wrong"))
+    assert "Could not select" in widget.export_status_html.value
+    assert project.value == "-1" and experiments.value == "-1"
+    assert cls.prepare_from_url(widget, link(experiment_permid=permid, openbis_instance=instance))
+    assert selected_sources[-1] == source and experiments.value == permid
+
+
 def _stub_project_selector(monkeypatch, module):
     class Project(module.ipw.VBox):
         def __init__(self, session):
