@@ -177,6 +177,15 @@ def test_preceding_main_workchains_ignore_noncausal_return_links(
         current.uuid,
     ]
 
+    # A continuation through ordinary input provenance stops at the nearest path.
+    current.process_label = "Cp2kNebWorkChain"
+    geometry.process_label = "Cp2kReplicaWorkChain"
+    older = WorkChain(6, "older", "2025-12-01", "Cp2kReplicaWorkChain")
+    incoming(geometry, older, aiida_utils.LinkType.INPUT_WORK)
+    assert aiida_utils.get_all_preceding_main_workchains(
+        current.uuid, stop_at_prior_mep=True
+    ) == [geometry.uuid, current.uuid]
+
 
 def test_stm_export_scope_includes_only_provenance_linked_geoopt(
     aiida_profile_clean, aiida_utils
@@ -2372,6 +2381,40 @@ def test_neb_mep_properties_and_endpoints(monkeypatch, aiida_utils):
         0.002897 * aiida_utils.Hartree
     )
     assert properties["backward_barrier_ev"] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("stored", [("old", "direct"), ("old",), ()])
+def test_chained_restart_links_direct_source_only(monkeypatch, aiida_utils, stored):
+    def path(uid, previous=None):
+        return SimpleNamespace(
+            uuid=uid,
+            process_label="Cp2kNebWorkChain",
+            inputs=SimpleNamespace(restart_from=SimpleNamespace(value=previous)),
+        )
+
+    nodes = {"old": path("old"), "direct": path("direct", "old")}
+    current = path("current", "direct")
+    monkeypatch.setattr(aiida_utils.orm, "load_node", nodes.__getitem__)
+    monkeypatch.setattr(aiida_utils, "_collection_space_code", lambda *_: "SPACE")
+    queries = []
+
+    def objects(type, space, where):
+        uid = where["AIIDA_SOURCE_UUID"]
+        queries.append(uid)
+        return [uid] if uid in stored else []
+
+    session = SimpleNamespace(get_objects=objects)
+    result = aiida_utils._preceding_mep_objects(session, "experiment", current)
+    assert queries == ["direct"]
+    assert result == (["direct"] if "direct" in stored else [])
+
+
+def test_old_mep_links_require_review_without_mutation(aiida_utils):
+    older, direct, current = [FakeOpenbisObject("MINIMUM_ENERGY_PATH") for _ in range(3)]
+    current.parents = [direct, older]
+    with pytest.raises(ValueError, match="different MEP predecessor"):
+        aiida_utils.validate_existing_mep_parents(None, current, [direct])
+    assert current.parents == [direct, older]
 
 
 def test_replica_chain_export_links_only_endpoints_and_preceding_mep(

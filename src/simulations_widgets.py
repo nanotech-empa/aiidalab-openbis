@@ -13,11 +13,13 @@ import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
+from uuid import UUID
 
 import ipywidgets as ipw
 import pandas as pd
 from aiida import orm
 from IPython.display import Javascript, display
+from traitlets import TraitError
 
 from . import (
     aiida_archives,
@@ -1860,6 +1862,41 @@ class ExportSimulationsWidget(ipw.VBox):
             _popup("Reselect the project to find the saved experiment.")
             return
         selector.select_created_experiment(str(experiment.permId), name)
+
+    def select_destination_experiment(self, instance, permid):
+        """Select an existing experiment through the ordinary project-scoped controls."""
+        if self.openbis_session.url.rstrip("/") != instance.rstrip("/"):
+            raise ValueError("The selected experiment belongs to another ELN.")
+        experiment = self.openbis_session.get_experiment(permid, use_cache=False)
+        identifier = str(experiment.identifier)
+        project = self.openbis_session.get_project(identifier.rsplit("/", 1)[0])
+        self.select_project_widget.project_dropdown.value = str(project.permId)
+        dropdown = self.select_experiment_widget.experiment_dropdown
+        try:
+            dropdown.value = permid
+        except TraitError as exc:
+            raise ValueError("Select a visible EXPERIMENT in the destination project.") from exc
+
+    def prepare_from_url(self, url):
+        """Open a local result for review. Leave publication to the Export button."""
+        query = parse_qs(urlsplit(url).query, keep_blank_values=True)
+        if "export_uuid" not in query or "simulation_permid" in query:
+            return False
+        try:
+            source, = query["export_uuid"]
+            self.set_source_uuid(str(UUID(source)))
+            if "experiment_permid" in query:
+                permid, = query["experiment_permid"]
+                instance, = query.get("openbis_instance", [])
+                if not re.fullmatch(r"[0-9]+-[0-9]+", permid):
+                    raise ValueError("Invalid experiment permID")
+                self.select_destination_experiment(instance, permid)
+        except Exception:
+            self.export_status_html.value = (
+                "<p role='alert'>Could not select the requested result or experiment. "
+                "Review the source, project and experiment before exporting.</p>"
+            )
+        return True
 
     def set_source_uuid(self, source_uuid):
         """Open the common review for the app entry, with no second source picker."""
